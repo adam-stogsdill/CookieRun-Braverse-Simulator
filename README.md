@@ -179,6 +179,38 @@ of art.
 
 To refresh the card database itself: `python3 fetch_cards.py`.
 
+### A standalone executable
+
+`braverse.spec` builds the visual player into one self-contained binary — no
+Python, no virtualenv, no `card_images/` checkout on the machine that runs it.
+Hand someone the file, they double-click it, the browser opens:
+
+```bash
+python3 fetch_images.py             # the art goes inside the binary
+pip install pyinstaller
+pyinstaller braverse.spec           # -> dist/braverse  (198 MB)
+```
+
+It carries the engine, the browser front end, `braverse_cards.csv`, the
+decklists and the **whole ~2000-card art library**, so any deck of any cards
+renders. Drop a decklist `.txt` next to the binary and it shows up in the deck
+menu — that is how a card outside the shipped decks gets played, and why the
+art is bundled whole. A `.txt` beside the binary overrides a bundled one of the
+same name. The spec refuses to build against a thin `card_images/`.
+
+It leaves out the RL pilots, because torch would add about a gigabyte — the
+pilot menu is human / heuristic / random. A `.pt` beside the binary is picked
+up the same way decklists are, but still needs torch present to load.
+
+The size is paid at every launch, not just once: a one-file bundle unpacks
+itself into a temp directory each run, which is **about 6 seconds** before the
+browser opens. If that grates, build a folder instead — flip `onefile=True` to
+`False` in the spec, zip `dist/braverse/`, and it starts instantly.
+
+PyInstaller does not cross-compile: build it on macOS and you get a macOS
+arm64 binary, build it on Windows for a `.exe`. Unsigned binaries need one
+right-click → **Open** on macOS the first time.
+
 ## Quick start
 
 If you installed the full `requirements.txt`, run the tests to confirm it

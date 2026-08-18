@@ -20,6 +20,7 @@ import argparse
 import json
 import mimetypes
 import random
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -37,6 +38,12 @@ from braverse.state import CardInstance, Cookie, GameState
 ROOT = Path(__file__).resolve().parent
 VIEWER = ROOT / "viewer"
 IMAGES = ROOT / "card_images"
+
+# Frozen by PyInstaller (see braverse.spec), ROOT is the throwaway directory the
+# bundle unpacks into — fine for the assets baked in, useless for the decklists
+# and trained pilots someone drops next to the binary. Look there too.
+SIDE = (Path(sys.executable).resolve().parent
+        if getattr(sys, "frozen", False) else ROOT)
 
 # How long the browser spends playing one action out, per event. A bot seat
 # waits this out before deciding again, so an attack, the HP cards it turned
@@ -79,10 +86,21 @@ def scene_seconds(events: list) -> float:
 # ---------------------------------------------------------------------------
 # decks and pilots
 # ---------------------------------------------------------------------------
+def scan(pattern: str) -> list[Path]:
+    """Files matching `pattern` beside the script, and beside a frozen binary.
+
+    A name found in both wins from `SIDE`, so someone can override a bundled
+    decklist by dropping their own next to the executable.
+    """
+    found = {p.name: p for p in ROOT.glob(pattern)}
+    found.update({p.name: p for p in SIDE.glob(pattern)})
+    return sorted(found.values(), key=lambda p: p.name)
+
+
 def available_decks() -> dict[str, list[str]]:
     """Starter lists plus any decklist file `evolve_deck.py` wrote."""
     decks = {name: list(cards) for name, cards in STARTER_DECKS.items()}
-    for path in sorted(ROOT.glob("*.txt")):
+    for path in sorted(scan("*.txt")):
         try:
             text = path.read_text()
             blob = json.loads(text[text.index("{", text.rindex("\n\n")):])
@@ -96,7 +114,7 @@ def available_decks() -> dict[str, list[str]]:
 
 def available_pilots() -> list[str]:
     pilots = ["human", "heuristic", "random"]
-    pilots += [f"rl:{p.name}" for p in sorted(ROOT.glob("*.pt"))]
+    pilots += [f"rl:{p.name}" for p in scan("*.pt")]
     return pilots
 
 
@@ -107,7 +125,7 @@ def make_pilot(kind: str, seat: int, db: CardDB, seed: int, runner: "Match"):
         return Paced(SeatedAgent(RandomAgent(seed=seed), seat), runner)
     if kind.startswith("rl:"):
         from braverse.rl import RLAgent, Trainer
-        net = Trainer.load_net(ROOT / kind[3:])
+        net = Trainer.load_net(next(p for p in scan("*.pt") if p.name == kind[3:]))
         return Paced(RLAgent(net, seat, db=db, seed=seed), runner)
     return Paced(SeatedAgent(HeuristicAgent(db=db, seed=seed), seat), runner)
 

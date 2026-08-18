@@ -11,6 +11,11 @@ card_images/
 # Generated Tabletop Simulator deck sheets — `python build_tts_sheets.py`.
 tts_sheets/
 
+# PyInstaller output — `pyinstaller braverse.spec`.
+build/
+dist/
+.venv-build/
+
 # Training / evolution output.
 *.log
 *.err
