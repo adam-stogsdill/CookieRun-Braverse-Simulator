@@ -681,14 +681,16 @@ function groupOptions(options) {
   return groups;
 }
 
-/* Picking several cards at once — a discard cost, most often. Choosing from a
- * list on the far side of the screen while your hand sits at the bottom is the
- * wrong way round, so the cards themselves are the control: toggle up to the
- * number asked for, then confirm. */
+/* Any question that is really "point at a card in your hand" is answered with
+ * the hand itself: a discard cost, the Cookie you open with, the replacement
+ * you field when one faints. Toggle up to the number asked for, then confirm.
+ * Choosing from a list on the far side of the screen while your hand sits at
+ * the bottom is the wrong way round. */
 function renderPicker(snap) {
   const bar = el("#picker");
   const pending = snap.pending;
-  const count = pending && pending.count > 1 ? pending.count : 0;
+  const pick = pending && pending.pick;
+  const count = pick ? Math.max(1, pending.count || 1) : 0;
   if (!count) {
     bar.classList.add("hidden");
     bar.innerHTML = "";
@@ -717,6 +719,7 @@ function renderPicker(snap) {
     wrap.onclick = () => {
       const at = state.picked.indexOf(opt.index);
       if (at >= 0) state.picked.splice(at, 1);
+      else if (count === 1) state.picked = [opt.index];
       else if (state.picked.length < count) state.picked.push(opt.index);
       renderPicker(snap);
     };
@@ -725,18 +728,49 @@ function renderPicker(snap) {
   bar.appendChild(row);
 
   const foot = h("div", "picker-foot");
-  const confirm = h("button", "primary", `Discard ${state.picked.length || ""}`.trim());
+  const verb = pick.verb || "Choose";
+  const confirm = h("button", "primary",
+    count > 1 ? `${verb} ${state.picked.length || ""}`.trim() : verb);
   confirm.disabled = state.picked.length !== count;
   confirm.onclick = () => {
     const picks = state.picked.slice();
     state.picked = [];
     bar.classList.add("hidden");
-    answer(picks);
+    // A single pick is still a single answer; only a batch sends a list.
+    answer(count > 1 ? picks : picks[0]);
   };
-  foot.appendChild(h("span", "hint",
-    state.picked.length === count ? "ready" : `choose ${count - state.picked.length} more`));
+  foot.appendChild(h("span", "hint", state.picked.length === count
+    ? "ready"
+    : `choose ${count - state.picked.length} more`));
   foot.appendChild(confirm);
   bar.appendChild(foot);
+  return true;
+}
+
+/* The opening toss, played in the middle of the table. For those few seconds it
+ * is the only thing happening, so it should not be a list in the far corner. */
+function renderCentre(snap) {
+  const bar = el("#centre");
+  const pending = snap.pending;
+  const style = pending && pending.centre;
+  if (!style) {
+    bar.classList.add("hidden");
+    bar.innerHTML = "";
+    return false;
+  }
+  bar.classList.remove("hidden");
+  bar.innerHTML = "";
+  bar.appendChild(h("div", "centre-prompt", pending.prompt));
+  const row = h("div", "centre-row" + (style === "throw" ? " throws" : " choices"));
+  pending.options.forEach((opt) => {
+    const btn = h("button", "centre-btn");
+    const icon = THROW_ICONS[opt.label];
+    if (icon) btn.appendChild(h("span", "big", icon));
+    btn.appendChild(h("span", "label", opt.label));
+    btn.onclick = () => answer(opt.index);
+    row.appendChild(btn);
+  });
+  bar.appendChild(row);
   return true;
 }
 
@@ -752,8 +786,14 @@ function renderOptions(snap) {
     : lastLine;
 
   if (!pending) { state.filterUid = null; return; }
-  if (pending.count > 1) {
-    box.appendChild(h("div", "filterbar", "pick the cards on your hand below"));
+  if (pending.centre) {
+    box.appendChild(h("div", "filterbar", "answer in the middle of the table"));
+    return;
+  }
+  if (pending.pick) {
+    box.appendChild(h("div", "filterbar",
+      pending.count > 1 ? "pick the cards on your hand below"
+                        : "pick the card on your hand below"));
     return;
   }
 
@@ -1064,6 +1104,7 @@ function render(snap) {
   renderBanner(snap);
   renderOptions(snap);
   renderLog(snap);
+  renderCentre(snap);
   renderPicker(snap);
   markChoosable(snap);
   if (state.browsing) renderBrowser();

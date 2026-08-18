@@ -45,6 +45,39 @@ def test_the_winner_of_the_toss_chooses():
     assert toss.chooser == 1 and toss.first_player == 0
 
 
+class FakeState:
+    """Just enough of a GameState to receive log lines."""
+
+    def __init__(self):
+        self.log = []
+
+
+def test_each_round_is_logged_as_it_happens():
+    """A tie sends you back for another throw; being re-asked with no
+    explanation is baffling, so the round must be logged before the next one."""
+    seen = []
+
+    class Watcher(Scripted):
+        def choose(self, state, prompt, options, *, optional):
+            # Whatever the log holds at the moment this player is asked.
+            seen.append(list(state.log))
+            return super().choose(state, prompt, options, optional=optional)
+
+    state = FakeState()
+    toss = decide_first_player(
+        [Watcher(["rock", "rock", "scissors"]), Watcher(["rock", "rock", "paper"])],
+        state, random.Random(0))
+
+    # By the second throw the first tie is already on the log.
+    assert seen[0] == [], "nothing has happened yet"
+    assert any("a tie" in line for line in seen[2]), seen[2]
+    assert sum("a tie" in line for line in seen[4]) == 2, seen[4]
+
+    assert state.log == toss.describe()
+    assert state.log[-1] == "P0 goes first"
+    assert sum("a tie" in line for line in state.log) == 2
+
+
 def test_ties_are_rethrown():
     rng = random.Random(0)
     toss = decide_first_player(

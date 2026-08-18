@@ -263,10 +263,17 @@ older `<{P}{P}> Deals 2 damage.` printing have no name to show, and no
 itself: "Attack" and "Activate". The move list on the right tags the same
 names.
 
-**Picking several cards at once.** When an effect asks you to discard, your
-hand comes up as a strip: toggle up to the number asked for, watch the counter,
-then confirm. Choosing from a list on the far side of the screen while your hand
-sits at the bottom was the wrong way round.
+**Questions about your hand are answered with your hand.** Discarding, opening
+with a Cookie, fielding a replacement when one faints — all the same gesture:
+your hand comes up as a strip, you toggle up to the number asked for, and the
+confirm button says what you are about to do (*Discard*, *Play Cookie*).
+Choosing from a list on the far side of the screen while your hand sits at the
+bottom was the wrong way round. With one card to pick, clicking a second moves
+the choice rather than refusing it.
+
+Which questions get the strip is decided structurally — every option is a card
+that is in your hand — rather than by matching prompt text, so a new prompt of
+the same shape gets it for free; only the verb reads from the prompt.
 
 That needed one engine change. `Game.discard` asked its controller once *per
 card*, which is the natural shape for a greedy bot and the wrong shape for a
@@ -461,7 +468,11 @@ turns 46 bounces into faints and does not move the win rate either way.
 ### Who goes first
 
 `braverse/rps.py` plays the guide's opener: both controllers throw, ties are
-re-thrown, and the winner picks who starts. `Game(first_player=...)` takes the
+re-thrown, and the winner picks who starts. Each round is logged *as it
+happens* rather than in one block at the end — a tie sends you straight back for
+another throw, and being re-asked with no explanation is baffling. The browser
+puts the whole toss in the middle of the table, big enough to hit, instead of in
+the panel on the far right. `Game(first_player=...)` takes the
 answer — the engine no longer assumes seat 0 opens, so the skipped first draw,
 the no-attacks-on-turn-one rule and the round counter all follow whoever
 actually won.

@@ -451,7 +451,10 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
 
 /* ------------------------------------------------------------------ preview */
 .preview {
-  position: fixed; z-index: 60; width: 260px;
+  /* above every overlay it can be hovered from: the picker, the card menu,
+     a card being dragged. A modal <dialog> still beats any z-index, which is
+     why the preview is re-parented into one while it is open. */
+  position: fixed; z-index: 95; width: 260px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   padding: 10px; box-shadow: 0 18px 50px rgba(0,0,0,.55);
   pointer-events: none;
@@ -619,3 +622,30 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 .picker-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .picker-foot .hint { font-size: 11px; color: var(--dim); }
 .picker-foot button { margin-left: auto; }
+
+/* ------------------------------------------------------- centre-stage ask */
+/* The opening toss: for those few seconds it is the only thing happening, so
+   it belongs in the middle rather than in the panel on the far right. */
+.centre {
+  /* centred over the table, not the window: the panel owns the right 340px */
+  position: fixed; left: calc((100% - 340px) / 2); top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 78; text-align: center;
+  background: rgba(16, 20, 28, .94);
+  border: 1px solid var(--accent); border-radius: 16px;
+  padding: 16px 22px 18px;
+  box-shadow: 0 26px 70px rgba(0,0,0,.75);
+}
+.centre.hidden { display: none; }
+.centre-prompt { font-size: 14px; font-weight: 600; margin-bottom: 12px; max-width: 460px; }
+.centre-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.centre-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 12px 18px; border-radius: 12px; background: #262b39;
+  border: 1px solid var(--line); min-width: 96px;
+}
+.centre-btn:hover { border-color: var(--accent); background: #2f3547; transform: translateY(-2px); }
+.centre-btn .big { font-size: 34px; line-height: 1; }
+.centre-row.throws .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
+.centre-row.choices .centre-btn { min-width: 150px; padding: 14px 18px; }
+.centre-row.choices .label { font-size: 12.5px; }

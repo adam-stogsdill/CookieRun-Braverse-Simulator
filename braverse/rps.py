@@ -51,12 +51,14 @@ class Toss:
     def ties(self) -> int:
         return max(0, len(self.rounds) - 1)
 
+    def describe_round(self, index: int) -> str:
+        throw0, throw1 = self.rounds[index]
+        outcome = ("a tie" if throw0 == throw1
+                   else f"P{0 if beats(throw0, throw1) else 1} wins")
+        return f"rock-paper-scissors: P0 {throw0}, P1 {throw1} — {outcome}"
+
     def describe(self) -> list[str]:
-        lines = []
-        for throw0, throw1 in self.rounds:
-            outcome = ("a tie" if throw0 == throw1
-                       else f"P{0 if beats(throw0, throw1) else 1} wins")
-            lines.append(f"rock-paper-scissors: P0 {throw0}, P1 {throw1} — {outcome}")
+        lines = [self.describe_round(i) for i in range(len(self.rounds))]
         if self.chooser is not None:
             lines.append(f"P{self.chooser} chooses: {self.choice}")
         lines.append(f"P{self.first_player} goes first")
@@ -71,6 +73,16 @@ def decide_first_player(controllers: Sequence, state, rng, *,
     throw is given one at random so a stubborn agent cannot hang the match, and
     an unbroken run of ties falls back to the RNG rather than looping forever.
     """
+    # Log as we go rather than all at once at the end: a tie sends the players
+    # back for another throw, and being asked again with no explanation is
+    # baffling. The caller's state is the log, so the browser sees each round
+    # before it is asked for the next throw.
+    log = getattr(state, "log", None)
+
+    def record(line: str) -> None:
+        if isinstance(log, list):
+            log.append(line)
+
     toss = Toss(first_player=0)
     for _ in range(max_rounds):
         throws = []
@@ -78,6 +90,7 @@ def decide_first_player(controllers: Sequence, state, rng, *,
             pick = controller.choose(state, PROMPT_THROW, list(THROWS), optional=False)
             throws.append(pick if pick in THROWS else rng.choice(THROWS))
         toss.rounds.append(tuple(throws))
+        record(toss.describe_round(-1))
         if throws[0] == throws[1]:
             continue
 
@@ -87,9 +100,12 @@ def decide_first_player(controllers: Sequence, state, rng, *,
                                             optional=False)
         toss.choice = choice if choice in CHOICES else GO_FIRST
         toss.first_player = winner if toss.choice == GO_FIRST else 1 - winner
+        record(f"P{winner} chooses: {toss.choice}")
+        record(f"P{toss.first_player} goes first")
         return toss
 
     # Nothing but ties: the guide has no answer for that, so flip a coin.
     toss.first_player = rng.randrange(2)
     toss.choice = "unresolved after %d ties" % len(toss.rounds)
+    record(f"P{toss.first_player} goes first ({toss.choice})")
     return toss

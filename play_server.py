@@ -31,7 +31,7 @@ from braverse import (STARTER_DECKS, CardDB, Game, HeuristicAgent, RandomAgent,
                       SeatedAgent, default_db, validate)
 from braverse import actions as A
 from braverse.enums import CardType, Marker
-from braverse.rps import decide_first_player
+from braverse.rps import CHOICES, THROWS, decide_first_player
 from braverse.state import CardInstance, Cookie, GameState
 
 ROOT = Path(__file__).resolve().parent
@@ -272,6 +272,46 @@ class MatchAborted(Exception):
     """Raised inside the match thread when the match is replaced or stopped."""
 
 
+def centre_style(options: Sequence) -> Optional[str]:
+    """Questions that belong in the middle of the table, not off to one side.
+
+    The opening toss is the whole screen's business for those few seconds, and
+    making someone track to the far right to throw rock is a silly way to start
+    a game.
+    """
+    labels = [o for o in options if isinstance(o, str)]
+    if len(labels) != len(options):
+        return None
+    if set(labels) == set(THROWS):
+        return "throw"
+    if set(labels) == set(CHOICES):
+        return "choice"
+    return None
+
+
+def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
+    """Should this question be answered by pointing at your own hand?
+
+    Decided structurally rather than by prompt string: if every option is a card
+    that is *in your hand*, then your hand is the natural control — the same
+    strip whether you are being asked to discard, to open with a Cookie, or to
+    field a replacement. Only the verb on the confirm button changes.
+    """
+    if not options or not all(isinstance(o, CardInstance) for o in options):
+        return None
+    hand = {c.uid for c in player.hand}
+    if not all(o.uid in hand for o in options):
+        return None
+    lowered = prompt.lower()
+    if "discard" in lowered:
+        verb = "Discard"
+    elif "cookie" in lowered:
+        verb = "Play Cookie"
+    else:
+        verb = "Choose"
+    return {"verb": verb}
+
+
 class HumanController:
     """Hands every decision to the browser and blocks until it answers."""
 
@@ -294,7 +334,9 @@ class HumanController:
             return None
         db = self.match.db
         payload = [option_json(db, i, o) for i, o in enumerate(options)]
-        index = self.match.ask(self.seat, prompt, payload, optional=optional)
+        pick = hand_pick(prompt, options, state.players[self.seat])
+        index = self.match.ask(self.seat, prompt, payload, optional=optional,
+                               pick=pick, centre=centre_style(options))
         return options[index] if index is not None else None
 
     def choose_many(self, state: GameState, prompt: str, options: Sequence, *,
@@ -304,8 +346,9 @@ class HumanController:
             return []
         db = self.match.db
         payload = [option_json(db, i, o) for i, o in enumerate(options)]
+        pick = hand_pick(prompt, options, state.players[self.seat]) or {"verb": "Confirm"}
         picked = self.match.ask(self.seat, prompt, payload,
-                                optional=optional, count=count)
+                                optional=optional, count=count, pick=pick)
         if not isinstance(picked, list):
             picked = [] if picked is None else [picked]
         return [options[i] for i in picked if 0 <= i < len(options)]
@@ -399,8 +442,7 @@ class Match:
             # self-play is not made to play it a million times.
             toss = decide_first_player(self.controllers, game.state, game.state.rng)
             game.first_player = toss.first_player
-            game.state.log.extend(toss.describe())
-            self.toss = toss
+            self.toss = toss     # `decide_first_player` logs each round live
             self.publish()
             game.setup()
             self.publish()
@@ -627,7 +669,8 @@ class Match:
 
     # -- questions -------------------------------------------------------
     def ask(self, seat: int, prompt: str, options: list, *, optional: bool,
-            count: int = 1):
+            count: int = 1, pick: Optional[dict] = None,
+            centre: Optional[str] = None):
         """Block the match thread until the browser answers.
 
         Returns an index, or a list of them when ``count`` is more than one —
@@ -639,6 +682,8 @@ class Match:
             "options": options,
             "optional": optional,
             "count": count,
+            "pick": pick,
+            "centre": centre,
             "id": self.version + 1,
         }
         self.publish(pending)

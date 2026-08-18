@@ -299,3 +299,44 @@ def test_the_engine_records_activations():
             return
         game.step(game.controller(game.to_move()).choose_action(game.state, options))
     raise AssertionError("no skill was ever available to activate")
+
+
+def test_questions_about_your_own_hand_are_answered_with_your_hand():
+    """Opening Cookie, replacements and discards are all the same gesture.
+
+    Decided structurally — every option is a card in your hand — rather than by
+    matching prompt strings, so a new prompt of the same shape gets the picker
+    for free. Only the verb on the confirm button reads from the prompt.
+    """
+    from braverse import Game, HeuristicAgent, SeatedAgent
+    from play_server import hand_pick
+
+    db = default_db()
+    game = Game([available_decks()["st9_sea_fairy"], available_decks()["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0), SeatedAgent(HeuristicAgent(db=db), 1)],
+                db=db, seed=4)
+    game.setup()
+    me = game.state.players[0]
+
+    assert hand_pick("Opening Cookie", me.hand, me) == {"verb": "Play Cookie"}
+    assert hand_pick("Field a replacement Cookie", me.hand, me) == {"verb": "Play Cookie"}
+    assert hand_pick("Discard 2 cards", me.hand, me) == {"verb": "Discard"}
+    assert hand_pick("Reveal a card", me.hand, me) == {"verb": "Choose"}
+
+    # Not your hand, not the picker: a question about the board stays a list.
+    assert hand_pick("Damage which Cookie?", me.battle, me) is None
+    assert hand_pick("Opening Cookie", game.state.players[1].hand, me) is None
+    assert hand_pick("Anything", [], me) is None
+
+
+def test_the_toss_is_asked_in_the_middle_of_the_table():
+    """Tracking to the far-right panel to throw rock is a silly way to start."""
+    from braverse.rps import CHOICES, THROWS
+    from play_server import centre_style
+
+    assert centre_style(list(THROWS)) == "throw"
+    assert centre_style(list(CHOICES)) == "choice"
+    # Everything else stays in the panel, including anything non-textual.
+    assert centre_style(["rock", "paper"]) is None
+    assert centre_style([]) is None
+    assert centre_style([object(), object()]) is None
