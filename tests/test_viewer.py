@@ -405,3 +405,50 @@ def test_a_draw_event_carries_no_card_identity():
     # And the wait scales with how many cards actually fly.
     assert scene_seconds([{"type": "draw", "owner": 0, "count": 2}]) > \
            scene_seconds([{"type": "draw", "owner": 0, "count": 1}])
+
+
+def test_the_snapshot_carries_what_the_round_track_needs():
+    """The phase strip above the break area is built from these four fields.
+
+    It cannot be driven by `phase` alone: the engine only ever *reports* `main`
+    to a player — it untaps and draws inside the turn machinery, and never
+    enters `support` at all, because placing a support card is a main-phase
+    action capped at one per turn. So the strip also reads whose turn it is,
+    who opened (they skip their first draw), and whether the support has been
+    placed yet.
+    """
+    match = bot_match()
+    match.start()
+    assert wait_for(lambda: match.view().get("players"))
+    view = match.view()
+
+    assert view["phase"] == "main", "a player is only ever asked during main"
+    assert view["turnPlayer"] in (0, 1)
+    assert view["firstPlayer"] in (0, 1)
+    for player in view["players"]:
+        assert isinstance(player["supportedThisTurn"], bool)
+    match.stop()
+
+
+def test_the_support_flag_is_what_tells_you_a_support_is_still_owed():
+    from braverse import Game, HeuristicAgent, SeatedAgent
+    from braverse import actions as A
+    from play_server import player_json
+
+    db = default_db()
+    game = Game([available_decks()["st9_sea_fairy"], available_decks()["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0), SeatedAgent(HeuristicAgent(db=db), 1)],
+                db=db, seed=4)
+    game.setup()
+    me = game.state.players[0]
+    assert player_json(db, me, game.state)["supportedThisTurn"] is False
+
+    support = next(o for o in game.legal_actions() if isinstance(o, A.PlaceSupport))
+    game.step(support)
+    assert player_json(db, me, game.state)["supportedThisTurn"] is True
+
+    # ...and it comes back for the next turn.
+    game.end_turn()
+    game.end_turn()
+    assert game.state.turn_player == 0
+    assert player_json(db, me, game.state)["supportedThisTurn"] is False

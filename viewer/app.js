@@ -16,6 +16,9 @@ const state = {
   browsing: null,       // {seat, zone} while the trash/break browser is open
   animating: false,     // a scene is playing; the board is a beat behind
   queuedSnap: null,     // newest state, waiting for the scene to finish
+  restState: new Map(), // uid -> rested, as the board was last drawn
+  restSeen: new Map(),  // the same, being rebuilt by the render in progress
+  turning: 0,           // cards turning in this render, for the sweep stagger
   picked: [],           // indices chosen in a multi-card pick
   eventId: 0,           // last event batch played
   announced: false,     // win chime fired for this match
@@ -35,6 +38,52 @@ async function api(path, body) {
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const res = await fetch(path, opts);
   return res.json();
+}
+
+/* Turning a card, rather than snapping it.
+ *
+ * The board is rebuilt from scratch on every commit, so the node is new and a
+ * CSS transition has nothing to move *from*. This remembers how each card sat
+ * last time it was drawn, starts the new node at that angle, and lets it turn
+ * to the angle the stylesheet asks for — covering both directions at once:
+ * resting to attack or to pay a cost, and the sweep back to active at the start
+ * of your turn. The reset is on a timer rather than the animation's end,
+ * because a background tab never fires the frame that would start it. */
+const TURN_MS = 320;
+
+function animateTurn(node, card, opts) {
+  if (card.uid === undefined || opts.seat === undefined) return;
+  const now = !!card.rested;
+  state.restSeen.set(card.uid, now);
+  const was = state.restState.get(card.uid);
+  if (was === undefined || was === now) return;
+
+  const flipped = document.body.classList.contains("flip-opponent") && opts.seat !== 0;
+  const base = flipped ? 180 : 0;
+  const from = base + (was ? 90 : 0);
+  const to = base + (now ? 90 : 0);
+
+  node.style.transition = "none";
+  node.style.transform = `rotate(${from}deg)`;
+  const stagger = Math.min(state.turning++, 8) * 25;
+  requestAnimationFrame(() => {
+    node.style.transition = `transform ${TURN_MS}ms cubic-bezier(.2,.75,.3,1) ${stagger}ms`;
+    node.style.transform = `rotate(${to}deg)`;
+  });
+  // Whatever happens to the frame callback, the card must end up where the
+  // stylesheet puts it.
+  setTimeout(() => {
+    node.style.transition = "";
+    node.style.transform = "";
+  }, TURN_MS + stagger + 120);
+}
+
+/** The battle-area card box, read from CSS so the two cannot drift apart. */
+function cardBox() {
+  const css = getComputedStyle(document.documentElement);
+  const w = parseFloat(css.getPropertyValue("--battle-card-w")) || 116;
+  const h = parseFloat(css.getPropertyValue("--battle-card-h")) || 162;
+  return { w, h };
 }
 
 function prettyPilot(name) {
@@ -113,6 +162,7 @@ function cardNode(card, opts = {}) {
   node.appendChild(img);
 
   if (card.uid !== undefined) node.dataset.uid = card.uid;
+  animateTurn(node, card, opts);
   node.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
   node.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
   if (opts.uid !== undefined && opts.uid !== null) {
@@ -199,6 +249,55 @@ function stack(label, count, opts = {}) {
   return node;
 }
 
+/* The round, as a track above the break area.
+ *
+ * Driven by more than `snap.phase`, because the engine only ever *reports*
+ * `main` to a player: it untaps and draws for you inside the turn machinery,
+ * and support placement is a main-phase action capped at one per turn rather
+ * than a phase you stop in. So Active and Draw are shown as already resolved,
+ * End as still to come, and Support carries the one piece of state a player can
+ * actually act on — whether this turn's support card has been placed yet. */
+const ROUND_PHASES = [
+  ["active", "Active", "your cards untap"],
+  ["draw", "Draw", "you draw for the turn"],
+  ["support", "Support", "place 1 card as support"],
+  ["main", "Main", "play, activate, attack"],
+  ["end", "End", "turn passes"],
+];
+
+function phaseTrack(seat, snap) {
+  const mine = snap.turnPlayer === seat;
+  const player = snap.players[seat];
+  const track = h("div", "phases" + (mine ? " mine" : ""));
+  track.appendChild(h("div", "zlabel2", mine ? "this turn" : "opponent's turn"));
+
+  const openerSkips = snap.turn === 1 && seat === snap.firstPlayer;
+  ROUND_PHASES.forEach(([key, label, hint]) => {
+    let cls = "phase";
+    let note = "";
+    if (!mine) {
+      cls += " idle";
+    } else if (key === "active" || key === "draw") {
+      cls += " done";
+      if (key === "draw" && openerSkips) { cls = "phase skipped"; note = "skipped"; }
+    } else if (key === "support") {
+      if (player.supportedThisTurn) { cls += " used"; note = "done"; }
+      else { cls += " available"; note = "ready"; }
+    } else if (key === "main") {
+      cls += snap.phase === "main" ? " now" : " done";
+    } else {
+      cls += " todo";
+    }
+    const row = h("div", cls);
+    row.appendChild(h("span", "dot"));
+    row.appendChild(h("span", "name", label));
+    if (note) row.appendChild(h("span", "note", note));
+    row.title = hint;
+    track.appendChild(row);
+  });
+  return track;
+}
+
 function renderSide(seat, snap) {
   const side = el("#side-" + seat);
   side.innerHTML = "";
@@ -216,6 +315,7 @@ function renderSide(seat, snap) {
   const mat = h("div", "mat" + (snap.turnPlayer === seat && !snap.over ? " active" : ""));
 
   const left = h("div", "matcol left");
+  left.appendChild(phaseTrack(seat, snap));
   left.appendChild(stack("break area", p.break.length, {
     numText: `${p.breakLevel} / 10`,
     sub: `${p.break.length} card${p.break.length === 1 ? "" : "s"}`,
@@ -490,9 +590,10 @@ function playSkill(event, delay = 0) {
     const bounds = el("#table").getBoundingClientRect();
     const at = anchor.getBoundingClientRect();
 
+    const box = cardBox();
     const node = h("div", "skillpop");
-    node.style.left = at.left + at.width / 2 - bounds.left - 46 + "px";
-    node.style.top = at.top + at.height / 2 - bounds.top - 64 + "px";
+    node.style.left = at.left + at.width / 2 - bounds.left - box.w / 2 + "px";
+    node.style.top = at.top + at.height / 2 - bounds.top - box.h / 2 + "px";
     const img = h("img");
     img.src = event.card.img;
     img.onerror = () => img.remove();
@@ -516,9 +617,10 @@ function playFaint(event, delay = 0) {
     const bounds = el("#table").getBoundingClientRect();
     const at = anchor.getBoundingClientRect();
 
+    const box = cardBox();
     const node = h("div", "breaker");
-    node.style.left = at.left + at.width / 2 - bounds.left - 46 + "px";
-    node.style.top = at.top + at.height / 2 - bounds.top - 64 + "px";
+    node.style.left = at.left + at.width / 2 - bounds.left - box.w / 2 + "px";
+    node.style.top = at.top + at.height / 2 - bounds.top - box.h / 2 + "px";
     node.style.setProperty("--face",
       document.body.classList.contains("flip-opponent") && event.owner !== 0 ? "180deg" : "0deg");
 
@@ -589,12 +691,13 @@ function flipCard(event, rank = 0, seq = 0) {
   const offset = host ? rank : seq;   // no host: fan the whole batch instead
 
   const node = h("div", "flipper" + (event.flip ? " isflip" : ""));
-  node.style.width = "76px";
-  node.style.height = "106px";
-  const left = at ? (host ? at.left : at.left + at.width / 2 - 38) - bounds.left - 4
-                  : bounds.width / 2 - 38;
-  const top = at ? (host ? at.top : at.top + at.height / 2 - 53) - bounds.top - 4
-                 : bounds.height / 2 - 53;
+  const box = cardBox();
+  node.style.width = box.w + "px";
+  node.style.height = box.h + "px";
+  const left = at ? (host ? at.left : at.left + at.width / 2 - box.w / 2) - bounds.left - 4
+                  : bounds.width / 2 - box.w / 2;
+  const top = at ? (host ? at.top : at.top + at.height / 2 - box.h / 2) - bounds.top - 4
+                 : bounds.height / 2 - box.h / 2;
   node.style.left = left + offset * 30 + "px";
   node.style.top = top - offset * 12 + "px";
 
@@ -1145,12 +1248,16 @@ function render(snap) {
     renderBanner(snap);
     return;
   }
+  state.turning = 0;
   renderSide(1, snap);
   renderSide(0, snap);
   renderTurnline(snap);
   renderBanner(snap);
   renderOptions(snap);
   renderLog(snap);
+  // Swap in what this render just drew, so the next one can see what moved.
+  state.restState = state.restSeen;
+  state.restSeen = new Map();
   renderCentre(snap);
   renderPicker(snap);
   markChoosable(snap);

@@ -255,7 +255,14 @@ Stop it with ctrl-c. It also shuts down on SIGHUP and SIGTERM, so closing the
 terminal takes the server with it rather than leaving something holding port
 8080; if the port is busy anyway it names the PID still on it.
 
-A playmat with the printed card art: the two battle areas with their face-down
+A playmat with the printed card art. Cards in the battle area are drawn larger
+than the ones in a support row, because that is where the game is actually read;
+every stand-in overlay — the flip reveal, the break, the skill popup — sizes
+itself off the same two CSS variables, so they cannot drift apart. On a short
+window the board scrolls: it used to be a grid whose rows got fitted to the
+container, which squeezed the mats until they overlapped each other.
+
+The board shows the two battle areas with their face-down
 HP piles, the support area, the stage, deck and trash, the break-area clock, and
 both hands. Pick a pilot and a deck for each seat — `human`, `heuristic`,
 `random`, or any `rl_agent*.pt` checkpoint in the directory — plus any decklist
@@ -269,6 +276,19 @@ older `<{P}{P}> Deals 2 damage.` printing have no name to show, and no
 【Activate】 skill in the whole pool is named, so those fall back to the marker
 itself: "Attack" and "Activate". The move list on the right tags the same
 names.
+
+**The round, above the break area.** A strip on each mat shows Active → Draw →
+Support → Main → End, lit for whoever's turn it is and dimmed on the other side.
+
+It deliberately reads more than `state.phase`, because that field alone would be
+a lie by omission: the engine only ever *reports* `main` to a player — it untaps
+and draws inside the turn machinery, and never enters `support` at all, since
+placing a support card is a main-phase action capped at one per turn rather than
+a phase you stop in. So Active and Draw show as already resolved (and Draw reads
+*skipped* for whoever opened, who forgoes their first draw), End as still to
+come, and Support carries the one thing you can still act on: it pulses **ready**
+until this turn's support card is placed, then settles to **done**. That is the
+nudge — forgetting the free support card is the easiest mistake in the game.
 
 **Questions about your hand are answered with your hand.** Discarding, opening
 with a Cookie, fielding a replacement when one faints — all the same gesture:
@@ -322,6 +342,16 @@ rested card of theirs sits at 270° rather than 90°, for the same reason. Zone
 labels, counters and the reveal animation stay upright, because those are the
 interface rather than the board; hover any card to read it the right way up.
 Turn the option off to see both halves in the same orientation.
+
+**Cards turn, they do not snap.** Resting to attack or to pay a cost, and the
+sweep back to active at the start of your turn, are animated in both directions
+— staggered slightly when a whole support row untaps at once. The board is
+rebuilt from scratch on every commit, so a CSS transition has nothing to move
+*from*; the renderer remembers how each card sat last time it was drawn, starts
+the new node at that angle and lets it turn to the one the stylesheet asks for.
+The reset to the stylesheet's own transform is on a timer rather than the
+animation's end, because a backgrounded tab never fires the frame that would
+start it, and a card must never be left lying at the wrong angle.
 
 **Cards are dealt, not conjured.** A draw sends a face-down card arcing from
 that player's deck to their hand before the hand redraws underneath it. The
