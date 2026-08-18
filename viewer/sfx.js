@@ -115,6 +115,11 @@ const Sfx = (() => {
       burst({ duration: 0.13, from: 900, to: 3000, q: 0.6, gain: 0.16 });
       burst({ at: 0.1, duration: 0.05, from: 4200, to: 2000, q: 2.2, gain: 0.1 });
     },
+    // effect damage: a thin electric tick, nothing like the impact thud
+    zap() {
+      burst({ duration: 0.09, from: 3400, to: 1200, q: 3.2, gain: 0.22 });
+      tone({ duration: 0.18, from: 1200, to: 420, gain: 0.14, type: "square" });
+    },
     // a skill going off: two quick rising blips
     skill() {
       burst({ duration: 0.07, from: 1800, to: 3200, q: 1.4, gain: 0.2 });

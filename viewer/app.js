@@ -379,6 +379,22 @@ function renderSide(seat, snap) {
   }
 }
 
+/* End turn is the one move you reach for constantly, and hunting for it at the
+ * bottom of a list on the far right is the worst place to put it. */
+function renderEndTurn(snap) {
+  const host = el("#endturn");
+  host.innerHTML = "";
+  const pending = snap.pending;
+  const end = pending && !state.animating
+    && pending.options.find((o) => o.kind === "EndTurn");
+  if (!end) { host.classList.add("hidden"); return; }
+  host.classList.remove("hidden");
+  const btn = h("button", "endturn-btn", "End turn");
+  btn.title = "End your turn (also on the list, and the last number key)";
+  btn.onclick = () => answer(end.index);
+  host.appendChild(btn);
+}
+
 function renderBanner(snap) {
   const banner = el("#banner");
   banner.className = "banner";
@@ -419,6 +435,8 @@ const FLIP_MS = 2400;     // how long a revealed card stays on screen
 const FAINT_MS = 300;
 const DRAW_MS = 220;      // between one card leaving the deck and the next
 const DRAW_FLIGHT = 700;  // how long a card takes to reach the hand
+const DAMAGE_MS = 250;    // between one hit registering and the next
+const DAMAGE_HOLD = 1000; // how long the number floats
 const SKILL_MS = 400;     // between one skill popping up and the next
 const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
@@ -426,6 +444,7 @@ const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
 /** Play one action's scene and return how long it runs, in ms. */
 function playEvents(events) {
   if (!events || !events.length) return 0;
+  const hits = events.filter((e) => e.type === "damage");
   const draws = events.filter((e) => e.type === "draw");
   const skills = events.filter((e) => e.type === "skill");
   const attacks = events.filter((e) => e.type === "attack");
@@ -441,6 +460,13 @@ function playEvents(events) {
   skills.forEach((event, i) => playSkill(event, clock + i * SKILL_MS));
   if (skills.length) clock += (skills.length - 1) * SKILL_MS + SKILL_HOLD;
   attacks.forEach((event) => { playAttack(event, clock); clock += ATTACK_MS; });
+  // Land the hits with the swing that caused them, or straight away if the
+  // damage came from a rider, a skill or a trap rather than an attack.
+  hits.forEach((event, i) => {
+    const at = event.source === "attack" ? Math.max(0, clock - ATTACK_MS * 0.6) : clock;
+    playDamage(event, at + i * DAMAGE_MS);
+  });
+  if (hits.length) clock = Math.max(clock, (hits.length - 1) * DAMAGE_MS + DAMAGE_HOLD);
   if (reveals.length) {
     playReveals(reveals, clock);
     // Wait for the last card to *leave*, not just to start turning: the board
@@ -523,20 +549,41 @@ function playAttack(event, delay = 0) {
       { transform: `translate(0,0) rotate(${base}deg) scale(1)`, offset: 1 },
     ], { duration: ATTACK_MS, easing: "linear" });
 
-    // The defender takes the hit as the lunge lands.
-    setTimeout(() => {
-      const hit = document.querySelector(`[data-cookie="${event.target}"]`);
-      if (!hit) return;
-      hit.classList.add("struck");
-      setTimeout(() => hit.classList.remove("struck"), 420);
-    }, ATTACK_MS * 0.3);
-
     // Remove it when the animation actually ends. A background tab throttles
     // timers but not the compositor, so a timer alone can leave a card floating
     // over the board; the timer stays as a backstop, and `sweepFx` catches
     // anything that still slips through.
     flight.finished.then(() => ghost.remove()).catch(() => ghost.remove());
     setTimeout(() => ghost.remove(), ATTACK_MS + 400);
+  }, delay);
+}
+
+/* A hit landing. The two sources are deliberately unalike: a swing is a heavy
+ * red shove with the number thrown out to the side, while a rider, a skill or a
+ * trap is a cool blue pulse that rises off the card — so you can tell, without
+ * reading a word, whether you were hit or chipped. */
+function playDamage(event, delay = 0) {
+  setTimeout(() => {
+    const attack = event.source === "attack";
+    const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
+    Sfx.play(attack ? "impact" : "zap");
+    const anchor = host || document.querySelector(`#side-${event.owner} .zone.battle`);
+    if (!anchor) return;
+    const bounds = el("#table").getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
+
+    if (host) {
+      host.classList.add(attack ? "struck" : "zapped");
+      setTimeout(() => host.classList.remove(attack ? "struck" : "zapped"), 460);
+    }
+
+    const node = h("div", "hitnum " + (attack ? "attack" : "effect"));
+    node.textContent = "-" + event.amount;
+    node.style.left = at.left + at.width / 2 - bounds.left + "px";
+    node.style.top = at.top + at.height / 2 - bounds.top + "px";
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+    setTimeout(() => node.remove(), DAMAGE_HOLD + 200);
   }, delay);
 }
 
@@ -1235,7 +1282,16 @@ function renderLog(snap) {
   const box = el("#log");
   const lines = snap.log || [];
   box.innerHTML = "";
-  lines.forEach((line, i) => box.appendChild(h("li", i >= lines.length - 3 ? "new" : "", line)));
+  lines.forEach((line, i) => {
+    let cls = i >= lines.length - 3 ? "new" : "";
+    // The engine names the source, so the log can colour a swing differently
+    // from a "Then, ..." rider, a skill or a trap.
+    if (line.includes(" attack damage")) cls += " hit-attack";
+    else if (line.includes(" effect damage")) cls += " hit-effect";
+    else if (line.includes(" attacks ")) cls += " declare";
+    else if (line.includes("faints")) cls += " faint";
+    box.appendChild(h("li", cls.trim(), line));
+  });
   box.scrollTop = box.scrollHeight;
 }
 
@@ -1253,6 +1309,7 @@ function render(snap) {
   renderSide(0, snap);
   renderTurnline(snap);
   renderBanner(snap);
+  renderEndTurn(snap);
   renderOptions(snap);
   renderLog(snap);
   // Swap in what this render just drew, so the next one can see what moved.

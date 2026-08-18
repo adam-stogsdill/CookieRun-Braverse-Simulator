@@ -720,3 +720,67 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
   0%, 100% { box-shadow: 0 0 0 0 rgba(240, 169, 43, .55); }
   50%      { box-shadow: 0 0 0 4px rgba(240, 169, 43, 0); }
 }
+
+/* end turn, where the eye already is */
+.endturn { display: flex; justify-content: center; }
+.endturn.hidden { display: none; }
+.endturn-btn {
+  padding: 7px 22px; border-radius: 999px; font-weight: 600;
+  background: #2a3142; border-color: var(--line); color: var(--ink);
+}
+.endturn-btn:hover { border-color: var(--accent); background: #333b50; color: #fff; }
+
+/* the log, by what actually happened */
+.log li.declare { color: #d8e2f2; }
+.log li.hit-attack { color: #ff9d97; }      /* a swing landing */
+.log li.hit-effect { color: #9fd0ff; }      /* a rider, a skill, a trap */
+.log li.faint { color: var(--bad); font-weight: 600; }
+.log li.new { color: var(--accent); }
+.log li.new.hit-attack { color: #ff8a82; }
+.log li.new.hit-effect { color: #8ac6ff; }
+
+/* ------------------------------------------------------ damage, by source */
+/* A swing shoves the card and throws a red number sideways; a rider, skill or
+   trap pulses it cool blue and the number rises. Different on purpose. */
+.cookiebox.zapped, .card.zapped { animation: zapped 460ms ease-out; }
+@keyframes zapped {
+  0%   { filter: none; }
+  20%  { filter: brightness(1.5) saturate(.4) drop-shadow(0 0 10px var(--accent2)); }
+  55%  { filter: brightness(1.15) drop-shadow(0 0 16px var(--accent2)); }
+  100% { filter: none; }
+}
+
+.hitnum {
+  position: absolute; z-index: 36; pointer-events: none;
+  font-size: 46px; font-weight: 900; letter-spacing: -1px; line-height: 1;
+  transform: translate(-50%, -50%);
+  /* A hard dark edge so the number reads over card art of any colour. The
+     stroke is painted behind the glyph where `paint-order` is honoured; the
+     ring of shadows is the fallback where it is not, and doubles as the drop
+     shadow either way. */
+  -webkit-text-stroke: 4px rgba(5, 8, 13, .95);
+  paint-order: stroke fill;
+  text-shadow:
+     2px 0 0 rgba(5,8,13,.95), -2px 0 0 rgba(5,8,13,.95),
+     0 2px 0 rgba(5,8,13,.95), 0 -2px 0 rgba(5,8,13,.95),
+     0 4px 12px rgba(0,0,0,.95), 0 0 26px rgba(0,0,0,.8);
+}
+.hitnum.attack {
+  color: #ff5f55;
+  animation: hitnum-attack 1000ms cubic-bezier(.2,.8,.3,1) forwards;
+}
+.hitnum.effect {
+  color: #6cbcff; font-size: 38px;
+  animation: hitnum-effect 1000ms cubic-bezier(.25,.7,.3,1) forwards;
+}
+@keyframes hitnum-attack {
+  0%   { transform: translate(-50%, -50%) scale(.5) rotate(-12deg); opacity: 0; }
+  18%  { transform: translate(-30%, -70%) scale(1.5) rotate(6deg); opacity: 1; }
+  40%  { transform: translate(-25%, -78%) scale(1.15) rotate(2deg); opacity: 1; }
+  100% { transform: translate(-10%, -120%) scale(1) rotate(0deg); opacity: 0; }
+}
+@keyframes hitnum-effect {
+  0%   { transform: translate(-50%, -40%) scale(.7); opacity: 0; }
+  25%  { transform: translate(-50%, -75%) scale(1.12); opacity: 1; }
+  100% { transform: translate(-50%, -150%) scale(.95); opacity: 0; }
+}

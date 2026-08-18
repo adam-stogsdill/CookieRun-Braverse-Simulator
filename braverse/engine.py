@@ -494,7 +494,8 @@ class Game:
         # attack", so record the outcome before the rider runs.
         before = len(defender.break_area)
         if damage > 0:
-            self.deal_damage(target, damage, source_player=player.index)
+            self.deal_damage(target, damage, source_player=player.index,
+                             kind="attack")
         if target in defender.battle and target.hp_cards:
             self._run_cookie_effect(target, Trigger.SURVIVED_DAMAGE, defender)
         self._attack_target = target
@@ -545,7 +546,8 @@ class Game:
         # A trap may have removed the target from the field.
         return target if target in defender.battle else None
 
-    def deal_damage(self, cookie: Cookie, amount: int, *, source_player: int) -> None:
+    def deal_damage(self, cookie: Cookie, amount: int, *, source_player: int,
+                    kind: str = "effect") -> None:
         """Reveal ``amount`` HP cards, one at a time, firing any FLIP as it turns.
 
         The count logged is what was actually taken off the pile, which is not
@@ -556,12 +558,12 @@ class Game:
         """
         name = cookie.name(self.db)
         if cookie.damage_immune:
-            self.state.record(f"{name} takes no damage (immune)")
+            self.state.record(f"{name} takes no {kind} damage (immune)")
             return
         from .effects import shields_from_opponent
         owner = self.state.players[cookie.owner]
         if source_player != cookie.owner and shields_from_opponent(self.db, owner):
-            self.state.record(f"{name} takes no damage (shielded)")
+            self.state.record(f"{name} takes no {kind} damage (shielded)")
             return
         dealt = 0
         for _ in range(amount):
@@ -580,18 +582,30 @@ class Game:
             # A flip effect can bounce or otherwise remove its own host;
             # the rest of the damage has nothing left to hit.
             if self.state.over or cookie not in owner.battle:
-                self._record_damage(name, dealt, amount, None)
+                self._record_damage(name, dealt, amount, None, kind, cookie)
                 return
-        self._record_damage(name, dealt, amount, cookie)
+        self._record_damage(name, dealt, amount, cookie, kind, cookie)
         if not cookie.hp_cards:
             self._faint(cookie)
 
     def _record_damage(self, name: str, dealt: int, asked: int,
-                       cookie: Cookie | None) -> None:
+                       cookie: Cookie | None, kind: str = "effect",
+                       target: Cookie | None = None) -> None:
+        """`kind` separates a swing from everything else — a "Then, ..." rider,
+        a skill, a trap — so the log says which one hit you."""
+        if target is not None and dealt:
+            self.state.events.append({
+                "kind": "damage",
+                "cookie": target.uid,
+                "owner": target.owner,
+                "amount": dealt,
+                "source": kind,
+                "left": target.remaining_hp if cookie is not None else 0,
+            })
         if dealt == 0:
-            self.state.record(f"{name} takes no damage")
+            self.state.record(f"{name} takes no {kind} damage")
             return
-        line = f"{name} takes {dealt} damage"
+        line = f"{name} takes {dealt} {kind} damage"
         if dealt < asked:
             line += f" (of {asked})"
         if cookie is not None:

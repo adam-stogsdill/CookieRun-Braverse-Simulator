@@ -31,6 +31,8 @@ There are many things that are still needing to be updated and reworked, but I i
 
 - Better animations and sounds. This bit is lacking and I know this needs to be improved to make the gameplay more enjoyable.
 
+- Further simplifying the installation and running of the game. I know that running python code is not most people's favorite way of launching a program so I would like to fix that asap.
+
 ### Contents
 
 - [Cookie Run: Braverse Simulator](#cookie-run-braverse-simulator)
@@ -43,6 +45,7 @@ There are many things that are still needing to be updated and reworked, but I i
   - [What works](#what-works)
   - [The visual player](#the-visual-player)
   - [The effect compiler](#the-effect-compiler)
+    - [The log says how much damage landed](#the-log-says-how-much-damage-landed)
     - [Removal that skips the break area](#removal-that-skips-the-break-area)
     - ["This Cookie" on a FLIP is the card, not its host](#this-cookie-on-a-flip-is-the-card-not-its-host)
     - [Who goes first](#who-goes-first)
@@ -290,6 +293,13 @@ come, and Support carries the one thing you can still act on: it pulses **ready*
 until this turn's support card is placed, then settles to **done**. That is the
 nudge — forgetting the free support card is the easiest mistake in the game.
 
+**Questions about cards are answered by pointing at cards.** When an effect
+asks which Cookie to damage or debuff, the candidates are outlined on the board
+and you click the one you mean — no trip to the list on the right. The same goes
+for a card in your support area. Cards you *cannot* reach on the table — in your
+hand, trash, break area or deck — come up as a strip instead, which is decided
+structurally rather than by prompt text.
+
 **Questions about your hand are answered with your hand.** Discarding, opening
 with a Cookie, fielding a replacement when one faints — all the same gesture:
 your hand comes up as a strip, you toggle up to the number asked for, and the
@@ -322,6 +332,10 @@ a drop resolves to (subject, target) and then looks for the one legal action
 that matches, so the drag layer cannot invent a move the engine did not offer.
 When an effect asks a question mid-resolution — "Damage which Cookie?" — the
 cards it is choosing between are outlined and clicking one answers it.
+
+**End turn** sits in the middle of the table, next to the turn banner, as well
+as at the end of the move list — it is the move you reach for most and the far
+corner of the screen is the worst place for it.
 
 Hover any card for its full text; click one to filter the move list down to the
 moves that use it; click the trash or break area to search through it, where the hover preview
@@ -482,16 +496,35 @@ these needed new engine state: per-turn faint and break-area counters, reset for
 *both* players each turn, since "during this turn" clauses routinely ask about
 the opponent's losses.
 
-### The log says how much damage landed
+### The log says how much damage landed, and what dealt it
 
-Every attack now names its number — `Sea Fairy Cookie attacks Leek Cookie for
-3` — and every damage step reports what was actually taken off the pile:
+Every attack names its number — `Sea Fairy Cookie attacks Leek Cookie for 3` —
+and every damage step reports what was actually taken off the pile, and whether
+it was the swing or something else:
 
 ```
-T5 P1 Leek Cookie attacks Sea Fairy Cookie for 3
-T5 P1 Sea Fairy Cookie takes 1 damage (of 3) — 0 HP left
-T5 P1 Sea Fairy Cookie faints
+T7 P0 Sea Fairy Cookie attacks Leek Cookie for 3
+T7 P0 Leek Cookie takes 3 attack damage — 2 HP left
+T7 P0 Leek Cookie takes 1 effect damage — 1 HP left
 ```
+
+A swing is `attack damage`; a `Then, ...` rider, a skill and a trap are all
+`effect damage`, since they all route through the same `Ctx.deal_damage`.
+
+The board says it too, without a word being read. A swing shoves the card,
+flashes it white and throws a heavy red number out sideways, over the thud of
+the impact; a rider, skill or trap pulses the card cool blue, floats a smaller
+number straight up and ticks rather than thuds. Both numbers are set large and
+carry a hard dark outline, so they stay legible over card art of any colour —
+`paint-order` puts the stroke behind the glyph where it is honoured, and a ring
+of text shadows does the same job where it is not. Being chipped twice by riders
+now looks nothing like being hit once, hard.
+
+That distinction cannot be recovered from a state diff — a swing and the rider
+that follows it take HP off the same Cookie in the same step — so the engine
+keeps a structured `state.events` alongside the prose log and the server drains
+it. Delivery is one-for-one and in order, which is worth a test: an animation
+that silently doubles or drops a hit would be worse than none.
 
 The `(of N)` is the interesting part: damage reveals HP cards one at a time, so
 the count that lands is not always the count that was asked for. Auditing 2446

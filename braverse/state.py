@@ -177,6 +177,12 @@ class GameState:
     win_reason: str = ""
     rng: random.Random = field(default_factory=random.Random)
     log: list[str] = field(default_factory=list)
+    # Structured counterpart to the prose log, for anything that needs to read
+    # back *what* happened rather than parse a sentence — the viewer animates
+    # from it, and it keeps knowledge like "this was attack damage, not a
+    # rider" out of string matching. Append-only; consumers track their own
+    # read position.
+    events: list = field(default_factory=list)
 
     def player(self, index: int) -> PlayerState:
         return self.players[index]

@@ -403,7 +403,7 @@ def test_damage_removes_exactly_the_cards_it_says_it_does():
     hp = cookie.remaining_hp
     game.deal_damage(cookie, 2, source_player=0)
     assert cookie.remaining_hp == hp - 2
-    assert game.state.log[-1].endswith(f"takes 2 damage — {hp - 2} HP left")
+    assert game.state.log[-1].endswith(f"takes 2 effect damage — {hp - 2} HP left")
 
     # More damage than HP: it takes what is there and says so. Fainting
     # trails its own lines (a replacement gets fielded), so search the log.
@@ -412,7 +412,8 @@ def test_damage_removes_exactly_the_cards_it_says_it_does():
     game.deal_damage(cookie, left + 3, source_player=0)
     assert cookie.remaining_hp == 0
     tail = game.state.log[mark:]
-    assert any(f"takes {left} damage (of {left + 3})" in line for line in tail), tail
+    assert any(f"takes {left} effect damage (of {left + 3})" in line
+               for line in tail), tail
 
 
 def test_damage_respects_immunity_and_the_hp_floor():
@@ -428,7 +429,7 @@ def test_damage_respects_immunity_and_the_hp_floor():
     before = cookie.remaining_hp
     game.deal_damage(cookie, 3, source_player=0)
     assert cookie.remaining_hp == before
-    assert "takes no damage (immune)" in game.state.log[-1]
+    assert "takes no effect damage (immune)" in game.state.log[-1]
 
     # "This Cookie's HP cannot reach 0" stops one card short of fainting.
     cookie.damage_immune = False
@@ -436,6 +437,24 @@ def test_damage_respects_immunity_and_the_hp_floor():
     game.deal_damage(cookie, 99, source_player=0)
     assert cookie.remaining_hp == 1, "the floor let it faint"
     assert cookie in player.battle
+
+
+def test_the_log_tells_a_swing_apart_from_a_rider_or_a_skill():
+    """"Then, ..." damage, a trap and an 【Activate】 all read as effect damage;
+    only the attack itself is attack damage. The log is the only place a player
+    can see which one just hit them."""
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    _, target = _lone_cookie(game)
+
+    game.deal_damage(target, 1, source_player=0, kind="attack")
+    assert "attack damage" in game.state.log[-1]
+    game.deal_damage(target, 1, source_player=0)
+    assert "effect damage" in game.state.log[-1], "effect damage is the default"
 
 
 def test_an_attack_applies_its_printed_damage_after_buffs_and_reductions():

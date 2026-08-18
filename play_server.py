@@ -43,10 +43,11 @@ IMAGES = ROOT / "card_images"
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
 EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
-                 "draw": 0.22}
+                 "draw": 0.22, "damage": 0.25}
 # What is still on screen after the last event of its kind *starts*: a revealed
 # card is held face up to be read, and a broken Cookie falls apart.
-TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5, "draw": 0.7}
+TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5, "draw": 0.7,
+                "damage": 0.9}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -293,17 +294,23 @@ def centre_style(options: Sequence) -> Optional[str]:
 
 
 def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
-    """Should this question be answered by pointing at your own hand?
+    """Should this question be answered by pointing at the cards themselves?
 
-    Decided structurally rather than by prompt string: if every option is a card
-    that is *in your hand*, then your hand is the natural control — the same
-    strip whether you are being asked to discard, to open with a Cookie, or to
-    field a replacement. Only the verb on the confirm button changes.
+    Decided structurally rather than by prompt string. Cookies in a battle area
+    and cards in a support area are already on the table, so those are answered
+    by clicking them where they sit. A card in your hand, trash, break area or
+    deck is not something you can reach on the board — the hand is a fan and the
+    rest are face-down piles — so those come up as a strip to pick from. Only
+    the verb on the confirm button reads from the prompt.
     """
     if not options or not all(isinstance(o, CardInstance) for o in options):
         return None
-    hand = {c.uid for c in player.hand}
-    if not all(o.uid in hand for o in options):
+    on_the_table = {c.uid for c in player.support} | {c.uid for c in player.stage}
+    if any(o.uid in on_the_table for o in options):
+        return None
+    reachable = ({c.uid for c in player.hand} | {c.uid for c in player.trash}
+                 | {c.uid for c in player.break_area} | {c.uid for c in player.deck})
+    if not all(o.uid in reachable for o in options):
         return None
     lowered = prompt.lower()
     if "discard" in lowered:
@@ -415,6 +422,7 @@ class Match:
         self._queued: list = []   # events taken from the action, not a diff
         self._scene_pause = 0.0   # how long the browser needs for the last batch
         self._log_mark = 0        # log lines already turned into events
+        self._event_mark = 0      # structured engine records already consumed
 
         decks = available_decks()
         self.deck_lists = [list(decks[name]) for name in config.decks]
@@ -526,6 +534,27 @@ class Match:
         })
 
     _TRAP_LINE = None
+
+    def _damage_events(self) -> list:
+        """Damage, straight from the engine's structured record.
+
+        Not a diff: a swing and a "Then, ..." rider both take HP off the same
+        Cookie in the same step, and only the engine knows which was which.
+        """
+        events = []
+        for record in self.game.state.events[self._event_mark:]:
+            if record.get("kind") != "damage":
+                continue
+            events.append({
+                "type": "damage",
+                "cookie": record["cookie"],
+                "owner": record["owner"],
+                "amount": record["amount"],
+                "source": record["source"],
+                "left": record["left"],
+            })
+        self._event_mark = len(self.game.state.events)
+        return events
 
     def _trap_events(self, snap: dict) -> list:
         """Traps sprung inside the defender's response window.
@@ -646,6 +675,7 @@ class Match:
             # whatever damage turned face up, then anything that fainted.
             snap["events"] = (self._queued
                               + self._trap_events(snap)
+                              + self._damage_events()
                               + self._draw_events(self._prev, snap)
                               + self._reveal_events(self._prev, snap)
                               + self._faint_events(self._prev, snap))

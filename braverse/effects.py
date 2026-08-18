@@ -372,7 +372,10 @@ class Ctx:
             from .enums import Keyword
             if Keyword.ARENA in self.source_cookie.defn(self.db).keywords:
                 self.me.arena_effect_damage_this_turn = True
-        self.game.deal_damage(cookie, amount, source_player=self.me.index)
+        # Everything routed through an effect — a skill, a trap, the "Then,"
+        # rider on an attack — is effect damage, not the swing itself.
+        self.game.deal_damage(cookie, amount, source_player=self.me.index,
+                              kind="effect")
 
     def gain_hp(self, cookie: Cookie, amount: int) -> None:
         owner = self.state.players[cookie.owner]

@@ -452,3 +452,34 @@ def test_the_support_flag_is_what_tells_you_a_support_is_still_owed():
     game.end_turn()
     assert game.state.turn_player == 0
     assert player_json(db, me, game.state)["supportedThisTurn"] is False
+
+
+def test_damage_reaches_the_browser_typed_and_exactly_once():
+    """The two kinds are animated differently, so the browser has to know which
+    is which — and a diff cannot tell them apart, because a swing and the
+    "Then, ..." rider that follows it take HP off the same Cookie in the same
+    step. The engine records them structurally and the server drains that
+    record, so each hit is delivered once, in order."""
+    match = bot_match()
+    batches = {}
+    original = match.publish
+
+    def spy(pending=None):
+        original(pending)
+        hits = [(e["source"], e["amount"], e["cookie"])
+                for e in match.snapshot.get("events", []) if e["type"] == "damage"]
+        if hits:
+            batches.setdefault(match.snapshot["eventId"], hits)
+
+    match.publish = spy
+    match.start()
+    assert wait_for(lambda: match.view().get("over"), timeout=30), "match did not finish"
+    match.stop()
+
+    delivered = [hit for batch in batches.values() for hit in batch]
+    recorded = [(e["source"], e["amount"], e["cookie"])
+                for e in match.game.state.events if e["kind"] == "damage"]
+    assert delivered == recorded, "damage was dropped, doubled or reordered"
+    assert recorded, "no damage in a whole match?"
+    assert {source for source, _, _ in recorded} <= {"attack", "effect"}
+    assert any(source == "attack" for source, _, _ in recorded)
