@@ -11,8 +11,8 @@ WIND_ARCHER = "Wind Archer Cookie"
 @effect("ST8-002", Trigger.FLIP)
 def muscle_flip(ctx: Ctx) -> None:
     """Return this Cookie to your hand."""
-    if ctx.source_cookie:
-        ctx.return_to_hand(ctx.source_cookie)
+    # "this Cookie" is this card, not the Cookie it was HP for.
+    ctx.return_self_to_hand()
 
 
 # --- ST8-004 Red Panna Cotta Cookie ----------------------------------------

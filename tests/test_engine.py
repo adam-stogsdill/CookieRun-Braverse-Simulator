@@ -295,44 +295,6 @@ def test_heuristic_beats_random(db):
     assert wins / games > 0.65, f"heuristic won only {wins}/{games}"
 
 
-def test_a_flip_that_bounces_its_host_denies_the_break_area():
-    """Muscle Cookie / Blue Whale Cookie: "Return this Cookie to your hand."
-
-    Revealed as the last HP card, the bounce beats the faint, so the opponent
-    banks no Level. The other reading is a config flag, because the guide does
-    not settle it and every measured result in the README assumes this one.
-    """
-    import dataclasses
-
-    from braverse import config as cfg
-
-    db = default_db()
-
-    def bounce_at_zero_hp(rules):
-        game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
-                    [SeatedAgent(HeuristicAgent(db=db), 0),
-                     SeatedAgent(HeuristicAgent(db=db), 1)],
-                    db=db, rules=rules, seed=1)
-        game.setup()
-        cookie = game.state.players[0].battle[0]
-        cookie.hp_cards.clear()               # out of HP, mid-damage
-        game.return_cookie_to_hand(cookie)
-        # Level is banked in the *fainting* player's own break area; 10 there
-        # loses them the game. Assert on that rather than on the hand, because
-        # a bounced Cookie is usually replayed immediately by the same
-        # controller once its battle area is checked.
-        return len(game.state.players[0].break_area), game.state.log
-
-    banked, log = bounce_at_zero_hp(cfg.DEFAULT)
-    assert banked == 0, "the bounce should have saved it from the break area"
-    assert any("returns to hand" in line for line in log)
-
-    strict = dataclasses.replace(cfg.DEFAULT, flip_bounce_beats_faint=False)
-    banked, log = bounce_at_zero_hp(strict)
-    assert banked == 1, "at 0 HP it should have fainted instead"
-    assert any("faints" in line for line in log)
-
-
 def test_a_multi_card_discard_is_one_question_for_a_controller_that_wants_it():
     """A human picks the whole discard at once; scripted agents still loop.
 
@@ -498,3 +460,59 @@ def test_an_attack_applies_its_printed_damage_after_buffs_and_reductions():
     hp = target.remaining_hp
     game.deal_damage(target, landed, source_player=0)
     assert target.remaining_hp == max(0, hp - landed)
+
+
+def test_a_flip_returns_itself_to_hand_not_the_cookie_it_was_hp_for():
+    """"Return this Cookie to your hand" means the revealed card.
+
+    The pool is explicit about this: all 92 FLIPs that mean their host spell it
+    out as "the Cookie with this card attached for HP". Only these five say
+    "this Cookie", so it is the card itself — it comes back out of the trash
+    instead of staying there, and the Cookie it was serving keeps taking the
+    rest of the damage.
+    """
+    db = default_db()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=3)
+    game.setup()
+
+    player = game.state.players[0]
+    host = player.battle[0]
+    # Put a Muscle Cookie ("Return this Cookie to your hand.") on top of the pile.
+    muscle = next(c for c in player.deck if c.card_id == "ST8-002")
+    player.deck.remove(muscle)
+    host.hp_cards.append(muscle)
+
+    hp_before = host.remaining_hp
+    hand_before = len(player.hand)
+    game.deal_damage(host, 1, source_player=1)
+
+    assert muscle in player.hand, "the revealed card did not come back to hand"
+    assert muscle not in player.trash
+    assert len(player.hand) == hand_before + 1
+    assert host in player.battle, "the host was bounced; it should have stayed"
+    assert host.remaining_hp == hp_before - 1, "the host still loses the HP card"
+
+
+def test_a_flip_that_names_its_host_still_means_the_host():
+    """The long phrasing is the one that reaches the Cookie holding the card."""
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=3)
+    game.setup()
+
+    player = game.state.players[0]
+    host = player.battle[0]
+    # Parfait Cookie: "<Discard 1 card.> The Cookie with this card attached for
+    # HP gains +1 HP."
+    parfait = next(c for c in player.deck if c.card_id == "ST9-010")
+    player.deck.remove(parfait)
+    host.hp_cards.append(parfait)
+
+    hp_before = host.remaining_hp
+    game.deal_damage(host, 1, source_player=1)
+    # One card off for the damage, one back on from the flip: net unchanged.
+    assert host.remaining_hp == hp_before, "the host was not the one healed"
+    assert parfait in player.trash, "a healing flip stays in the trash"

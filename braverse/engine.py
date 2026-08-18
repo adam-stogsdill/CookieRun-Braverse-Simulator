@@ -610,11 +610,6 @@ class Game:
         owner = self.state.players[cookie.owner]
         if cookie not in owner.battle:
             return
-        if not self.rules.flip_bounce_beats_faint and not cookie.hp_cards:
-            # Out of HP already: under this reading the Cookie faints before an
-            # effect can rescue it, so its Level still reaches the break area.
-            self._faint(cookie)
-            return
         owner.battle.remove(cookie)
         owner.hand.append(cookie.card)
         owner.trash.extend(cookie.hp_cards)

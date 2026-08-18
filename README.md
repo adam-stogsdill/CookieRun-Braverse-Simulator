@@ -44,7 +44,7 @@ There are many things that are still needing to be updated and reworked, but I i
   - [The visual player](#the-visual-player)
   - [The effect compiler](#the-effect-compiler)
     - [Removal that skips the break area](#removal-that-skips-the-break-area)
-    - [A FLIP can save its own host from the break area](#a-flip-can-save-its-own-host-from-the-break-area)
+    - ["This Cookie" on a FLIP is the card, not its host](#this-cookie-on-a-flip-is-the-card-not-its-host)
     - [Who goes first](#who-goes-first)
     - [Costs in angle brackets are a decision](#costs-in-angle-brackets-are-a-decision)
   - [Rules fidelity](#rules-fidelity)
@@ -393,8 +393,7 @@ again while a revealed card is still being read — so an attack that turns thre
 HP cards face up and breaks a Cookie holds the board for about six seconds.
 
 **Damage is animated.** An HP card turning face up is the swing moment of a
-battle — a FLIP fires the instant it is revealed, and can bounce its own host
-mid-attack — so each revealed card turns face up over the Cookie it came off
+battle — a FLIP fires the instant it is revealed — so each revealed card turns face up over the Cookie it came off
 rather than a number quietly ticking down. It is held enlarged for about a
 second and a half, which is the difference between seeing that something
 happened and reading *what*, and the bot seats wait an extra beat after a reveal
@@ -498,8 +497,8 @@ The `(of N)` is the interesting part: damage reveals HP cards one at a time, so
 the count that lands is not always the count that was asked for. Auditing 2446
 damage steps across 120 games turned up four reasons it can differ, all correct
 and all now visible in the log — the pile ran dry, "this Cookie's HP cannot
-reach 0" stopped it one short, a FLIP bounced its own host out of the battle
-area mid-step, or the game ended. A fifth case removes *more* cards than the
+reach 0" stopped it one short, an effect took the target off the board
+mid-step, or the game ended. A fifth case removes *more* cards than the
 Cookie started with: a FLIP that heals its host (`<Discard 1 card.> ... gains
 +1 HP`) hands HP back while the loop is still running, so a 3-damage attack on
 a 2 HP Cookie legitimately turns three cards. No case applied the wrong number.
@@ -517,22 +516,32 @@ Three other mechanics came with it: a `TRASHED` trigger (distinct from `FAINT`),
 Phase", and an `ATTACK_START` hook so static 【Your Turn】 buffs read the board
 as the attack is declared rather than being stored.
 
-### A FLIP can save its own host from the break area
+### "This Cookie" on a FLIP is the card, not its host
 
-"Return this Cookie to your hand" (Muscle Cookie ST8-002, Blue Whale Cookie
-ST9-003) sits in an HP pile and fires the instant damage reveals it — including
-the damage that empties the pile. The Cookie goes back to its owner's hand
-rather than to the break area, so the attacker banks no Level and the rest of
-the damage has nothing left to hit. That is the printed card working as
-written, and it is what the deck search found and maxed out.
+`Return this Cookie to your hand` (Muscle Cookie ST8-002, Blue Whale Cookie
+ST9-003 and three others) sits in an HP pile and fires when damage reveals it.
+The engine used to read "this Cookie" as the Cookie the card was serving as HP
+for, so the host bounced off the board — cancelling the rest of the damage and
+denying the attacker the Level it would have banked.
 
-The one part the guide does not settle is what happens when the revealed card
-is the *last* HP card: the Cookie is at 0 HP, so does the flip rescue it or does
-it faint first? `flip_bounce_beats_faint` in `config.py` picks a reading. It
-defaults to the flip winning, because a FLIP fires the moment it is revealed and
-because every measured result here was produced under that reading; set it False
-and a Cookie already at 0 HP faints instead. Over 60 ST9-vs-ST8 games the switch
-turns 46 bounces into faints and does not move the win rate either way.
+That was wrong, and the card pool says so plainly. **Every one of the 92 FLIPs
+that means its host spells it out**: "the Cookie with this card attached for HP
+gains +1 HP". Only five say "this Cookie", and if that also meant the host the
+long phrase would never have been needed. So it is the revealed card that
+returns to hand — out of the trash it was just put in — while the Cookie it was
+serving keeps taking the rest of the damage.
+
+The fix lands in both places a card can be implemented: `Ctx.return_self_to_hand`
+for the hand-written two, and `REF_SELF` inside a FLIP for the three the
+compiler handles. `REF_HOST` still means the host, which is what the long
+phrasing compiles to.
+
+Two things fell out of it. No FLIP can move its host off the board any more, so
+the `flip_bounce_beats_faint` rules flag — added to arbitrate whether such a
+bounce beat a faint at 0 HP — was guarding a case that can no longer happen, and
+is gone. And a pinned self-play number moved (19/30 to 20/30 for one fitness
+call); that is a rules change rather than drift, so it was re-pinned
+deliberately.
 
 ### Who goes first
 
@@ -780,12 +789,19 @@ supports this: at equal budget on the same small pool, the RL pilot produced a
 57.4% deck against the heuristic pilot's 56.4%. Give co-evolution a real budget
 before trusting it.
 
-What the deck search found is more interesting than the margin: it maxes FLIP cards at the
-legal 16 and runs 8 copies of "Return this Cookie to your hand" flips (Muscle
-Cookie, Blue Whale Cookie). Those sit in the HP pile and, when revealed by
-damage, bounce their own host mid-attack — cancelling the rest of the damage and
-denying the opponent the Level they would have banked in the break area. It also
-plays 4-of both HP6 LV3 bodies and ten traps. Nobody told it any of that.
+What the deck search found is more interesting than the margin: it maxes FLIP
+cards at the legal 16 and runs 8 copies of "Return this Cookie to your hand"
+flips (Muscle Cookie, Blue Whale Cookie), alongside 4-of both HP6 LV3 bodies and
+ten traps. Nobody told it any of that.
+
+**Caveat: those runs predate a rules fix.** At the time, a revealed
+"Return this Cookie to your hand" bounced its *host* off the board, cancelling
+the rest of an attack and denying the opponent the Level — which is exactly what
+made stacking them worth 16 slots. That reading was wrong (see ["This Cookie" on
+a FLIP is the card, not its host](#this-cookie-on-a-flip-is-the-card-not-its-host)),
+and those flips are now ordinary card advantage. The evolved lists and the win
+rates above were measured under the old behaviour and have not been re-run; the
+method stands, the specific numbers no longer describe this engine.
 
 ## Extending it
 

@@ -414,6 +414,12 @@ class ReturnToHand(Op):
     ref: str = REF_IT
 
     def run(self, ctx, env) -> bool:
+        # Inside a FLIP, "this Cookie" is the card that was just revealed — the
+        # host is only ever meant when the text spells it out, and that compiles
+        # to REF_HOST.
+        if self.ref == REF_SELF and getattr(ctx, "trigger", "") == "flip":
+            ctx.return_self_to_hand()
+            return True
         for cookie in _resolve(self.ref, ctx, env):
             ctx.return_to_hand(cookie)
         return True

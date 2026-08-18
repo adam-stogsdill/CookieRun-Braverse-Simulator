@@ -14,8 +14,8 @@ SEA_FAIRY = "Sea Fairy Cookie"
 @effect("ST9-003", Trigger.FLIP)
 def blue_whale_flip(ctx: Ctx) -> None:
     """Return this Cookie to your hand."""
-    if ctx.source_cookie:
-        ctx.return_to_hand(ctx.source_cookie)
+    # "this Cookie" is this card, not the Cookie it was HP for.
+    ctx.return_self_to_hand()
 
 
 # --- ST9-004 Pond Dino Cookie (FLIP) ---------------------------------------

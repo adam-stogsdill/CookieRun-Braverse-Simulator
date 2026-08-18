@@ -393,4 +393,8 @@ def test_single_pilot_path_is_unchanged_by_the_multi_pilot_refactor(db):
     evolver = DeckEvolver(pool, [STARTER_DECKS["st8_wind_archer"]],
                           DeckGenConfig(games_per_eval=30, seed=1), db=db)
     score = evolver.fitness(STARTER_DECKS["st9_sea_fairy"], seed_block=0)
-    assert score == pytest.approx(19 / 30)
+    # Moved 19/30 -> 20/30 when "Return this Cookie to your hand" was corrected
+    # to return the revealed FLIP card rather than the Cookie it was HP for.
+    # That is a rules fix, not drift: re-pin deliberately, never to make a red
+    # test green.
+    assert score == pytest.approx(20 / 30)

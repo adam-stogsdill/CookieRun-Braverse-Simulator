@@ -399,6 +399,23 @@ class Ctx:
         owner = self.state.players[cookie.owner]
         return not is_move_protected(self.db, owner, cookie)
 
+    def return_self_to_hand(self) -> bool:
+        """A FLIP returning *itself* to hand.
+
+        "Return this Cookie to your hand" on a FLIP means the card that was
+        just revealed, not the Cookie it was serving as HP for: whenever the
+        pool means the host it says so at length — "the Cookie with this card
+        attached for HP" — on all 92 cards that do. Damage has already put the
+        revealed card in the trash by the time this runs, so it comes back out.
+        """
+        card = self.source_card
+        if card is None or card not in self.me.trash:
+            return False
+        self.me.trash.remove(card)
+        self.me.hand.append(card)
+        self.state.record(f"{self.db[card.card_id].name} returns to hand")
+        return True
+
     def return_to_hand(self, cookie: Cookie) -> None:
         if not self._may_move(cookie):
             return

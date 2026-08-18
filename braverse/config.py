@@ -63,19 +63,6 @@ class RulesConfig:
     # 【Once Per Turn】 skills already are, and without a cap the legal-action
     # list does not terminate for skills the engine cannot prove paid a cost.
     activate_once_per_turn_per_source: bool = True
-    # A FLIP that moves its own host ("Return this Cookie to your hand", Muscle
-    # Cookie ST8-002, Blue Whale Cookie ST9-003) can be revealed by the very
-    # damage that empties the HP pile. The guide does not say whether the flip
-    # resolves first or the Cookie faints on reaching 0 HP first, and it decides
-    # whether the opponent banks that Cookie's Level in the break area.
-    #
-    # Kept as "the flip wins", because a FLIP fires the instant it is revealed
-    # and the Cookie is gone before anything checks its HP. That is also what
-    # the deck search in `deckgen.py` found and exploited, so the measured
-    # results in the README are all under this reading. Set False for the other
-    # one: a Cookie already at 0 HP faints, and only a bounce with HP still on
-    # the pile saves it.
-    flip_bounce_beats_faint: bool = True
     # ----------------------------------------------------------------------
 
 
