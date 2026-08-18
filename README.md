@@ -87,7 +87,7 @@ evolve_deck.py        evolve a decklist against a gauntlet
 coverage_report.py    which cards the engine can play, and what to build next
 coevolve.py           alternate deck evolution and agent training
 compare_decks.py      round-robin decks under a chosen pilot
-tests/                157 tests
+tests/                200 tests
 requirements-play.txt just play the game (numpy only)
 requirements.txt      the above plus RL, tests and tooling
 ```
@@ -456,6 +456,46 @@ before the browser polled it; and the obvious way to write the flip —
 `backface-visibility` on a `rotateY` — is not honoured everywhere, so the card
 stayed back-side up through the whole animation. It is a 2D squash-and-swap
 instead.
+
+### The deck builder tab
+
+The second tab in the header is a deck builder, so a deck can be put together
+in the same window it will be played in.
+
+The left half is the card pool — every card the engine will accept in a deck,
+which is the whole library minus banned cards and NPCs — searchable by name, id
+or rules text and filterable by type, colour and set. The **playable** filter,
+on by default, narrows it to the cards whose printed effect the engine actually
+implements; turn it off and the rest of the pool is there too, playing as
+vanilla bodies. Searching happens server-side over a lowercased index built once
+(`pool_index`), because re-scanning 1500 cards' rules text on every keystroke is
+the sort of thing that makes a search box feel broken; results come back a page
+at a time.
+
+Click a card to add it, click a card in the list to take one out. The pane on
+the right keeps the running count against the 60-card deck, the copy count for
+each card number, the cookie and FLIP totals, and a line saying whether the deck
+is legal — **and that line is the server's answer, not the page's**. It comes
+from `POST /api/deck/validate`, which runs the same `braverse.validate` a match
+runs at setup, so the builder cannot bless a deck the game would then refuse.
+The page enforces the two limits that would otherwise be annoying to hit by
+accident — 60 cards, and four copies of a card *number* (alt arts of one number
+share the cap, which is why every card carries its `baseId`) — but it is not the
+authority on either.
+
+Decks are saved into `saved_decks.json` beside the script, or beside the binary
+for a frozen build, dropping back to `~/.braverse/` if that directory is
+read-only. It is a plain `{name: [card ids]}` file, so a deck can be edited or
+copied by hand, and it is written through a temporary file so an interrupted
+save cannot leave half a decklist behind. Saved decks join the starter lists and
+anything `evolve_deck.py` wrote in `available_decks()`, so a deck is in the New
+match dropdown the moment it is saved — no restart. A saved deck wins a name
+clash with a starter list, on the grounds that you made that one on purpose.
+
+An illegal deck still saves. Half-built is the normal state of a deck you mean
+to come back to; it simply cannot be picked for a match until it is 60 cards.
+Loading a starter or generated list opens it as `<name> copy`, so editing one to
+see how it feels cannot silently shadow the deck it came from.
 
 **Why it is a server and not a script.** The engine calls its controllers
 *re-entrantly*: the defender's trap window opens inside `game.step`, and so does

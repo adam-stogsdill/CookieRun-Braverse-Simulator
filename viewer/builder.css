@@ -1,0 +1,144 @@
+/* Deck builder: the second tab.
+ *
+ * It sits in the same body grid as the table, spanning both columns of the
+ * second row, and is swapped in by `body.view-build`. Colours and controls all
+ * come from style.css — this file only lays the builder out. */
+
+/* --------------------------------------------------------------- the tabs */
+.tabs { display: flex; gap: 4px; }
+.tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--dim);
+  padding: 4px 12px;
+}
+.tab:hover { color: var(--ink); }
+.tab.on {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* Which view the tabs show. The play controls are meaningless while building,
+   and the builder is not in the flow until its tab is picked. */
+.builder { display: none; }
+body.view-build #table,
+body.view-build .panel,
+body.view-build .controls,
+body.view-build .turnline { display: none; }
+body.view-build .builder {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------- the pool */
+.pool {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 12px;
+  gap: 8px;
+}
+.pool-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pool-bar input[type="search"] { flex: 1 1 200px; min-width: 140px; }
+.pool-bar select { max-width: 130px; }
+.pool-count { font-size: 11px; color: var(--dim); }
+
+/* style.css already dresses selects and search boxes; this covers the plain
+   text input for the deck name and keeps focus visible in the builder. */
+.builder input[type="text"] {
+  font: inherit; color: var(--ink); background: #262b39;
+  border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px;
+}
+.builder input:focus, .builder select:focus { outline: none; border-color: var(--accent2); }
+
+.pool-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+  gap: 10px;
+  align-content: start;
+  padding-right: 4px;
+}
+.pool-grid .entry { position: relative; cursor: pointer; }
+.pool-grid .card { width: 100%; height: auto; aspect-ratio: 5 / 7; }
+.pool-grid .entry:hover .card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pool-grid .cname {
+  font-size: 10px; color: var(--dim); margin-top: 2px;
+  text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* How many copies of this card number are already in the deck. */
+.pool-grid .have {
+  position: absolute; top: 4px; right: 4px;
+  background: rgba(10, 12, 18, .85);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px; font-weight: 700;
+}
+.pool-grid .entry.full .card { opacity: .45; }
+.pool-grid .entry.full { cursor: not-allowed; }
+
+.pager { display: flex; align-items: center; gap: 10px; color: var(--dim); font-size: 11px; }
+
+/* ------------------------------------------------------------ the decklist */
+.deckpane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+.deck-bar { display: flex; gap: 6px; align-items: center; }
+.deck-bar input, .deck-bar select { flex: 1; min-width: 0; }
+
+.deck-meter {
+  height: 6px;
+  border-radius: 999px;
+  background: #12151d;
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.deck-meter > div {
+  height: 100%;
+  width: 0;
+  background: var(--accent2);
+  transition: width .18s ease;
+}
+.deck-meter > div.done { background: var(--good); }
+.deck-meter > div.over { background: var(--bad); }
+
+.deck-status { font-size: 11px; color: var(--dim); }
+.deck-status b { color: var(--ink); }
+.deck-status.bad { color: var(--bad); }
+.deck-status.good { color: var(--good); }
+.deck-mix { font-size: 11px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 8px; }
+
+.decklist { flex: 1; min-height: 0; overflow-y: auto; }
+.decklist .group {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .6px;
+  color: var(--dim); margin: 8px 0 3px;
+}
+.decklist .row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 2px 0;
+}
+.decklist .row .card { width: 26px; height: 36px; cursor: pointer; flex: 0 0 auto; }
+.decklist .row .card img { border-radius: 3px; }
+.decklist .rname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.decklist .rmeta { color: var(--dim); font-size: 10px; flex: 0 0 auto; }
+.decklist .n { width: 22px; text-align: center; font-weight: 700; }
+.decklist .row button { padding: 0 6px; line-height: 18px; }
+
+.deck-hint { font-size: 10px; color: var(--dim); }

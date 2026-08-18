@@ -38,6 +38,78 @@ STARTER_DECKS = {
     "st8_wind_archer": ST8_WIND_ARCHER,
 }
 
+# Every ST set is a monocolour preconstructed product, but only ST8 and ST9 are
+# transcribed above. The rest are derived on demand by build_starter_deck.
+STARTER_SET_IDS = tuple(f"ST{i}" for i in range(1, 11))
+
+
+def build_starter_deck(db: CardDB, set_id: str,
+                       rules: cfg.RulesConfig = cfg.DEFAULT) -> list[str]:
+    """Derive a legal 60-card list using only cards from one starter set.
+
+    The shape follows the transcribed ST8/ST9 lists: four copies each of a
+    5/4/3 LV1/LV2/LV3 Cookie line, then 3+3 items, 2+2 traps and 2 stages.
+    Sets are not uniformly shaped — ST2, ST3 and ST10 are short a Cookie at
+    some level — so anything still missing at the end is topped up from the
+    rest of the set, Cookies first.
+    """
+    cards = sorted((c for c in db.cards.values()
+                    if c.set_id == set_id and not c.is_ban),
+                   key=lambda c: c.number)
+    if not cards:
+        raise KeyError(f"no cards for set {set_id!r}")
+
+    cookies = [c for c in cards if c.is_cookie]
+    items = [c for c in cards if c.type.value == "ITEM"]
+    traps = [c for c in cards if c.type.value == "TRAP"]
+    stages = [c for c in cards if c.type.value == "STAGE"]
+
+    deck: list[str] = []
+    copies: Counter = Counter()
+    flips = 0
+
+    def add(card, n: int) -> None:
+        nonlocal flips
+        room = rules.max_copies_by_number - copies[card.base_id]
+        if card.is_flip:
+            room = min(room, rules.max_flip_cards - flips)
+        n = max(0, min(n, room, rules.deck_size - len(deck)))
+        deck.extend([card.id] * n)
+        copies[card.base_id] += n
+        flips += n * card.is_flip
+
+    for level, want in ((1, 5), (2, 4), (3, 3)):
+        tier = [c for c in cookies if c.level == level]
+        # Prefer non-FLIP Cookies once four copies would breach the FLIP cap.
+        tier.sort(key=lambda c: (c.is_flip and flips + 4 > rules.max_flip_cards,
+                                 c.number))
+        for card in tier[:want]:
+            add(card, 4)
+    for card in items[:2]:
+        add(card, 3)
+    for card in traps[:2]:
+        add(card, 2)
+    for card in stages[:1]:
+        add(card, 2)
+
+    for card in cookies + items + traps + stages:
+        if len(deck) >= rules.deck_size:
+            break
+        add(card, rules.deck_size - len(deck))
+
+    report = validate(deck, db, rules)
+    if not report.ok:
+        raise ValueError(f"{set_id}: {report.problems}")
+    return deck
+
+
+def starter_deck(db: CardDB, name: str,
+                 rules: cfg.RulesConfig = cfg.DEFAULT) -> list[str]:
+    """A starter list by name: a transcribed one, or a set id like ``ST4``."""
+    if name in STARTER_DECKS:
+        return list(STARTER_DECKS[name])
+    return build_starter_deck(db, name.upper(), rules)
+
 
 @dataclass
 class DeckReport:

@@ -63,6 +63,16 @@ class DeckGenConfig:
     # search overfits the seeds instead of the game: a deck evolved on fixed
     # seeds scored 78% during the run and 46-52% on unseen shuffles.
     reseed_each_generation: bool = True
+    # Colours a candidate may draw on. A deck spanning a wide multi-set pool
+    # uniformly cannot pay its own costs, so the search wastes its whole budget
+    # rediscovering "pick a colour". 0 disables the constraint (uniform sampling
+    # over the pool), which is the right setting for a single-colour pool.
+    #
+    # Measured on the ST1-ST10 pool against the ten starter decks, mean fitness
+    # of six freshly seeded random decks: 7.6% at 0, 63.2% at 1, 31.2% at 2.
+    # Mono is where the search should start; crossover between two differently
+    # coloured parents still reaches two-colour lists from there.
+    color_identity: int = 1
     rules: cfg.RulesConfig = field(default_factory=lambda: cfg.DEFAULT)
 
 
@@ -85,6 +95,15 @@ class DeckEvolver:
         if not self.cookies:
             raise ValueError("card pool contains no Cookie cards")
         self._cache: dict[tuple, float] = {}
+        # Colours that can actually carry a deck on their own: a handful of
+        # BLACK/PURE cards exist pool-wide but never enough Cookies to open on.
+        self._by_color: dict = {}
+        for card in self.pool:
+            self._by_color.setdefault(card.color, []).append(card)
+        self._colors = [c for c, cards in self._by_color.items()
+                        if sum(1 for x in cards if x.is_cookie) >= 8]
+        if not self._colors:
+            self._colors = list(self._by_color)
 
     def _default_agent(self, seat: int, seed: int):
         return SeatedAgent(HeuristicAgent(db=self.db, seed=seed), seat)
@@ -111,11 +130,39 @@ class DeckEvolver:
 
         return factory
 
+    # -- colour identity --------------------------------------------------
+    def _subpool(self, colors) -> tuple[list, list]:
+        """The pool restricted to ``colors``, as (cards, cookies)."""
+        if not colors:
+            return self.pool, self.cookies
+        cards = [c for color in colors for c in self._by_color.get(color, ())]
+        cookies = [c for c in cards if c.is_cookie]
+        # Never hand back a subpool that cannot fill a legal deck.
+        if len(cookies) < 8:
+            return self.pool, self.cookies
+        return cards, cookies
+
+    def _pick_colors(self) -> list:
+        n = min(self.cfg.color_identity, len(self._colors))
+        return self.rng.sample(self._colors, n) if n else []
+
+    def _deck_colors(self, deck: Sequence[str]) -> list:
+        """The colours a deck already commits to, most-played first."""
+        if not self.cfg.color_identity:
+            return []
+        counts = Counter(self.db[c].color for c in deck if c in self.db)
+        return [color for color, _ in counts.most_common(self.cfg.color_identity)]
+
     # -- legality --------------------------------------------------------
-    def repair(self, deck: list[str]) -> list[str]:
-        """Force a candidate back inside the deck-construction rules."""
+    def repair(self, deck: list[str], colors=None) -> list[str]:
+        """Force a candidate back inside the deck-construction rules.
+
+        Topping up is drawn from ``colors`` when given, so a repair cannot
+        quietly splash a deck back out of its own colour identity.
+        """
         rules = self.cfg.rules
         db = self.db
+        fill, fill_cookies = self._subpool(colors)
         out: list[str] = []
         by_number: Counter[str] = Counter()
         flips = 0
@@ -138,7 +185,7 @@ class DeckEvolver:
         guard = 0
         while len(out) < rules.deck_size and guard < 5000:
             guard += 1
-            card = self.rng.choice(self.pool)
+            card = self.rng.choice(fill)
             if by_number[card.base_id] >= rules.max_copies_by_number:
                 continue
             if card.is_flip and flips >= rules.max_flip_cards:
@@ -148,29 +195,41 @@ class DeckEvolver:
             flips += card.is_flip
 
         if rules.require_cookie_card and not any(db[c].is_cookie for c in out):
-            out[-1] = self.rng.choice(self.cookies).id
+            out[-1] = self.rng.choice(fill_cookies).id
         return out
 
     def random_deck(self) -> list[str]:
+        # Commit to a colour identity up front. Sampled uniformly over a wide
+        # multi-set pool, a candidate draws ten colours' worth of cards and can
+        # pay for almost none of them, so every candidate is equally dead and
+        # the search gets no gradient to climb.
+        colors = self._pick_colors()
+        cards, cookies = self._subpool(colors)
         # Seed with a healthy Cookie count; a deck that cannot refill its
         # battle area loses on the spot and teaches the search nothing.
-        seed_cookies = [self.rng.choice(self.cookies).id for _ in range(30)]
-        rest = [self.rng.choice(self.pool).id for _ in range(40)]
+        seed_cookies = [self.rng.choice(cookies).id for _ in range(30)]
+        rest = [self.rng.choice(cards).id for _ in range(40)]
         deck = seed_cookies + rest
         self.rng.shuffle(deck)
-        return self.repair(deck)
+        return self.repair(deck, colors)
 
     # -- genetic operators ----------------------------------------------
     def mutate(self, deck: list[str]) -> list[str]:
+        # Mutating within the deck's own colours keeps a working list working.
+        # Splashing is still reachable: a colour that grows dominant through
+        # repeated mutation becomes part of the identity on the next pass.
+        colors = self._deck_colors(deck)
+        cards, _ = self._subpool(colors)
         child = list(deck)
         for _ in range(self.rng.randint(1, self.cfg.mutations)):
             index = self.rng.randrange(len(child))
-            child[index] = self.rng.choice(self.pool).id
-        return self.repair(child)
+            child[index] = self.rng.choice(cards).id
+        return self.repair(child, colors)
 
     def crossover(self, a: list[str], b: list[str]) -> list[str]:
         cut = self.rng.randrange(10, self.cfg.rules.deck_size - 10)
-        return self.repair(a[:cut] + b[cut:])
+        child = a[:cut] + b[cut:]
+        return self.repair(child, self._deck_colors(child))
 
     # -- fitness ---------------------------------------------------------
     def fitness(self, deck: list[str], seed_block: int = 0, *,

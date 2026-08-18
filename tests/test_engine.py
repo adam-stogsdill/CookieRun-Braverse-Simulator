@@ -2,8 +2,9 @@
 
 import pytest
 
-from braverse import (STARTER_DECKS, Game, HeuristicAgent, RandomAgent,
-                      SeatedAgent, default_db, validate)
+from braverse import (STARTER_DECKS, STARTER_SET_IDS, Game, HeuristicAgent,
+                      RandomAgent, SeatedAgent, build_starter_deck,
+                      default_db, starter_deck, validate)
 from braverse import actions as A
 from braverse.cost import Cost, plan_payment
 from braverse.enums import CardType, Color, Marker
@@ -70,6 +71,28 @@ def test_starter_decks_are_legal(name, db):
     assert report.ok, report.problems
     assert report.size == 60
     assert report.flip_count <= 16
+
+
+@pytest.mark.parametrize("set_id", list(STARTER_SET_IDS))
+def test_derived_starter_decks_are_legal_and_playable(set_id, db):
+    deck = build_starter_deck(db, set_id)
+    report = validate(deck, db)
+    assert report.ok, report.problems
+    assert report.size == 60
+    assert report.flip_count <= 16
+    # Only cards from that one set, and enough LV1 Cookies to open on.
+    assert {db[c].set_id for c in deck} == {set_id}
+    assert sum(1 for c in deck if db[c].is_cookie and db[c].level == 1) >= 12
+
+    game = Game([deck, STARTER_DECKS["st9_sea_fairy"]],
+                [SeatedAgent(HeuristicAgent(seed=1), 0),
+                 SeatedAgent(HeuristicAgent(seed=2), 1)], db=db, seed=3)
+    game.setup()
+    assert game.play_out().winner is not None
+
+
+def test_starter_deck_accepts_a_transcribed_name(db):
+    assert starter_deck(db, "st9_sea_fairy") == list(STARTER_DECKS["st9_sea_fairy"])
 
 
 def test_validator_rejects_a_bad_deck(db):

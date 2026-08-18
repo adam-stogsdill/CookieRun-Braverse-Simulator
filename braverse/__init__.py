@@ -13,7 +13,8 @@ from .agents import HeuristicAgent, RandomAgent, SeatedAgent
 from .cards import CardDB, CardDef, default_db, load_cards
 from .config import DEFAULT as DEFAULT_RULES, RulesConfig
 from .deckgen import DeckEvolver, DeckGenConfig, implemented_pool, set_pool
-from .decks import STARTER_DECKS, validate
+from .decks import (STARTER_DECKS, STARTER_SET_IDS, build_starter_deck,
+                    starter_deck, validate)
 from .effects import Ctx, Trigger, effect, implemented_cards
 from .engine import Game
 from .enums import CardType, Color, Marker, Phase, Zone
@@ -48,7 +49,8 @@ __all__ = [
     "Game", "GameState", "PlayerState", "Cookie",
     "HeuristicAgent", "RandomAgent", "SeatedAgent",
     "CardDB", "CardDef", "default_db", "load_cards",
-    "STARTER_DECKS", "validate",
+    "STARTER_DECKS", "STARTER_SET_IDS", "build_starter_deck", "starter_deck",
+    "validate",
     "DeckEvolver", "DeckGenConfig", "implemented_pool", "set_pool", "Encoder",
     "Ctx", "Trigger", "effect", "implemented_cards",
     "RulesConfig", "DEFAULT_RULES",

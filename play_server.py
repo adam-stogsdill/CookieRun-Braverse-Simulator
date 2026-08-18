@@ -19,17 +19,20 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
 import random
 import sys
 import threading
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from braverse import (STARTER_DECKS, CardDB, Game, HeuristicAgent, RandomAgent,
-                      SeatedAgent, default_db, validate)
+from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
+                      HeuristicAgent, RandomAgent, SeatedAgent, default_db,
+                      implemented_pool, validate)
 from braverse import actions as A
 from braverse.enums import CardType, Marker
 from braverse.rps import CHOICES, THROWS, decide_first_player
@@ -98,7 +101,11 @@ def scan(pattern: str) -> list[Path]:
 
 
 def available_decks() -> dict[str, list[str]]:
-    """Starter lists plus any decklist file `evolve_deck.py` wrote."""
+    """Starter lists, any decklist file `evolve_deck.py` wrote, saved decks.
+
+    Saved decks come last, so a deck built in the browser wins a name clash
+    with a starter list — the user made that one on purpose.
+    """
     decks = {name: list(cards) for name, cards in STARTER_DECKS.items()}
     for path in sorted(scan("*.txt")):
         try:
@@ -109,7 +116,73 @@ def available_decks() -> dict[str, list[str]]:
             continue
         if len(deck) >= 10:
             decks[path.stem] = deck
+    decks.update(load_saved_decks())
     return decks
+
+
+def deck_source(name: str) -> str:
+    """Where a deck in `available_decks()` came from, for the UI."""
+    if name in load_saved_decks():
+        return "saved"
+    if name in STARTER_DECKS:
+        return "starter"
+    return "file"
+
+
+# ---------------------------------------------------------------------------
+# saved decks
+# ---------------------------------------------------------------------------
+# Decks built in the browser live in one JSON file, `{name: [card ids]}`. It
+# sits beside the script (or beside a frozen binary) so a deck survives a
+# restart and can be edited by hand; if that directory is read-only — a bundle
+# dropped in /Applications, say — fall back to the user's home.
+DECK_STORE_NAME = "saved_decks.json"
+MAX_DECK_NAME = 60
+MAX_DECK_CARDS = 400       # a 60-card deck with room to be mid-edit
+_store_lock = threading.Lock()
+
+
+def deck_store() -> Path:
+    if os.access(SIDE, os.W_OK):
+        return SIDE / DECK_STORE_NAME
+    home = Path.home() / ".braverse"
+    home.mkdir(parents=True, exist_ok=True)
+    return home / DECK_STORE_NAME
+
+
+def load_saved_decks() -> dict[str, list[str]]:
+    path = deck_store()
+    if not path.is_file():
+        return {}
+    try:
+        blob = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(blob, dict):
+        return {}
+    return {str(name): [str(c) for c in cards]
+            for name, cards in blob.items() if isinstance(cards, list)}
+
+
+def write_saved_decks(decks: dict[str, list[str]]) -> None:
+    path = deck_store()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(decks, indent=2, sort_keys=True))
+    tmp.replace(path)          # never leave a half-written store behind
+
+
+def clean_deck_name(raw: Any) -> str:
+    """A name that is safe as a dict key, a dropdown label and a file stem."""
+    name = " ".join(str(raw or "").split())[:MAX_DECK_NAME]
+    return "".join(ch for ch in name if ch.isprintable() and ch not in '/\\:')
+
+
+def clean_card_list(raw: Any) -> list[str]:
+    """Card ids out of a request body, capped so one POST cannot be a decklist
+    of a million cards."""
+    if not isinstance(raw, list):
+        return []
+    return [str(c) for c in raw[:MAX_DECK_CARDS]]
 
 
 def available_pilots() -> list[str]:
@@ -138,6 +211,10 @@ def card_json(db: CardDB, card_id: str) -> dict:
     attack = defn.attack
     return {
         "id": defn.id,
+        # The 4-copy rule counts card *numbers*, so the deck builder groups
+        # alt arts by this rather than by id.
+        "baseId": defn.base_id,
+        "set": defn.set_id,
         "name": defn.name,
         "type": defn.type.value,
         "color": defn.color.value,
@@ -152,6 +229,103 @@ def card_json(db: CardDB, card_id: str) -> dict:
         "markers": sorted(m.value for m in defn.markers),
         "img": f"/card_images/{defn.id}.webp",
     }
+
+
+# ---------------------------------------------------------------------------
+# the card pool, for the deck builder
+# ---------------------------------------------------------------------------
+POOL_LIMIT = 120          # cards returned per search; the browser pages through
+
+
+def deck_payload(db: CardDB, deck: Sequence[str], name: str = "") -> dict:
+    """One decklist, collapsed to distinct cards, with its legality report."""
+    counts: dict[str, int] = {}
+    for card_id in deck:
+        counts[card_id] = counts.get(card_id, 0) + 1
+    cards = [dict(card_json(db, cid), count=n)
+             for cid, n in counts.items() if cid in db]
+    cards.sort(key=lambda c: (c["type"], -(c["level"] or 0), c["name"]))
+    report = validate(list(deck), db)
+    return {"name": name, "cards": cards, "size": len(deck),
+            "legal": report.ok, "problems": report.problems,
+            "flipCount": report.flip_count, "levels": report.level_counts}
+
+
+@lru_cache(maxsize=1)
+def pool_index() -> list[tuple[str, str]]:
+    """(card id, haystack) for every deck-legal card, in set/number order.
+
+    Built once: searching ~2000 cards on each keystroke otherwise re-lowercases
+    the whole pool's rules text.
+    """
+    db = default_db()
+    rows = []
+    for card in db.cards.values():
+        if card.is_ban or card.type is CardType.NPC:
+            continue
+        haystack = " ".join([card.id, card.name, card.type.value,
+                             card.color.value, card.description,
+                             card.flip_text,
+                             card.attack.text if card.attack else "",
+                             card.attack.name if card.attack else ""]).lower()
+        rows.append((card.id, haystack))
+    rows.sort(key=lambda row: (db[row[0]].set_id, db[row[0]].number, row[0]))
+    return rows
+
+
+def pool_meta(db: CardDB) -> dict:
+    """The filter choices the builder offers, plus the deck-building rules."""
+    sets = sorted({db[cid].set_id for cid, _ in pool_index() if db[cid].set_id})
+    types = sorted({db[cid].type.value for cid, _ in pool_index()})
+    colors = sorted({db[cid].color.value for cid, _ in pool_index()
+                     if db[cid].color.value})
+    return {
+        "sets": sets,
+        "types": types,
+        "colors": colors,
+        "rules": {"deckSize": RULES.deck_size,
+                  "maxCopies": RULES.max_copies_by_number,
+                  "maxFlip": RULES.max_flip_cards},
+    }
+
+
+def search_pool(db: CardDB, query: dict) -> dict:
+    """Filter the pool. Returns one page of cards and the total match count."""
+    text = " ".join(query.get("q", "").lower().split())
+    want_type = query.get("type", "")
+    want_color = query.get("color", "")
+    want_set = query.get("set", "")
+    playable = query.get("playable") == "1"
+    coded = implemented_ids() if playable else None
+
+    matches = []
+    for card_id, haystack in pool_index():
+        card = db[card_id]
+        if text and not all(word in haystack for word in text.split()):
+            continue
+        if want_type and card.type.value != want_type:
+            continue
+        if want_color and card.color.value != want_color:
+            continue
+        if want_set and card.set_id != want_set:
+            continue
+        if coded is not None and card_id not in coded:
+            continue
+        matches.append(card_id)
+
+    try:
+        offset = max(0, int(query.get("offset", 0)))
+    except ValueError:
+        offset = 0
+    page = matches[offset:offset + POOL_LIMIT]
+    return {"total": len(matches), "offset": offset, "limit": POOL_LIMIT,
+            "cards": [card_json(db, cid) for cid in page]}
+
+
+@lru_cache(maxsize=1)
+def implemented_ids() -> frozenset[str]:
+    """Ids the engine plays correctly — everything else is a vanilla body."""
+    return frozenset(c.id for c in implemented_pool(default_db()))
 
 
 def instance_json(db: CardDB, card: CardInstance) -> dict:
@@ -902,7 +1076,8 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/":
             self._file(VIEWER / "index.html")
-        elif path in ("/app.js", "/sfx.js", "/style.css"):
+        elif path in ("/app.js", "/sfx.js", "/style.css",
+                      "/builder.js", "/builder.css"):
             self._file(VIEWER / path.lstrip("/"))
         elif path.startswith("/card_images/"):
             name = Path(path).name
@@ -925,15 +1100,19 @@ class Handler(BaseHTTPRequestHandler):
             if name not in decks:
                 self._json({"error": "unknown deck"}, 404)
                 return
-            counts: dict[str, int] = {}
-            for card_id in decks[name]:
-                counts[card_id] = counts.get(card_id, 0) + 1
-            cards = [dict(card_json(self.app.db, cid), count=n)
-                     for cid, n in counts.items() if cid in self.app.db]
-            cards.sort(key=lambda c: (c["type"], -(c["level"] or 0), c["name"]))
-            report = validate(decks[name], self.app.db)
-            self._json({"name": name, "cards": cards,
-                        "legal": report.ok, "problems": report.problems})
+            payload = deck_payload(self.app.db, decks[name], name)
+            payload["source"] = deck_source(name)
+            payload["list"] = decks[name]
+            self._json(payload)
+        elif path == "/api/pool":
+            self._json({**pool_meta(self.app.db),
+                        **search_pool(self.app.db, self._query())})
+        elif path == "/api/decks":
+            decks = available_decks()
+            self._json({"decks": [
+                {"name": name, "size": len(cards), "source": deck_source(name),
+                 "legal": validate(cards, self.app.db).ok}
+                for name, cards in decks.items()]})
         else:
             self._send(404, b"not found", "text/plain")
 
@@ -969,6 +1148,47 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
                 return
             self._json({"ok": True, "seed": match.seed})
+        elif path == "/api/deck/validate":
+            cards = clean_card_list(body.get("cards"))
+            self._json(deck_payload(self.app.db, cards, clean_deck_name(body.get("name"))))
+        elif path == "/api/decks/save":
+            name = clean_deck_name(body.get("name"))
+            cards = clean_card_list(body.get("cards"))
+            if not name:
+                self._json({"error": "give the deck a name"}, 400)
+                return
+            unknown = sorted({c for c in cards if c not in self.app.db})
+            if unknown:
+                self._json({"error": f"unknown card ids: {unknown[:5]}"}, 400)
+                return
+            # An illegal deck still saves — half-built lists are the normal
+            # state of a deck you come back to — it just cannot be played.
+            try:
+                with _store_lock:
+                    decks = load_saved_decks()
+                    decks[name] = cards
+                    write_saved_decks(decks)
+            except OSError as exc:
+                self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
+                return
+            payload = deck_payload(self.app.db, cards, name)
+            payload["saved"] = True
+            payload["path"] = str(deck_store())
+            self._json(payload)
+        elif path == "/api/decks/delete":
+            name = clean_deck_name(body.get("name"))
+            try:
+                with _store_lock:
+                    decks = load_saved_decks()
+                    if name not in decks:
+                        self._json({"error": "no saved deck by that name"}, 404)
+                        return
+                    del decks[name]
+                    write_saved_decks(decks)
+            except OSError as exc:
+                self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
+                return
+            self._json({"ok": True})
         elif path == "/api/choose":
             match = self.app.match
             if match is None:

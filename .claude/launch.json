@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "braverse",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "play_server.py",
+        "--port",
+        "8091",
+        "--no-browser"
+      ],
+      "port": 8091
+    }
+  ]
+}

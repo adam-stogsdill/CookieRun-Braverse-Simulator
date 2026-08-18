@@ -5,11 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CookieRun: Braverse — visual player</title>
 <link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/builder.css">
 </head>
 <body>
 
 <header class="bar">
   <div class="brand">CookieRun<span>: Braverse</span></div>
+  <nav class="tabs">
+    <button id="tab-play" class="tab on">Play</button>
+    <button id="tab-build" class="tab">Deck builder</button>
+  </nav>
   <div class="turnline" id="turnline">idle</div>
   <div class="controls">
     <button id="btn-pause" class="ghost" title="Pause / resume the bots">Pause</button>
@@ -56,6 +61,45 @@
   <ol id="log" class="log"></ol>
 </aside>
 
+<section id="builder" class="builder">
+  <div class="pool">
+    <div class="pool-bar">
+      <input id="pool-q" type="search" placeholder="search name, id or rules text…" autocomplete="off">
+      <select id="pool-type"><option value="">any type</option></select>
+      <select id="pool-color"><option value="">any colour</option></select>
+      <select id="pool-set"><option value="">any set</option></select>
+      <label class="check" title="Only cards whose printed effect the engine plays; the rest are treated as vanilla bodies">
+        <input id="pool-playable" type="checkbox" checked> playable
+      </label>
+    </div>
+    <div class="pool-count" id="pool-count">…</div>
+    <div class="pool-grid" id="pool-grid"></div>
+    <div class="pager">
+      <button id="pool-prev" class="ghost tiny">‹ prev</button>
+      <span id="pool-page"></span>
+      <button id="pool-next" class="ghost tiny">next ›</button>
+    </div>
+  </div>
+
+  <aside class="deckpane">
+    <div class="deck-bar">
+      <input id="deck-name" type="text" placeholder="deck name" autocomplete="off" maxlength="60">
+      <button id="deck-save" class="primary">Save</button>
+    </div>
+    <div class="deck-bar">
+      <select id="deck-load"><option value="">load a deck…</option></select>
+      <button id="deck-new" class="ghost tiny">New</button>
+      <button id="deck-copy" class="ghost tiny" title="Copy the decklist to the clipboard">Copy</button>
+      <button id="deck-delete" class="ghost tiny">Delete</button>
+    </div>
+    <div class="deck-meter"><div id="deck-fill"></div></div>
+    <div class="deck-status" id="deck-status"></div>
+    <div class="deck-mix" id="deck-mix"></div>
+    <div class="decklist" id="decklist"></div>
+    <div class="deck-hint">click a card to add · click a row's card to remove one</div>
+  </aside>
+</section>
+
 <div id="centre" class="centre hidden"></div>
 
 <div id="picker" class="picker hidden"></div>
@@ -101,5 +145,6 @@
 
 <script src="/sfx.js"></script>
 <script src="/app.js"></script>
+<script src="/builder.js"></script>
 </body>
 </html>

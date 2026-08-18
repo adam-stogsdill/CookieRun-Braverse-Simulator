@@ -27,7 +27,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from braverse import STARTER_DECKS, default_db
+from braverse import STARTER_SET_IDS, default_db, starter_deck
 from braverse.deckgen import (DeckEvolver, DeckGenConfig, describe,
                               implemented_pool, set_pool)
 from braverse.rl import TrainConfig, Trainer
@@ -61,8 +61,17 @@ def main() -> None:
     parser.add_argument("--random-decks", type=float, default=0.5)
     parser.add_argument("--pool", choices=("starter_sets", "implemented"),
                         default="starter_sets")
+    parser.add_argument("--sets", default="ST8,ST9",
+                        help="card pool when --pool starter_sets: a comma list "
+                             "of set ids, or 'all-starters' for ST1-ST10")
+    parser.add_argument("--seed-decks", default="st9_sea_fairy,st8_wind_archer",
+                        help="decks that seed the gauntlet: transcribed names "
+                             "or set ids (ST4), or 'all-starters'")
+    parser.add_argument("--colors", type=int, default=1,
+                        help="colours a candidate deck may draw on "
+                             "(0 = unrestricted; only sane on a 1-colour pool)")
     parser.add_argument("--gauntlet-size", type=int, default=6,
-                        help="cap on gauntlet decks: the 2 starters plus the "
+                        help="cap on gauntlet decks: every seed deck plus the "
                              "most recent evolved decks")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint", default="rl_agent.pt",
@@ -74,12 +83,19 @@ def main() -> None:
                         help="stop cleanly after this many hours (0 = no limit)")
     args = parser.parse_args()
 
+    def expand(spec: str) -> list[str]:
+        if spec.strip() == "all-starters":
+            return list(STARTER_SET_IDS)
+        return [s.strip() for s in spec.split(",") if s.strip()]
+
     db = default_db()
-    pool = (set_pool(db, ("ST8", "ST9")) if args.pool == "starter_sets"
+    set_ids = expand(args.sets)
+    pool = (set_pool(db, set_ids) if args.pool == "starter_sets"
             else implemented_pool(db))
 
-    deck_pool = [list(STARTER_DECKS["st9_sea_fairy"]),
-                 list(STARTER_DECKS["st8_wind_archer"])]
+    seed_names = expand(args.seed_decks)
+    deck_pool = [starter_deck(db, name) for name in seed_names]
+    n_seed = len(deck_pool)
 
     checkpoint = Path(args.checkpoint)
     best_path = checkpoint.with_suffix(".best.pt")
@@ -90,7 +106,10 @@ def main() -> None:
         net = None
         print("starting from a fresh policy")
 
-    print(f"card pool: {len(pool)} ({args.pool})   pilot: {args.pilot}")
+    print(f"card pool: {len(pool)} ({args.pool}"
+          f"{': ' + ','.join(set_ids) if args.pool == 'starter_sets' else ''})"
+          f"   pilot: {args.pilot}")
+    print(f"seed decks: {len(deck_pool)} ({', '.join(seed_names)})")
     print(f"started {datetime.now():%Y-%m-%d %H:%M}")
     if args.hours:
         print(f"will stop by {datetime.now() + timedelta(hours=args.hours):%H:%M}")
@@ -123,10 +142,13 @@ def main() -> None:
 
         # Cap the gauntlet: an unbounded one makes each round slower and every
         # matchup rarer, so scores get noisier the longer the run goes.
-        gauntlet = deck_pool[:2] + deck_pool[2:][-max(0, args.gauntlet_size - 2):]
+        keep = max(0, args.gauntlet_size - n_seed)
+        gauntlet = deck_pool[:n_seed] + (deck_pool[n_seed:][-keep:] if keep
+                                         else [])
 
         deck_cfg = DeckGenConfig(population=args.pop, generations=args.generations,
                                  games_per_eval=args.games,
+                                 color_identity=args.colors,
                                  seed=args.seed + round_index * 977)
         evolver = DeckEvolver(pool, gauntlet, deck_cfg, db=db,
                               agent_factory=pilot, agent_factories=pilots)
