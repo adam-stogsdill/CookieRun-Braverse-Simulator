@@ -471,7 +471,8 @@ class Game:
         # Static 【Your Turn】 buffs read the board as the attack is declared.
         self._run_cookie_effect(attacker, Trigger.ATTACK_START, player)
         attacker.rested = True
-        state.record(f"{attacker.name(self.db)} attacks {target.name(self.db)}")
+        state.record(f"{attacker.name(self.db)} attacks {target.name(self.db)} "
+                     f"for {attacker.attack_damage(self.db)}")
 
         target = self._response_window(defender, attacker, target)
         if state.over or target is None:
@@ -545,13 +546,24 @@ class Game:
         return target if target in defender.battle else None
 
     def deal_damage(self, cookie: Cookie, amount: int, *, source_player: int) -> None:
+        """Reveal ``amount`` HP cards, one at a time, firing any FLIP as it turns.
+
+        The count logged is what was actually taken off the pile, which is not
+        always ``amount``: the pile can run dry, "HP cannot reach 0" stops one
+        short, and a FLIP can hand HP *back* mid-way, in which case the loop
+        keeps going and legitimately takes more cards than the Cookie started
+        with.
+        """
+        name = cookie.name(self.db)
         if cookie.damage_immune:
+            self.state.record(f"{name} takes no damage (immune)")
             return
         from .effects import shields_from_opponent
         owner = self.state.players[cookie.owner]
         if source_player != cookie.owner and shields_from_opponent(self.db, owner):
+            self.state.record(f"{name} takes no damage (shielded)")
             return
-        owner = self.state.players[cookie.owner]
+        dealt = 0
         for _ in range(amount):
             if not cookie.hp_cards:
                 break
@@ -560,6 +572,7 @@ class Game:
             card = cookie.hp_cards.pop()
             card.face_up = True
             owner.trash.append(card)
+            dealt += 1
             defn = self.db[card.card_id]
             if defn.is_flip and not cookie.flip_disabled:
                 self.state.record(f"FLIP! {defn.name}")
@@ -567,9 +580,23 @@ class Game:
             # A flip effect can bounce or otherwise remove its own host;
             # the rest of the damage has nothing left to hit.
             if self.state.over or cookie not in owner.battle:
+                self._record_damage(name, dealt, amount, None)
                 return
+        self._record_damage(name, dealt, amount, cookie)
         if not cookie.hp_cards:
             self._faint(cookie)
+
+    def _record_damage(self, name: str, dealt: int, asked: int,
+                       cookie: Cookie | None) -> None:
+        if dealt == 0:
+            self.state.record(f"{name} takes no damage")
+            return
+        line = f"{name} takes {dealt} damage"
+        if dealt < asked:
+            line += f" (of {asked})"
+        if cookie is not None:
+            line += f" — {cookie.remaining_hp} HP left"
+        self.state.record(line)
 
     def gain_hp(self, cookie: Cookie, amount: int) -> None:
         owner = self.state.players[cookie.owner]

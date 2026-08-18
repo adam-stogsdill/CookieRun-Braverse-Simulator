@@ -406,3 +406,95 @@ def test_discarding_takes_the_cards_the_controller_picked():
     assert discarded == wanted
     assert len(player.hand) == before - 2
     assert all(card in player.trash for card in wanted)
+
+
+def _plain_pile(game, db):
+    """Swap FLIPs out of every HP pile so a test measures damage, not flips."""
+    for player in game.state.players:
+        for cookie in player.battle:
+            plain = [c for c in player.deck if not db[c.card_id].is_flip]
+            for i, card in enumerate(list(cookie.hp_cards)):
+                if db[card.card_id].is_flip and plain:
+                    swap = plain.pop()
+                    player.deck.remove(swap)
+                    player.deck.append(card)
+                    cookie.hp_cards[i] = swap
+
+
+def _lone_cookie(game, seat=1):
+    """The Cookie on ``seat``'s board, with a predictable HP pile."""
+    player = game.state.players[seat]
+    cookie = player.battle[0]
+    return player, cookie
+
+
+def test_damage_removes_exactly_the_cards_it_says_it_does():
+    """Each point of damage turns one HP card, and the log states the count."""
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    player, cookie = _lone_cookie(game)
+
+    hp = cookie.remaining_hp
+    game.deal_damage(cookie, 2, source_player=0)
+    assert cookie.remaining_hp == hp - 2
+    assert game.state.log[-1].endswith(f"takes 2 damage — {hp - 2} HP left")
+
+    # More damage than HP: it takes what is there and says so. Fainting
+    # trails its own lines (a replacement gets fielded), so search the log.
+    left = cookie.remaining_hp
+    mark = len(game.state.log)
+    game.deal_damage(cookie, left + 3, source_player=0)
+    assert cookie.remaining_hp == 0
+    tail = game.state.log[mark:]
+    assert any(f"takes {left} damage (of {left + 3})" in line for line in tail), tail
+
+
+def test_damage_respects_immunity_and_the_hp_floor():
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    player, cookie = _lone_cookie(game)
+
+    cookie.damage_immune = True
+    before = cookie.remaining_hp
+    game.deal_damage(cookie, 3, source_player=0)
+    assert cookie.remaining_hp == before
+    assert "takes no damage (immune)" in game.state.log[-1]
+
+    # "This Cookie's HP cannot reach 0" stops one card short of fainting.
+    cookie.damage_immune = False
+    cookie.hp_cannot_reach_zero = True
+    game.deal_damage(cookie, 99, source_player=0)
+    assert cookie.remaining_hp == 1, "the floor let it faint"
+    assert cookie in player.battle
+
+
+def test_an_attack_applies_its_printed_damage_after_buffs_and_reductions():
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    attacker = game.state.players[0].battle[0]
+    _, target = _lone_cookie(game)
+
+    printed = attacker.defn(db).attack.damage
+    assert attacker.attack_damage(db) == printed
+
+    attacker.attack_bonus = 2
+    assert attacker.attack_damage(db) == printed + 2, "a buff was not counted"
+
+    # The reduction is applied to what lands, not to what the card prints.
+    target.incoming_damage_reduction = 1
+    landed = max(0, attacker.attack_damage(db) - target.incoming_damage_reduction)
+    hp = target.remaining_hp
+    game.deal_damage(target, landed, source_player=0)
+    assert target.remaining_hp == max(0, hp - landed)

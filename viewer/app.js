@@ -241,7 +241,9 @@ function renderSide(seat, snap) {
   p.stage.forEach((c) => stageCards.appendChild(cardNode(c, { small: true, uid: c.uid, seat })));
   stageZone.appendChild(stageCards);
   right.appendChild(stageZone);
-  right.appendChild(stack("deck", p.deckCount, { title: "Face-down deck" }));
+  const deckStack = stack("deck", p.deckCount, { title: "Face-down deck" });
+  deckStack.dataset.zone = "deck";
+  right.appendChild(deckStack);
   right.appendChild(stack("trash", p.trashCount, {
     faceUp: true,
     top: p.trash[p.trash.length - 1],
@@ -258,6 +260,7 @@ function renderSide(seat, snap) {
   const handRow = h("div", "handrow");
   handRow.appendChild(h("span", "tag", `hand ${p.handCount}`));
   const hand = h("div", "hand");
+  hand.dataset.zone = "hand";
   if (p.hand.length) {
     p.hand.forEach((c) => hand.appendChild(cardNode(c, { mid: true, uid: c.uid, seat })));
   } else {
@@ -314,6 +317,8 @@ const ATTACK_MS = 900;
 const REVEAL_MS = 700;    // between one HP card turning over and the next
 const FLIP_MS = 2400;     // how long a revealed card stays on screen
 const FAINT_MS = 300;
+const DRAW_MS = 220;      // between one card leaving the deck and the next
+const DRAW_FLIGHT = 700;  // how long a card takes to reach the hand
 const SKILL_MS = 400;     // between one skill popping up and the next
 const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
@@ -321,13 +326,19 @@ const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
 /** Play one action's scene and return how long it runs, in ms. */
 function playEvents(events) {
   if (!events || !events.length) return 0;
+  const draws = events.filter((e) => e.type === "draw");
   const skills = events.filter((e) => e.type === "skill");
   const attacks = events.filter((e) => e.type === "attack");
   const reveals = events.filter((e) => e.type === "reveal").slice(0, 6);
   const faints = events.filter((e) => e.type === "faint");
 
   let clock = 0;
-  skills.forEach((event, i) => playSkill(event, i * SKILL_MS));
+  let dealt = 0;
+  draws.forEach((event) => {
+    for (let i = 0; i < event.count; i++) playDraw(event, dealt++ * DRAW_MS);
+  });
+  if (dealt) clock += (dealt - 1) * DRAW_MS + DRAW_FLIGHT;
+  skills.forEach((event, i) => playSkill(event, clock + i * SKILL_MS));
   if (skills.length) clock += (skills.length - 1) * SKILL_MS + SKILL_HOLD;
   attacks.forEach((event) => { playAttack(event, clock); clock += ATTACK_MS; });
   if (reveals.length) {
@@ -426,6 +437,42 @@ function playAttack(event, delay = 0) {
     // anything that still slips through.
     flight.finished.then(() => ghost.remove()).catch(() => ghost.remove());
     setTimeout(() => ghost.remove(), ATTACK_MS + 400);
+  }, delay);
+}
+
+/* A drawn card, travelling from the deck to the hand. It stays face down the
+ * whole way — a draw is secret, and the event carries only a count, so there is
+ * no face to show even for your own cards until the hand redraws underneath. */
+function playDraw(event, delay = 0) {
+  setTimeout(() => {
+    const side = `#side-${event.owner}`;
+    const from = document.querySelector(`${side} .stack[data-zone="deck"] .stackart`);
+    const to = document.querySelector(`${side} .hand`);
+    Sfx.play("draw");
+    if (!from || !to) return;
+    const bounds = el("#table").getBoundingClientRect();
+    const a = from.getBoundingClientRect();
+    const b = to.getBoundingClientRect();
+
+    const node = h("div", "drawn");
+    node.appendChild(faceDown("mid"));
+    node.style.left = a.left - bounds.left + "px";
+    node.style.top = a.top - bounds.top + "px";
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+
+    // Land at the open edge of the hand, which is where the new card appears.
+    const dx = (b.right - 30) - a.left;
+    const dy = (b.top + b.height / 2 - 40) - a.top;
+    const flight = node.animate([
+      { transform: "translate(0,0) scale(.7) rotate(-8deg)", opacity: 0, easing: "ease-out" },
+      { transform: `translate(${dx * 0.5}px, ${dy * 0.5}px) scale(1.05) rotate(4deg)`,
+        opacity: 1, offset: 0.45, easing: "ease-in-out" },
+      { transform: `translate(${dx}px, ${dy}px) scale(1) rotate(0deg)`, opacity: 1, offset: 0.85 },
+      { transform: `translate(${dx}px, ${dy}px) scale(1)`, opacity: 0 },
+    ], { duration: DRAW_FLIGHT, easing: "linear" });
+    flight.finished.then(() => node.remove()).catch(() => node.remove());
+    setTimeout(() => node.remove(), DRAW_FLIGHT + 400);
   }, delay);
 }
 
@@ -1113,7 +1160,15 @@ function render(snap) {
     Sfx.play("win");
   }
   el("#btn-pause").textContent = snap.paused ? "Resume" : "Pause";
-  el("#reveal").checked = !!snap.reveal;
+  // Spectator's tool only: there is nothing to reveal in a match you are playing.
+  const playing = (snap.humanSeats || []).length > 0;
+  const reveal = el("#reveal");
+  reveal.checked = !!snap.reveal && !playing;
+  reveal.disabled = playing;
+  reveal.parentElement.classList.toggle("disabled", playing);
+  reveal.parentElement.title = playing
+    ? "Only for watching two bots — your opponent's hand stays hidden while you play"
+    : "Show both hands (HP piles stay face down until revealed)";
 }
 
 /** Bin any animation left over from an earlier scene. */

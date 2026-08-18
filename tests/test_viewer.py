@@ -97,14 +97,42 @@ def test_human_seat_blocks_until_answered_and_hides_the_other_hand():
     match.stop()
 
 
-def test_reveal_shows_both_hands():
+def hands_visible(pilots, reveal):
+    """How many hands the browser is allowed to see, without dealing a game."""
     config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
-                         pilots=["human", "heuristic"], seed=5, delay=0.0, reveal=True)
+                         pilots=pilots, seed=5, delay=0.0, reveal=reveal)
+    match = Match(config, default_db())
+    snap = {"players": [{"index": 0, "hand": [{}], "battle": []},
+                        {"index": 1, "hand": [{}], "battle": []}]}
+    match._hide(snap)
+    return [len(p["hand"]) for p in snap["players"]]
+
+
+def test_reveal_is_for_spectating_and_cannot_be_used_to_peek():
+    """`reveal` used to read `config.reveal or not human_seats`, which was
+    backwards both ways: in a match you were playing it handed you the bot's
+    hand, and while watching two bots it did nothing."""
+    # Playing: your opponent's hand is hidden however the toggle is set.
+    assert hands_visible(["human", "heuristic"], False) == [1, 0]
+    assert hands_visible(["human", "heuristic"], True) == [1, 0]
+    assert hands_visible(["heuristic", "human"], True) == [0, 1]
+
+    # Watching: the toggle is the whole point, so it has to work.
+    assert hands_visible(["heuristic", "heuristic"], False) == [0, 0]
+    assert hands_visible(["heuristic", "heuristic"], True) == [1, 1]
+
+    # Hot seat: two people at one screen already see everything.
+    assert hands_visible(["human", "human"], False) == [1, 1]
+
+
+def test_reveal_shows_both_hands_when_nobody_is_playing():
+    config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
+                         pilots=["heuristic", "heuristic"], seed=5, delay=0.0, reveal=True)
     match = Match(config, default_db())
     match.start()
-    assert play_the_toss(match), "no question reached the browser"
+    assert wait_for(lambda: match.view().get("players"))
     view = match.view()
-    assert view["players"][1]["hand"], "reveal did not show the opponent's hand"
+    assert view["players"][0]["hand"] and view["players"][1]["hand"]
     for player in view["players"]:
         for cookie in player["battle"]:
             assert cookie["hpPileCards"] == [], "reveal must not turn the HP pile face up"
@@ -340,3 +368,40 @@ def test_the_toss_is_asked_in_the_middle_of_the_table():
     assert centre_style(["rock", "paper"]) is None
     assert centre_style([]) is None
     assert centre_style([object(), object()]) is None
+
+
+def hand_snapshot(hand_uids, deck_count):
+    """Two-player snapshot skeleton for the draw diff; seat 0 is the one moving."""
+    return {"players": [
+        {"hand": [card_stub(u) for u in hand_uids], "deckCount": deck_count},
+        {"hand": [], "deckCount": 40},
+    ]}
+
+
+def test_a_draw_is_a_card_that_came_off_the_deck():
+    """Animated from a diff, and told apart from a card arriving any other way."""
+    before = hand_snapshot([1, 2, 3], 30)
+
+    drew = Match._draw_events(before, hand_snapshot([1, 2, 3, 4, 5], 28))
+    assert drew == [{"type": "draw", "owner": 0, "count": 2}]
+
+    # A Cookie bounced back to hand is not a draw: the deck never moved.
+    assert Match._draw_events(before, hand_snapshot([1, 2, 3, 9], 30)) == []
+
+    # Both at once — one drawn, one bounced — animates only the one that flew.
+    mixed = Match._draw_events(before, hand_snapshot([1, 2, 3, 8, 9], 29))
+    assert mixed[0]["count"] == 1
+
+    # Playing a card out of hand is not a draw either.
+    assert Match._draw_events(before, hand_snapshot([1, 2], 30)) == []
+    assert Match._draw_events(None, before) == []
+
+
+def test_a_draw_event_carries_no_card_identity():
+    """A drawn card is secret; the animation only needs a count."""
+    drew = Match._draw_events(hand_snapshot([1], 30), hand_snapshot([1, 2], 29))
+    assert set(drew[0]) == {"type", "owner", "count"}
+
+    # And the wait scales with how many cards actually fly.
+    assert scene_seconds([{"type": "draw", "owner": 0, "count": 2}]) > \
+           scene_seconds([{"type": "draw", "owner": 0, "count": 1}])

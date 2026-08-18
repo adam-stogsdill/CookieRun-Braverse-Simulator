@@ -649,3 +649,9 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 .centre-row.throws .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
 .centre-row.choices .centre-btn { min-width: 150px; padding: 14px 18px; }
 .centre-row.choices .label { font-size: 12.5px; }
+
+/* a card travelling from the deck to the hand */
+.drawn { position: absolute; z-index: 31; pointer-events: none; }
+.drawn .card { box-shadow: 0 12px 28px rgba(0,0,0,.6); }
+.check.disabled { opacity: .4; cursor: not-allowed; }
+.check.disabled input { cursor: not-allowed; }

@@ -2,6 +2,13 @@
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
+Example Images:
+Human vs Bot
+![alt text](image.png)
+
+Bot vs Bot
+![alt text](image-1.png)
+
 A rules engine for CookieRun: Braverse plus a practice bot to play against. This is an **unofficial** project and much of the code was generated using Claude (I feel like this should be explicityly disclosed). However, this was initially to create an simulator for deck building and agent training.
 
 If there are any issues (as I'm sure there will be), please create an issue or message me on discord: \_\_set\_\_. 
@@ -302,7 +309,9 @@ now paints over the browser rather than behind it — a modal `<dialog>` lives i
 the browser's top layer, which no z-index can beat, so the preview moves inside
 it while it is open; keys
 `1`–`9` take the numbered option and `space` / `→` pause and step. `reveal`
-shows both hands, which is what you want when watching two bots.
+shows both hands, and is a spectator's tool only: in a match you are playing it
+is disabled and ignored, so your opponent's hand stays hidden however the
+request is made.
 
 `flip opp.` (on by default, remembered per browser) turns the opponent's half
 through a full 180°, the way their mat would sit across the table from you:
@@ -313,6 +322,13 @@ rested card of theirs sits at 270° rather than 90°, for the same reason. Zone
 labels, counters and the reveal animation stay upright, because those are the
 interface rather than the board; hover any card to read it the right way up.
 Turn the option off to see both halves in the same orientation.
+
+**Cards are dealt, not conjured.** A draw sends a face-down card arcing from
+that player's deck to their hand before the hand redraws underneath it. The
+event carries a *count* and nothing else — a drawn card is secret, so there is
+no identity to send and nothing to leak — and it is told apart from a card
+arriving in hand some other way (a Cookie bounced off the board) by pairing the
+arrivals against how far the deck actually fell.
 
 **Actions play out.** One action can be a whole little scene, and the browser
 plays it as a sequence: the attacker steps out of its slot, turns side-on
@@ -380,7 +396,9 @@ simply does not open. Only turn-level decisions are paced, so an attack and
 everything it triggers reads as one beat rather than a stutter.
 
 Hidden information is filtered **server-side**, on the way out: your opponent's
-hand never reaches the page, so there is nothing in the browser to leak. Every
+hand never reaches the page, so there is nothing in the browser to leak — and
+because the filter is applied per request rather than baked into the snapshot,
+asking for a reveal over the API cannot get around it either. Every
 HP pile is stripped for *everyone*, including its owner and including under
 `reveal` — the pile is face down in the real game and the not-knowing is the
 point. Public zones (trash, break area) are sent in full, which is what makes
@@ -434,6 +452,27 @@ the bottom of the deck" — with a single op plus a card-level filter. Two of
 these needed new engine state: per-turn faint and break-area counters, reset for
 *both* players each turn, since "during this turn" clauses routinely ask about
 the opponent's losses.
+
+### The log says how much damage landed
+
+Every attack now names its number — `Sea Fairy Cookie attacks Leek Cookie for
+3` — and every damage step reports what was actually taken off the pile:
+
+```
+T5 P1 Leek Cookie attacks Sea Fairy Cookie for 3
+T5 P1 Sea Fairy Cookie takes 1 damage (of 3) — 0 HP left
+T5 P1 Sea Fairy Cookie faints
+```
+
+The `(of N)` is the interesting part: damage reveals HP cards one at a time, so
+the count that lands is not always the count that was asked for. Auditing 2446
+damage steps across 120 games turned up four reasons it can differ, all correct
+and all now visible in the log — the pile ran dry, "this Cookie's HP cannot
+reach 0" stopped it one short, a FLIP bounced its own host out of the battle
+area mid-step, or the game ended. A fifth case removes *more* cards than the
+Cookie started with: a FLIP that heals its host (`<Discard 1 card.> ... gains
++1 HP`) hands HP back while the loop is still running, so a 3-damage attack on
+a 2 HP Cookie legitimately turns three cards. No case applied the wrong number.
 
 ### Removal that skips the break area
 

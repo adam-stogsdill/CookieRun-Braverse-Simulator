@@ -42,10 +42,11 @@ IMAGES = ROOT / "card_images"
 # waits this out before deciding again, so an attack, the HP cards it turned
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
-EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4}
+EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
+                 "draw": 0.22}
 # What is still on screen after the last event of its kind *starts*: a revealed
 # card is held face up to be read, and a broken Cookie falls apart.
-TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5}
+TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5, "draw": 0.7}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -59,7 +60,9 @@ def scene_seconds(events: list) -> float:
     counts: dict = {}
     for event in events:
         kind = event.get("type", "")
-        counts[kind] = counts.get(kind, 0) + 1
+        # One draw event can be several cards, each of which flies separately.
+        counts[kind] = counts.get(kind, 0) + (event.get("count", 1)
+                                              if kind == "draw" else 1)
     counts["reveal"] = min(counts.get("reveal", 0), MAX_REVEALS)
 
     total = 0.0
@@ -554,6 +557,28 @@ class Match:
         return events
 
     @staticmethod
+    def _draw_events(prev: Optional[dict], snap: dict) -> list:
+        """Cards that came off a deck into a hand.
+
+        Carries a *count* and nothing else: a drawn card is secret, and the
+        animation is a face-down card travelling from the deck to the hand, so
+        there is no identity to send and nothing to leak. Cards that arrive in
+        hand some other way — a Cookie bounced off the board — are excluded by
+        pairing the arrivals against how far the deck actually fell.
+        """
+        if not prev:
+            return []
+        events = []
+        for index, (was, now) in enumerate(zip(prev["players"], snap["players"])):
+            held = {c["uid"] for c in was["hand"]}
+            arrived = sum(1 for c in now["hand"] if c["uid"] not in held)
+            off_deck = was["deckCount"] - now["deckCount"]
+            drawn = min(arrived, off_deck)
+            if drawn > 0:
+                events.append({"type": "draw", "owner": index, "count": drawn})
+        return events
+
+    @staticmethod
     def _faint_events(prev: Optional[dict], snap: dict) -> list:
         """Cookies that left the battle area — fainted, trashed or bounced."""
         if not prev:
@@ -621,6 +646,7 @@ class Match:
             # whatever damage turned face up, then anything that fainted.
             snap["events"] = (self._queued
                               + self._trap_events(snap)
+                              + self._draw_events(self._prev, snap)
                               + self._reveal_events(self._prev, snap)
                               + self._faint_events(self._prev, snap))
             self._queued = []
@@ -746,8 +772,16 @@ class Match:
         Filtering here rather than at snapshot time keeps one true state on the
         match thread and lets the reveal toggle work without replaying anything.
         """
-        reveal = self.config.reveal or not self.human_seats
+        # `reveal` is a spectator's tool and nothing else. It used to read
+        # `config.reveal or not human_seats`, which had it exactly backwards:
+        # in a match you were *playing* the toggle handed you the bot's hand,
+        # and while watching two bots it did nothing because the second clause
+        # was already true. Nobody at the table means it may be honoured; a
+        # human seat means it never is.
+        reveal = self.config.reveal and not self.human_seats
         for player in snap["players"]:
+            # Hot seat sees both hands — two people sharing one screen have no
+            # secrets from each other, and the setup dialog says so.
             if not reveal and player["index"] not in self.human_seats:
                 player["hand"] = []
             for cookie in player["battle"]:

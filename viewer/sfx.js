@@ -110,6 +110,11 @@ const Sfx = (() => {
       burst({ duration: 0.07, from: 1400, to: 500, q: 0.9, gain: 0.28 });
       tone({ duration: 0.12, from: 240, to: 90, gain: 0.22, type: "triangle" });
     },
+    // a card sliding off the deck
+    draw() {
+      burst({ duration: 0.13, from: 900, to: 3000, q: 0.6, gain: 0.16 });
+      burst({ at: 0.1, duration: 0.05, from: 4200, to: 2000, q: 2.2, gain: 0.1 });
+    },
     // a skill going off: two quick rising blips
     skill() {
       burst({ duration: 0.07, from: 1800, to: 3200, q: 1.4, gain: 0.2 });
