@@ -1,0 +1,9 @@
+# Everything: the game plus RL training, deck co-evolution and the tooling.
+# To just play the game, use requirements-play.txt instead — it is numpy only.
+
+-r requirements-play.txt
+
+torch>=2.0         # braverse.rl, train_rl.py, coevolve.py, RL pilots
+tqdm>=4.64         # progress bars in train_rl.py / coevolve.py
+pytest>=7.0        # tests/
+pillow>=9.0        # build_tts_sheets.py

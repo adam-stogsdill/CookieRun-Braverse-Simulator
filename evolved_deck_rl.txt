@@ -1,0 +1,315 @@
+COOKIE (31)
+  4x ST8-005    Wind Archer Cookie               LV3 HP6
+  4x ST8-008    Sugar Swan Cookie                LV2 HP4
+  4x ST8-011    Kiwi Cookie                      LV1 HP3
+  3x ST8-003    Leek Cookie                      LV2 HP4
+  3x ST9-006    Sea Fairy Cookie                 LV3 HP6
+  3x ST9-012    White Pearl Cookie               LV1 HP2
+  2x ST8-012    Windcatcher                      LV1 HP2
+  2x ST9-001    Gold Citrine Cookie              LV2 HP4
+  2x ST9-008    Crimson Coral Cookie             LV3 HP5
+  1x ST8-004    Red Panna Cotta Cookie           LV3 HP5
+  1x ST8-010    Cookiemals                       LV1 HP2
+  1x ST9-002    Aquamarine Cookie                LV1 HP2
+  1x ST9-005    Mystic Opal Cookie               LV1 HP3
+FLIP (13)
+  4x ST8-002    Muscle Cookie                    LV2 HP4
+  4x ST9-003    Blue Whale Cookie                LV2 HP4
+  2x ST9-004    Pond Dino Cookie                 LV2 HP3
+  1x ST8-006    Basil Pesto Cookie               LV3 HP4
+  1x ST8-007    Blue Slushy Cookie               LV1 HP1
+  1x ST9-010    Parfait Cookie                   LV1 HP1
+ITEM (6)
+  2x ST9-016    Bubble Wave Shell                
+  1x ST8-014    Cape of the Vanquisher           
+  1x ST8-015    Essence of the Tempest           
+  1x ST8-016    Wind's Grace Earrings            
+  1x ST9-013    Shimmering Moonlit Coral         
+TRAP (9)
+  4x ST8-019    Bad Omen                         
+  1x ST8-017    Hindering Darkness               
+  1x ST8-018    Piercing Arrow of Purity         
+  1x ST9-017    Revelation of the Seas           
+  1x ST9-018    Tower of Frozen Waves            
+  1x ST9-019    Curse of the Seas                
+STAGE (1)
+  1x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 13
+
+{
+ "deck": [
+  "ST8-005",
+  "ST9-012",
+  "ST9-003",
+  "ST9-003",
+  "ST8-017",
+  "ST8-002",
+  "ST9-016",
+  "ST8-019",
+  "ST8-007",
+  "ST8-008",
+  "ST9-017",
+  "ST9-003",
+  "ST9-016",
+  "ST9-006",
+  "ST8-011",
+  "ST8-018",
+  "ST8-019",
+  "ST9-004",
+  "ST8-019",
+  "ST9-013",
+  "ST8-006",
+  "ST8-003",
+  "ST8-005",
+  "ST8-012",
+  "ST8-002",
+  "ST8-008",
+  "ST9-019",
+  "ST8-002",
+  "ST8-002",
+  "ST9-010",
+  "ST9-004",
+  "ST9-005",
+  "ST8-010",
+  "ST9-003",
+  "ST8-014",
+  "ST8-019",
+  "ST9-012",
+  "ST8-015",
+  "ST8-005",
+  "ST9-006",
+  "ST9-006",
+  "ST8-011",
+  "ST8-011",
+  "ST8-008",
+  "ST9-002",
+  "ST8-005",
+  "ST8-011",
+  "ST9-008",
+  "ST8-004",
+  "ST8-016",
+  "ST8-012",
+  "ST8-003",
+  "ST9-001",
+  "ST9-018",
+  "ST9-001",
+  "ST8-003",
+  "ST8-008",
+  "ST9-008",
+  "ST9-012",
+  "ST8-020"
+ ],
+ "validation_score": 0.625,
+ "holdout": 0.574,
+ "baselines": {
+  "st9_sea_fairy": 0.562,
+  "st8_wind_archer": 0.43
+ },
+ "history": [
+  {
+   "generation": 0,
+   "best": 0.3333333333333333,
+   "mean": 0.19427083333333328
+  },
+  {
+   "generation": 1,
+   "best": 0.43333333333333335,
+   "mean": 0.25625000000000003
+  },
+  {
+   "generation": 2,
+   "best": 0.5,
+   "mean": 0.31302083333333325
+  },
+  {
+   "generation": 3,
+   "best": 0.48333333333333334,
+   "mean": 0.3234374999999999
+  },
+  {
+   "generation": 4,
+   "best": 0.5,
+   "mean": 0.3682291666666669
+  },
+  {
+   "generation": 5,
+   "best": 0.5833333333333334,
+   "mean": 0.4036458333333334
+  },
+  {
+   "generation": 6,
+   "best": 0.5666666666666667,
+   "mean": 0.3880208333333334
+  },
+  {
+   "generation": 7,
+   "best": 0.55,
+   "mean": 0.3890625000000002
+  },
+  {
+   "generation": 8,
+   "best": 0.55,
+   "mean": 0.4145833333333334
+  },
+  {
+   "generation": 9,
+   "best": 0.55,
+   "mean": 0.4166666666666667
+  },
+  {
+   "generation": 10,
+   "best": 0.5833333333333334,
+   "mean": 0.4078125
+  },
+  {
+   "generation": 11,
+   "best": 0.5166666666666667,
+   "mean": 0.3770833333333335
+  },
+  {
+   "generation": 12,
+   "best": 0.5333333333333333,
+   "mean": 0.4067708333333336
+  },
+  {
+   "generation": 13,
+   "best": 0.5166666666666667,
+   "mean": 0.3932291666666668
+  },
+  {
+   "generation": 14,
+   "best": 0.55,
+   "mean": 0.4427083333333333
+  },
+  {
+   "generation": 15,
+   "best": 0.5666666666666667,
+   "mean": 0.4223958333333334
+  },
+  {
+   "generation": 16,
+   "best": 0.6,
+   "mean": 0.44479166666666664
+  },
+  {
+   "generation": 17,
+   "best": 0.6666666666666666,
+   "mean": 0.46406249999999993
+  },
+  {
+   "generation": 18,
+   "best": 0.6166666666666667,
+   "mean": 0.4802083333333332
+  },
+  {
+   "generation": 19,
+   "best": 0.6166666666666667,
+   "mean": 0.46354166666666663
+  },
+  {
+   "generation": 20,
+   "best": 0.6666666666666666,
+   "mean": 0.4666666666666667
+  },
+  {
+   "generation": 21,
+   "best": 0.6166666666666667,
+   "mean": 0.4583333333333333
+  },
+  {
+   "generation": 22,
+   "best": 0.6166666666666667,
+   "mean": 0.5078124999999998
+  },
+  {
+   "generation": 23,
+   "best": 0.6,
+   "mean": 0.4713541666666665
+  },
+  {
+   "generation": 24,
+   "best": 0.6333333333333333,
+   "mean": 0.46406249999999993
+  },
+  {
+   "generation": 25,
+   "best": 0.6,
+   "mean": 0.42552083333333335
+  },
+  {
+   "generation": 26,
+   "best": 0.65,
+   "mean": 0.4770833333333332
+  },
+  {
+   "generation": 27,
+   "best": 0.6333333333333333,
+   "mean": 0.4843749999999999
+  },
+  {
+   "generation": 28,
+   "best": 0.65,
+   "mean": 0.49270833333333325
+  },
+  {
+   "generation": 29,
+   "best": 0.5666666666666667,
+   "mean": 0.44270833333333337
+  },
+  {
+   "generation": 30,
+   "best": 0.65,
+   "mean": 0.45937499999999987
+  },
+  {
+   "generation": 31,
+   "best": 0.65,
+   "mean": 0.47291666666666665
+  },
+  {
+   "generation": 32,
+   "best": 0.6666666666666666,
+   "mean": 0.4828124999999999
+  },
+  {
+   "generation": 33,
+   "best": 0.6166666666666667,
+   "mean": 0.45052083333333326
+  },
+  {
+   "generation": 34,
+   "best": 0.6166666666666667,
+   "mean": 0.43750000000000006
+  },
+  {
+   "generation": 35,
+   "best": 0.6333333333333333,
+   "mean": 0.45937500000000003
+  },
+  {
+   "generation": 36,
+   "best": 0.6666666666666666,
+   "mean": 0.5010416666666664
+  },
+  {
+   "generation": 37,
+   "best": 0.6666666666666666,
+   "mean": 0.5171875
+  },
+  {
+   "generation": 38,
+   "best": 0.6666666666666666,
+   "mean": 0.5291666666666666
+  },
+  {
+   "generation": 39,
+   "best": 0.7,
+   "mean": 0.5223958333333334
+  },
+  {
+   "validation_best": 0.625,
+   "validated": 8
+  }
+ ]
+}

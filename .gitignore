@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+
+# Downloaded card art (190 MB) — `python fetch_images.py` fetches it.
+card_images/
+
+# Generated Tabletop Simulator deck sheets — `python build_tts_sheets.py`.
+tts_sheets/
+
+# Training / evolution output.
+*.log
+*.err

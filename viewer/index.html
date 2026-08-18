@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CookieRun: Braverse — visual player</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">CookieRun<span>: Braverse</span></div>
+  <div class="turnline" id="turnline">idle</div>
+  <div class="controls">
+    <button id="btn-pause" class="ghost" title="Pause / resume the bots">Pause</button>
+    <button id="btn-step" class="ghost" title="Advance one bot decision">Step</button>
+    <label class="speed" title="Delay between bot decisions">
+      speed
+      <input id="speed" type="range" min="0" max="2000" step="50" value="700">
+      <span id="speed-label">0.7s</span>
+    </label>
+    <label class="check" title="Show both hands (HP piles stay face down until revealed)">
+      <input id="reveal" type="checkbox"> reveal
+    </label>
+    <label class="check" title="Show the opponent's mat rotated, as it would sit across the table">
+      <input id="flipopp" type="checkbox" checked> flip opp.
+    </label>
+    <label class="check" title="Card flicks, hits and breaks">
+      <input id="sound" type="checkbox" checked> sound
+    </label>
+    <button id="btn-new" class="primary">New match</button>
+  </div>
+</header>
+
+<main id="table">
+  <section class="side opponent" id="side-1"></section>
+  <div class="middle"><div class="banner" id="banner"></div></div>
+  <section class="side me" id="side-0"></section>
+  <div class="fx" id="fx"></div>
+</main>
+
+<aside class="panel">
+  <div class="panel-head">
+    <h2 id="prompt">…</h2>
+    <div class="who" id="prompt-who"></div>
+  </div>
+  <div id="reveals" class="reveals hidden"></div>
+  <div id="options" class="options"></div>
+  <div class="log-head">
+    <h3>Log</h3>
+    <button id="btn-copy-log" class="ghost tiny">copy</button>
+  </div>
+  <ol id="log" class="log"></ol>
+</aside>
+
+<div id="picker" class="picker hidden"></div>
+
+<div id="preview" class="preview hidden"></div>
+
+<dialog id="browser">
+  <div class="browser-head">
+    <h2 id="browser-title">Trash</h2>
+    <input id="browser-search" type="search" placeholder="search name, type or rules text…" autocomplete="off">
+    <button id="browser-close" class="ghost">Close</button>
+  </div>
+  <div class="browser-count" id="browser-count"></div>
+  <div class="browser-grid" id="browser-grid"></div>
+</dialog>
+
+<dialog id="setup">
+  <form method="dialog" id="setup-form">
+    <h2>New match</h2>
+    <div class="grid">
+      <div class="seat">
+        <h3>Seat 0 <span class="tag">goes first</span></h3>
+        <label>pilot <select id="pilot0"></select></label>
+        <label>deck <select id="deck0"></select></label>
+        <div class="deckinfo" id="deckinfo0"></div>
+      </div>
+      <div class="seat">
+        <h3>Seat 1</h3>
+        <label>pilot <select id="pilot1"></select></label>
+        <label>deck <select id="deck1"></select></label>
+        <div class="deckinfo" id="deckinfo1"></div>
+      </div>
+    </div>
+    <label class="row">seed <input id="seed" type="number" placeholder="random"></label>
+    <label class="row check"><input id="start-paused" type="checkbox"> start paused</label>
+    <p class="hint" id="setup-hint"></p>
+    <menu>
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="start" id="start" class="primary">Start</button>
+    </menu>
+  </form>
+</dialog>
+
+<script src="/sfx.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

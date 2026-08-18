@@ -1,0 +1,9 @@
+# Just play the game: the engine, the visual player, self-play against the
+# built-in bots. No RL, no PyTorch.
+#
+#     pip install -r requirements-play.txt
+#     python play_server.py
+#
+# Everything else in this project is standard library.
+
+numpy>=1.24        # braverse.features, imported by the package itself
