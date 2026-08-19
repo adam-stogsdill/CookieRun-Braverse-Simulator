@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.2
+Current Version: 0.2.3
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -54,6 +54,7 @@ There are many things that are still needing to be updated and reworked, but I i
     - [The mulligan](#the-mulligan)
     - [Reveals are recorded as the card turns](#reveals-are-recorded-as-the-card-turns)
     - [Healing is cards, not a bigger Cookie](#healing-is-cards-not-a-bigger-cookie)
+    - [A trap or a block, not both — and a block that costs a rest](#a-trap-or-a-block-not-both--and-a-block-that-costs-a-rest)
     - [Removal that skips the break area](#removal-that-skips-the-break-area)
     - ["This Cookie" on a FLIP is the card, not its host](#this-cookie-on-a-flip-is-the-card-not-its-host)
     - [Who goes first](#who-goes-first)
@@ -873,6 +874,31 @@ gone from a before/after diff of the pile by the time the browser polls. It is a
 a green glow around the card with a green number rising off it — the same beat
 as the hit that provoked it, and deliberately the opposite shape to the red
 shove of a swing.
+
+### A trap or a block, not both — and a block that costs a rest
+
+Two things were wrong with the defender's response window.
+
+**The price of a block was only half read.** `_blocker_cost` pulled the energy
+out of `【Blocker】 <...>` and treated anything else as free. Five cards —
+Blue Lily Cookie BS4-047, Peperoncino, Moon Rabbit, Captain Ice, Space Doughnut
+— print that price as `<Rest this card.>`, so they redirected every attack in a
+turn for nothing and were still upright afterwards to swing on their own. The
+cost is now returned as `(energy, rests itself)` and both halves are paid. A
+price the engine cannot read at all returns `None`, which means the Cookie
+cannot block: an unreadable cost is not a free one.
+
+**A trap and a block were being allowed on the same swing.** Springing the trap
+is the defender's answer to the attack, and so is putting a Cookie in the way;
+the window let them do one and then the other. `_responded` records which was
+taken and closes off the other for the rest of that attack — in both
+directions, so no block after a trap either.
+
+While in there: an attack announces itself at its printed number
+(`Lobster Cookie attacks Sea Fairy Cookie for 3`) *before* the response window,
+because that is when it is declared. If a trap or a defensive skill shaves it
+in between, the log now says so — `attack is reduced to 1 (from 3)` — rather
+than leaving a 3-damage attack that inexplicably took one card off the pile.
 
 ### Removal that skips the break area
 

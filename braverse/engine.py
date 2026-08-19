@@ -75,6 +75,9 @@ class Game:
         self._fainting: set = set()
         self._response_player: int | None = None
         self._trap_used = 0
+        # "trap" or "block" once the defender has answered this attack; either
+        # one rules the other out for the rest of the window.
+        self._responded: str | None = None
 
     # ------------------------------------------------------------------
     # setup
@@ -435,35 +438,60 @@ class Game:
         return plan_payment(cost, colors) is not None
 
     def _response_actions(self, player: PlayerState) -> list[A.Action]:
+        """What the defender may do about the attack being declared at them.
+
+        A trap and a block are alternatives, not a combination: taking either
+        one closes the other off for the rest of this attack. `_responded`
+        carries which was taken.
+        """
         out: list[A.Action] = [A.Pass()]
         db = self.db
         _, colors = player.active_support_colors(db)
-        if self._trap_used < self.rules.traps_per_attack and not player.traps_disabled:
+        if (self._responded is None
+                and self._trap_used < self.rules.traps_per_attack
+                and not player.traps_disabled):
             for card in player.hand:
                 defn = db[card.card_id]
                 if (defn.type is CardType.TRAP
                         and plan_payment(defn.play_cost, colors) is not None
                         and self._would_do_something(player, Trigger.ITEM, card=card)):
                     out.append(A.PlayTrap(card.uid))
-        if self._pending_attack:
+        if self._pending_attack and self._responded is None:
             _, target = self._pending_attack
             for cookie in player.battle:
                 if cookie.uid == target.uid or cookie.rested:
                     continue
                 if player.blockers_disabled:
                     break
-                cost = self._blocker_cost(cookie)
-                if cost is not None and plan_payment(cost, colors) is not None:
+                price = self._blocker_cost(cookie)
+                if price is not None and plan_payment(price[0], colors) is not None:
                     out.append(A.Block(cookie.uid))
         return out
 
-    def _blocker_cost(self, cookie: Cookie) -> Cost | None:
+    def _blocker_cost(self, cookie: Cookie) -> tuple[Cost, bool] | None:
+        """What redirecting an attack to this Cookie costs, as printed.
+
+        Returns (energy, rests itself), or None if the Cookie has no
+        【Blocker】. Five cards price the block as `<Rest this card.>` rather
+        than in energy; that half used to be dropped, so those Cookies blocked
+        every attack in a turn for free and were still standing to attack on
+        their own.
+        """
         defn = cookie.defn(self.db)
         if not defn.has(Marker.BLOCKER):
             return None
         import re
-        match = re.search(r"【Blocker】\s*<((?:\{[A-Za-z]+\})*)>", defn.description)
-        return Cost.parse(match.group(1)) if match else Cost()
+        bracket = re.search(r"【Blocker】\s*<([^>]*)>", defn.description)
+        if bracket is None:
+            return Cost(), False
+        token = bracket.group(1)
+        if re.fullmatch(r"(?:\{[A-Za-z]+\})*", token):
+            return Cost.parse(token), False
+        if re.search(r"rest this card", token, re.I):
+            return Cost(), True
+        # An unread price is not a free one: leave the Cookie unable to block
+        # rather than letting it block for nothing.
+        return None
 
     # ------------------------------------------------------------------
     # applying actions
@@ -658,12 +686,18 @@ class Game:
         if self.state.over or target not in defender.battle:
             return
 
-        damage = max(0, attacker.attack_damage(self.db)
-                     - target.incoming_damage_reduction)
+        swing = attacker.attack_damage(self.db)
+        damage = max(0, swing - target.incoming_damage_reduction)
         if target.damage_cap is not None:
             # "attack damage of N or more ... is reduced to N-1" is a ceiling,
             # not a subtraction.
             damage = min(damage, target.damage_cap)
+        if damage != swing:
+            # The swing was announced at its printed number a moment ago. If a
+            # trap or a defensive skill has shaved it since, say so — otherwise
+            # the log reads as an attack that mysteriously underperformed.
+            self.state.record(f"{attacker.name(self.db)}'s attack is reduced "
+                              f"to {damage} (from {swing})")
         # Riders can ask "if your opponent's Cookie faints from this Cookie's
         # attack", so record the outcome before the rider runs.
         before = len(defender.break_area)
@@ -680,10 +714,17 @@ class Game:
 
     def _response_window(self, defender: PlayerState, attacker: Cookie,
                          target: Cookie) -> Cookie | None:
-        """Let the defender play traps and/or block. Returns the final target."""
+        """Let the defender spring a trap *or* block. Returns the final target.
+
+        One or the other, not both, and not one after the other: springing the
+        trap is the answer to the attack, and so is putting a Cookie in the
+        way. The window used to allow a trap and then a block on the same
+        swing, which is two answers to one question.
+        """
         self._pending_attack = (attacker, target)
         self._response_player = defender.index
         self._trap_used = 0
+        self._responded = None
         blocked = False
         try:
             while True:
@@ -703,20 +744,29 @@ class Game:
                     self._run_effect(card, Trigger.ITEM, defender)
                     defender.trash.append(card)
                     self._trap_used += 1
+                    self._responded = "trap"
                 elif isinstance(choice, A.Block) and not blocked:
                     blocker = defender.find_cookie(choice.blocker_uid)
-                    cost = self._blocker_cost(blocker) if blocker else None
-                    if blocker is None or cost is None or not self.pay_cost(defender, cost):
+                    price = self._blocker_cost(blocker) if blocker else None
+                    if blocker is None or price is None:
                         break
+                    cost, rest_self = price
+                    if not self.pay_cost(defender, cost):
+                        break
+                    if rest_self:
+                        blocker.rested = True
                     target = blocker
                     blocked = True
                     self._pending_attack = (attacker, target)
-                    self.state.record(f"{blocker.name(self.db)} blocks")
+                    self._responded = "block"
+                    self.state.record(f"{blocker.name(self.db)} blocks"
+                                      + (" and rests" if rest_self else ""))
                 else:
                     break
         finally:
             self._pending_attack = None
             self._response_player = None
+            self._responded = None
         # A trap may have removed the target from the field.
         return target if target in defender.battle else None
 

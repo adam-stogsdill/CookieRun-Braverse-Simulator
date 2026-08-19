@@ -1040,3 +1040,109 @@ def test_hero_cookie_counts_active_support_not_the_whole_area():
     assert run() == 0, "one active card is still not two"
     me.support[1].rested = False
     assert run() == 2
+
+
+# --- blocking ---------------------------------------------------------------
+def _attack_setup(db, seed=21):
+    """A game with P0 attacking and P1 holding a `<Rest this card.>` Blocker."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=seed)
+    game.setup()
+    _plain_pile(game, db)
+    defender = game.state.players[1]
+    defender.battle.clear()
+    for card_id in ("ST8-003", "BS4-047"):          # a target, and the Blocker
+        card = CardInstance.make(card_id, 1)
+        game._deploy_cookie(defender, card, run_on_play=False)
+    defender.support = [CardInstance.make("ST8-011", 1) for _ in range(4)]
+    for card in defender.support:
+        card.rested = False
+    defender.hand = [CardInstance.make("ST8-017", 1)]   # a trap it can afford
+    return game, defender
+
+
+def test_a_blocker_priced_in_rest_actually_rests():
+    """【Blocker】 <Rest this card.> — the bracket is the price. Only the energy
+    half of it was read, so those Cookies blocked every attack in a turn for
+    free and were still upright to swing on their own."""
+    db = default_db()
+    game, defender = _attack_setup(db)
+    blocker = defender.battle[1]
+    assert db[blocker.card.card_id].name == "Blue Lily Cookie"
+    assert game._blocker_cost(blocker) == (Cost(), True)
+
+    attacker = game.state.players[0].battle[0]
+    game._pending_attack = (attacker, defender.battle[0])
+    game._response_player = 1
+    game._trap_used = 0
+    game._responded = None
+
+    class Blocks:
+        def choose_action(self, state, options):
+            return next((o for o in options if isinstance(o, A.Block)), A.Pass())
+
+    game._controllers[1] = Blocks()
+    target = game._response_window(defender, attacker, defender.battle[0])
+    assert target is blocker, "the attack was not redirected"
+    assert blocker.rested, "the blocker did not pay with its own rest"
+
+
+def test_a_blocker_whose_price_cannot_be_read_does_not_block_for_free():
+    db = default_db()
+    game, defender = _attack_setup(db)
+    blocker = defender.battle[1]
+    # Pretend the printed price is something the engine has never seen.
+    import dataclasses
+    printed = db[blocker.card.card_id]
+    db.cards[printed.id] = dataclasses.replace(
+        printed, description="【Blocker】 <Sing a little song.>")
+    try:
+        assert game._blocker_cost(blocker) is None
+    finally:
+        db.cards[printed.id] = printed
+
+
+def test_a_trap_and_a_block_are_alternatives_not_a_combination():
+    """Springing the trap is the answer to the attack, and so is putting a
+    Cookie in the way. Either one closes the other off."""
+    db = default_db()
+    game, defender = _attack_setup(db)
+    attacker = game.state.players[0].battle[0]
+    game._pending_attack = (attacker, defender.battle[0])
+    game._response_player = 1
+    game._trap_used = 0
+    game._responded = None
+
+    offered = game._response_actions(defender)
+    assert any(isinstance(o, A.PlayTrap) for o in offered)
+    assert any(isinstance(o, A.Block) for o in offered)
+
+    game._responded = "block"
+    assert [type(o) for o in game._response_actions(defender)] == [A.Pass], \
+        "a trap was still on offer after blocking"
+
+    game._responded = "trap"
+    assert [type(o) for o in game._response_actions(defender)] == [A.Pass], \
+        "a block was still on offer after springing a trap"
+
+
+def test_the_log_says_when_a_swing_was_shaved():
+    """An attack announced at 3 that lands for 1 reads as a broken attack
+    unless the reduction is written down."""
+    db = default_db()
+    game = new_game(seed=22, db=db)
+    _plain_pile(game, db)
+    me = game.state.players[0]
+    attacker = me.battle[0]
+    me.support = [CardInstance.make("ST9-013", 0) for _ in range(6)]
+    for card in me.support:
+        card.rested = False
+    _, target = _lone_cookie(game)
+    # A cap survives the per-battle reset, which is what makes it readable here.
+    target.damage_cap = 1
+
+    game._do_attack(A.Attack(attacker.uid, target.uid))
+    assert any("attacks" in line for line in game.state.log), "no attack happened"
+    assert any("attack is reduced to 1" in line for line in game.state.log), \
+        game.state.log[-4:]
