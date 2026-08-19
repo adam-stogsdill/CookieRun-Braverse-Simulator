@@ -78,6 +78,43 @@ def shields_from_opponent(db, owner) -> bool:
 PLAY_CONDITIONS: list = []
 
 
+@dataclass(frozen=True)
+class ExtraPlay:
+    """How one 【EXTRA】 card leaves the EXTRA deck.
+
+    Every EXTRA card prints a gate — the "Can be played if ..." line — and the
+    card is simply not a legal move while that is false; there is no version of
+    the move that fizzles. `hosts` is what separates the two kinds: a standalone
+    EXTRA Cookie leaves it None and is deployed into a free battle slot, while
+    an 【Awaken】 card returns the Cookies it may be stacked on top of, and is
+    unplayable when that list is empty. `pay` is the printed `<...>` cost, run
+    once the move is taken.
+    """
+
+    gate: object                     # (ctx) -> bool
+    hosts: object = None             # (ctx) -> list[Cookie], 【Awaken】 only
+    pay: object = None               # (ctx) -> bool, the <...> cost
+
+    @property
+    def is_awaken(self) -> bool:
+        return self.hosts is not None
+
+
+EXTRA_PLAYS: dict[str, ExtraPlay] = {}
+
+
+def extra_play(card_id: str, **kwargs):
+    """Register how an 【EXTRA】 card is played. Decorates its gate."""
+    def wrap(gate):
+        EXTRA_PLAYS[card_id] = ExtraPlay(gate=gate, **kwargs)
+        return gate
+    return wrap
+
+
+def extra_play_of(db, card_id: str) -> "ExtraPlay | None":
+    return EXTRA_PLAYS.get(db[card_id].base_id if card_id in db else card_id)
+
+
 def may_play(db, player, opponent, defn) -> bool:
     return all(rule(db, player, opponent, defn) for rule in PLAY_CONDITIONS)
 
@@ -146,6 +183,44 @@ def effect(card_id: str, trigger: Trigger) -> Callable[[EffectFn], EffectFn]:
 
 def get_effect(card_id: str, trigger: Trigger) -> EffectFn | None:
     return _REGISTRY.get((card_id.split("@")[0], trigger))
+
+
+def playable_if(predicate: Callable[["Ctx"], bool]) -> Callable[[EffectFn], EffectFn]:
+    """Declare when a hand-written effect has something to do.
+
+    A compiled card carries its conditions as ``Guard`` ops that the engine can
+    read, so it knows for itself when it would fizzle. A hand-written body is
+    opaque Python, so it says so here instead — the predicate is the ``if`` at
+    the top of the function, hoisted where the action list can see it.
+
+    The predicate must only read the board. Leave it off and the card is always
+    offered, which is the old behaviour.
+    """
+
+    def wrap(fn: EffectFn) -> EffectFn:
+        fn.playable = predicate       # type: ignore[attr-defined]
+        return fn
+
+    return wrap
+
+
+def effect_is_live(fn: EffectFn | None, ctx: "Ctx") -> bool:
+    """Whether running ``fn`` right now would accomplish anything.
+
+    Three kinds of answer, in order of how much the engine can see: a compiled
+    program reads its own guards and targets; a hand-written body answers only
+    if it was given a `playable_if`; anything else is assumed live, so an
+    unannotated card behaves exactly as it did before.
+    """
+    if fn is None:
+        return False
+    probe = getattr(fn, "is_live", None)          # a compiled Program
+    if probe is not None:
+        return bool(probe(ctx))
+    predicate = getattr(fn, "playable", None)     # an annotated hand-written body
+    if predicate is not None:
+        return bool(predicate(ctx))
+    return True
 
 
 def implemented_cards() -> set[str]:

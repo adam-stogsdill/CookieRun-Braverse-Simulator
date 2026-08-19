@@ -21,7 +21,7 @@ def test_a_saved_deck_survives_and_is_offered_to_play(store):
     deck = list(STARTER_DECKS["st9_sea_fairy"])
     ps.write_saved_decks({"my brew": deck})
 
-    assert ps.load_saved_decks() == {"my brew": deck}
+    assert ps.load_saved_decks() == {"my brew": (deck, [])}
     assert ps.available_decks()["my brew"] == deck
     assert ps.deck_source("my brew") == "saved"
     assert ps.deck_source("st9_sea_fairy") == "starter"
@@ -41,8 +41,29 @@ def test_a_corrupt_store_is_ignored_rather_than_fatal(store):
 def test_the_store_is_written_whole(store):
     ps.write_saved_decks({"a": ["ST9-002"]})
     ps.write_saved_decks({"a": ["ST9-002"], "b": ["ST8-001"]})
-    assert json.loads(store.read_text()) == {"a": ["ST9-002"], "b": ["ST8-001"]}
+    assert json.loads(store.read_text()) == {
+        "a": {"deck": ["ST9-002"], "extra": []},
+        "b": {"deck": ["ST8-001"], "extra": []},
+    }
     assert not list(store.parent.glob("*.tmp")), "left a half-written file behind"
+
+
+def test_a_store_written_before_extra_decks_still_loads(store):
+    """The old shape is a bare list of card ids, with no EXTRA deck at all.
+
+    Rewriting every saved deck on upgrade would be a fine way to lose someone's
+    decks to a bug, so the reader takes both shapes instead.
+    """
+    store.write_text(json.dumps({"old brew": ["ST9-002"] * 60}))
+    assert ps.load_saved_decks() == {"old brew": (["ST9-002"] * 60, [])}
+    assert ps.available_decks()["old brew"] == ["ST9-002"] * 60
+    assert ps.available_extra_decks()["old brew"] == []
+
+
+def test_an_extra_deck_round_trips_through_the_store(store):
+    deck = list(STARTER_DECKS["st9_sea_fairy"])
+    ps.write_saved_decks({"brew": (deck, ["BS8-005", "BS8-090"])})
+    assert ps.available_extra_decks()["brew"] == ["BS8-005", "BS8-090"]
 
 
 def test_deck_names_cannot_escape_the_store():
@@ -109,7 +130,8 @@ def test_a_junk_offset_does_not_break_the_search():
 
 def test_the_builder_is_told_the_deck_building_rules():
     meta = ps.pool_meta(default_db())
-    assert meta["rules"] == {"deckSize": 60, "maxCopies": 4, "maxFlip": 16}
+    assert meta["rules"] == {"deckSize": 60, "maxCopies": 4, "maxFlip": 16,
+                             "extraSize": 6}
     assert "ST9" in meta["sets"] and "COOKIE" in meta["types"]
 
 
@@ -117,3 +139,56 @@ def test_cards_carry_the_number_the_copy_limit_counts():
     # The 4-copy rule is per card number, so the builder groups by base id.
     card = ps.card_json(default_db(), "ST9-002")
     assert card["baseId"] == "ST9-002" and card["set"] == "ST9"
+
+
+# --- the decks/ folder -------------------------------------------------------
+@pytest.fixture
+def deck_dir(tmp_path, monkeypatch):
+    """Point both scan roots at a scratch directory with a decks/ folder."""
+    monkeypatch.setattr(ps, "ROOT", tmp_path)
+    monkeypatch.setattr(ps, "SIDE", tmp_path)
+    folder = tmp_path / ps.DECK_DIR
+    folder.mkdir()
+    return folder
+
+
+def _write(path, deck, **meta):
+    from braverse.deckfile import write_deck
+    return write_deck(path, deck, default_db(), **meta)
+
+
+def test_a_deck_in_the_decks_folder_is_offered_to_play(deck_dir):
+    _write(deck_dir / "v4_BLUE.txt", STARTER_DECKS["st9_sea_fairy"], run="v4")
+    decks = ps.available_decks()
+    assert "v4_BLUE" in decks
+    assert len(decks["v4_BLUE"]) == 60
+    assert ps.deck_source("v4_BLUE") == "evolved"
+
+
+def test_a_loose_decklist_beside_the_script_still_works(deck_dir):
+    _write(deck_dir.parent / "evolved_deck.txt", STARTER_DECKS["st8_wind_archer"])
+    assert "evolved_deck" in ps.available_decks()
+    assert ps.deck_source("evolved_deck") == "file"
+
+
+def test_the_decks_folder_wins_a_name_clash_with_a_loose_file(deck_dir):
+    _write(deck_dir.parent / "clash.txt", STARTER_DECKS["st8_wind_archer"])
+    _write(deck_dir / "clash.txt", STARTER_DECKS["st9_sea_fairy"])
+    assert ps.available_decks()["clash"] == list(STARTER_DECKS["st9_sea_fairy"])
+    assert ps.deck_source("clash") == "evolved"
+
+
+def test_a_half_written_deck_file_is_skipped_not_fatal(deck_dir):
+    """A live co-evolution run rewrites these files while the server is up."""
+    (deck_dir / "v9_RED.txt").write_text("COOKIE (30)\n\n{\"deck\": [tru")
+    _write(deck_dir / "v9_BLUE.txt", STARTER_DECKS["st9_sea_fairy"])
+    decks = ps.available_decks()
+    assert "v9_RED" not in decks
+    assert "v9_BLUE" in decks
+
+
+def test_a_saved_deck_still_beats_a_decks_folder_name_clash(deck_dir):
+    _write(deck_dir / "mine.txt", STARTER_DECKS["st8_wind_archer"])
+    ps.write_saved_decks({"mine": list(STARTER_DECKS["st9_sea_fairy"])})
+    assert ps.available_decks()["mine"] == list(STARTER_DECKS["st9_sea_fairy"])
+    assert ps.deck_source("mine") == "saved"

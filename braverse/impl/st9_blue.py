@@ -4,7 +4,7 @@ Each function is the card's printed text, sentence by sentence.
 """
 
 from braverse.cost import Cost
-from braverse.effects import Ctx, Trigger, effect
+from braverse.effects import Ctx, Trigger, effect, playable_if
 from braverse.enums import Color
 
 SEA_FAIRY = "Sea Fairy Cookie"
@@ -27,6 +27,7 @@ def pond_dino_flip(ctx: Ctx) -> None:
 
 # --- ST9-006 Sea Fairy Cookie ----------------------------------------------
 @effect("ST9-006", Trigger.ACTIVATE)
+@playable_if(lambda ctx: ctx.hand_size <= 5 and bool(ctx.me.deck))
 def sea_fairy_activate(ctx: Ctx) -> None:
     """If there are 5 cards or less in your hand, draw up to 1 card."""
     if ctx.hand_size <= 5:
@@ -52,6 +53,7 @@ def sea_fairy_attack(ctx: Ctx) -> None:
 
 # --- ST9-007 Peppermint Cookie ---------------------------------------------
 @effect("ST9-007", Trigger.ACTIVATE)
+@playable_if(lambda ctx: ctx.hand_size <= 3 and bool(ctx.me.deck))
 def peppermint_activate(ctx: Ctx) -> None:
     """If there are 3 cards or less in your hand, draw up to 1 card."""
     if ctx.hand_size <= 3:
@@ -111,6 +113,8 @@ def white_pearl_attack(ctx: Ctx) -> None:
 
 # --- ST9-013 Shimmering Moonlit Coral (ITEM) -------------------------------
 @effect("ST9-013", Trigger.ITEM)
+@playable_if(lambda ctx: any(ctx.db[c.card_id].color is Color.BLUE
+                             for c in ctx.me.hand) and bool(ctx.me.deck))
 def moonlit_coral(ctx: Ctx) -> None:
     """<Discard 1 {B} card from your hand.> Draw up to 2 cards."""
     if ctx.discard_colored(1, Color.BLUE):
@@ -119,6 +123,7 @@ def moonlit_coral(ctx: Ctx) -> None:
 
 # --- ST9-014 Glittering Pearl Shell (ITEM) ---------------------------------
 @effect("ST9-014", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.own_cookies()) and ctx.hand_size >= 3)
 def pearl_shell(ctx: Ctx) -> None:
     """<Discard 3 cards.> Select up to 1 of your Cookies. That Cookie gains +2 HP."""
     target = ctx.select_own()
@@ -130,6 +135,9 @@ def pearl_shell(ctx: Ctx) -> None:
 
 # --- ST9-015 Essence of the Ocean (ITEM) -----------------------------------
 @effect("ST9-015", Trigger.ITEM)
+@playable_if(lambda ctx: (ctx.hand_size <= 5 and bool(ctx.me.deck))
+             or bool(ctx.own_cookies(lambda c: c.name(ctx.db) == SEA_FAIRY
+                                     and c.remaining_hp <= 5)))
 def essence_of_ocean(ctx: Ctx) -> None:
     """If there are 5 cards or less in your hand, draw up to 1 card. Then,
     select up to 1 of your [Sea Fairy Cookie] with 5 or less HP remaining.
@@ -145,6 +153,7 @@ def essence_of_ocean(ctx: Ctx) -> None:
 
 # --- ST9-016 Bubble Wave Shell (ITEM) --------------------------------------
 @effect("ST9-016", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies()) and ctx.hand_size >= 3)
 def bubble_wave_shell(ctx: Ctx) -> None:
     """<Discard 3 cards.> Select up to 1 of your opponent's Cookies.
     That Cookie receives 3 damage."""
@@ -157,6 +166,8 @@ def bubble_wave_shell(ctx: Ctx) -> None:
 
 # --- ST9-017 Revelation of the Seas (TRAP) ---------------------------------
 @effect("ST9-017", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies())
+             or (ctx.hand_size <= 3 and bool(ctx.me.deck)))
 def revelation_of_the_seas(ctx: Ctx) -> None:
     """That Cookie deals -3 attack damage. Then, if there are 3 cards or less
     in your hand, draw up to 2 cards."""
@@ -169,6 +180,7 @@ def revelation_of_the_seas(ctx: Ctx) -> None:
 
 # --- ST9-018 Tower of Frozen Waves (TRAP) ----------------------------------
 @effect("ST9-018", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies()))
 def tower_of_frozen_waves(ctx: Ctx) -> None:
     """-1 attack damage. Then, <discard 1 card.> an additional -1."""
     target = ctx.select_enemy(prompt="Debuff which attacker?")
@@ -181,6 +193,7 @@ def tower_of_frozen_waves(ctx: Ctx) -> None:
 
 # --- ST9-019 Curse of the Seas (TRAP) --------------------------------------
 @effect("ST9-019", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies()))
 def curse_of_the_seas(ctx: Ctx) -> None:
     """-1 attack damage. Then, <discard 2 cards.> Select up to 1 of your
     opponent's Cookies that has 2 or more HP remaining. That Cookie receives
@@ -198,6 +211,7 @@ def curse_of_the_seas(ctx: Ctx) -> None:
 
 # --- ST9-020 Tearcrown (STAGE) ---------------------------------------------
 @effect("ST9-020", Trigger.STAGE_ACTIVATE)
+@playable_if(lambda ctx: ctx.hand_size <= 3 and bool(ctx.me.deck))
 def tearcrown(ctx: Ctx) -> None:
     """<Rest this card.> If there are 3 cards or less in your hand, draw up to 1."""
     if ctx.source_card is None or ctx.source_card.rested:

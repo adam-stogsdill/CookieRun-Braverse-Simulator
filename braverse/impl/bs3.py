@@ -53,7 +53,7 @@ def tea_knight_static(ctx: Ctx) -> None:
 
 
 # --- BS3-013 Tiger Lily Cookie ----------------------------------------------
-@effect("BS3-013", Trigger.ACTIVATE)
+@effect("BS3-013", Trigger.ON_PLAY)
 def tiger_lily_activate(ctx: Ctx) -> None:
     """During this turn, this Cookie gains +1 attack damage."""
     if ctx.source_cookie:
@@ -112,7 +112,7 @@ STATIC_ABILITY_CARDS.add("BS3-025")
 
 
 # --- BS3-026 / BS3-083 view-and-reorder -------------------------------------
-@effect("BS3-026", Trigger.ACTIVATE)
+@effect("BS3-026", Trigger.ON_PLAY)
 def linzer_activate(ctx: Ctx) -> None:
     """<{Y}> Select up to 1 of your Cookies. View all of that Cookie's HP cards
     and rearrange them in any order."""
@@ -124,7 +124,7 @@ def linzer_activate(ctx: Ctx) -> None:
         target.hp_cards.sort(key=lambda c: ctx.db[c.card_id].is_flip)
 
 
-@effect("BS3-083", Trigger.ACTIVATE)
+@effect("BS3-083", Trigger.ON_PLAY)
 def captain_caviar_blue_activate(ctx: Ctx) -> None:
     """View 3 cards from the top of your deck; place them on the top of your
     deck in any order."""
@@ -137,7 +137,7 @@ def captain_caviar_blue_activate(ctx: Ctx) -> None:
 
 
 # --- BS3-028 Mozzarella Cookie ----------------------------------------------
-@effect("BS3-028", Trigger.ACTIVATE)
+@effect("BS3-028", Trigger.ON_PLAY)
 def mozzarella_activate(ctx: Ctx) -> None:
     """<{Y}> <Discard 1 card.> If your opponent's break area is LV.6 or lower,
     select up to 1 LV.1 Cookie from your opponent's trash. Place that Cookie in
@@ -179,7 +179,7 @@ def burnt_cheese_faint(ctx: Ctx) -> None:
 
 
 # --- BS3-030 Black Raisin Cookie --------------------------------------------
-@effect("BS3-030", Trigger.ACTIVATE)
+@effect("BS3-030", Trigger.ON_PLAY)
 def black_raisin_yellow_activate(ctx: Ctx) -> None:
     """Place up to 1 card from your hand to the top of this Cookie's HP."""
     cookie = ctx.source_cookie
@@ -194,7 +194,7 @@ def black_raisin_yellow_activate(ctx: Ctx) -> None:
 
 
 # --- BS3-036 Olive Cookie ---------------------------------------------------
-@effect("BS3-036", Trigger.ACTIVATE)
+@effect("BS3-036", Trigger.ON_PLAY)
 def olive_activate(ctx: Ctx) -> None:
     """Select 1 of your other {Y} Cookies in your battle area. Place that
     Cookie in your break area. Then, draw up to 2 cards from your deck."""
@@ -218,7 +218,7 @@ def angel_attack(ctx: Ctx) -> None:
 
 
 # --- BS3-040 Adventurer Cookie ----------------------------------------------
-@effect("BS3-040", Trigger.ACTIVATE)
+@effect("BS3-040", Trigger.ON_PLAY)
 def adventurer_yellow_activate(ctx: Ctx) -> None:
     """<{Y}{Y}> Select up to 1 LV.1 Cookie from either player's battle area.
     Place that Cookie in the owner's break area."""
@@ -233,24 +233,45 @@ def adventurer_yellow_activate(ctx: Ctx) -> None:
         ctx.faint(target)
 
 
-# --- BS3-043 / BS3-068 sweep items ------------------------------------------
+# --- BS3-068 Elder Faerie's Sword -------------------------------------------
 def _sweep_one(ctx: Ctx) -> None:
     """Deals 1 damage to all of your opponent's Cookies.
 
-    The scrape splits the damage number off these attack lines, so they are
-    written out rather than fought with in the compiler.
+    The scrape splits the damage number off these lines, so they are written
+    out rather than fought with in the compiler.
     """
     for cookie in list(ctx.enemy_cookies()):
         ctx.deal_damage(cookie, 1)
 
 
-effect("BS3-043", Trigger.ATTACK)(_sweep_one)
+# BS3-043 Soul Jam: Light of Abundance is deliberately left unimplemented. Its
+# second sentence — "you can 【Equip】 this card to your [Golden Cheese Cookie]"
+# — is an Equip, which the engine does not model, and a body that only swept
+# would silently misreport the card. It stays a vanilla item until Equip exists.
+
+_SWORD_PLACE = "place this card in your support area as rested"
+_SWORD_SWEEP = "damage all their Cookies, then trash 2 of your supports"
 
 
-@effect("BS3-068", Trigger.ATTACK)
-def elder_faeries_sword_attack(ctx: Ctx) -> None:
-    """Deals 1 damage to all of your opponent's Cookies. Then, place 2 cards
-    from your support area into the trash."""
+@effect("BS3-068", Trigger.ITEM)
+def elder_faeries_sword(ctx: Ctx) -> None:
+    """Select 1 of the following.
+    ・Place this card in your support area as rested.
+    ・Deal 1 damage to all of your opponent's Cookies. Then, place 2 cards from
+      your support area into the trash.
+
+    A modal effect, so the mode is offered before either branch runs. The first
+    branch leaves the card in the support area and the engine's item path finds
+    it there, so it is not also sent to the trash.
+    """
+    mode = ctx.choose("Choose one", [_SWORD_PLACE, _SWORD_SWEEP],
+                      optional=False) or _SWORD_SWEEP
+    if mode == _SWORD_PLACE:
+        card = ctx.source_card
+        if card is not None:
+            card.rested = True
+            ctx.me.support.append(card)
+        return
     _sweep_one(ctx)
     for _ in range(2):
         if not ctx.me.support:
@@ -272,7 +293,7 @@ def fig_when_attacked(ctx: Ctx) -> None:
 
 
 # --- BS3-060 Elder Faerie Cookie --------------------------------------------
-@effect("BS3-060", Trigger.ACTIVATE)
+@effect("BS3-060", Trigger.ON_PLAY)
 def elder_faerie_green_activate(ctx: Ctx) -> None:
     """<{G}> Select up to 1 active card from your opponent's support area. Rest
     that card."""
@@ -309,7 +330,7 @@ def candy_diver_activate(ctx: Ctx) -> None:
 
 
 # --- BS3-076 Strawberry Crepe Cookie ----------------------------------------
-@effect("BS3-076", Trigger.ACTIVATE)
+@effect("BS3-076", Trigger.ON_PLAY)
 def strawberry_crepe_blue_activate(ctx: Ctx) -> None:
     """Select up to 1 Cookie that is LV.2 or lower from either player's battle
     area. Place that Cookie on the top of the owner's deck."""
@@ -324,7 +345,7 @@ def strawberry_crepe_blue_activate(ctx: Ctx) -> None:
     owner = ctx.state.players[target.owner]
     owner.battle.remove(target)
     owner.deck.insert(0, target.card)
-    owner.trash.extend(target.hp_cards)
+    owner.trash.extend(target.spent_cards)
     ctx.game._check_battle_area(owner)
 
 
@@ -351,7 +372,7 @@ def red_velvet_faint(ctx: Ctx) -> None:
 
 
 # --- BS3-112 Prune Juice Cookie ---------------------------------------------
-@effect("BS3-112", Trigger.ACTIVATE)
+@effect("BS3-112", Trigger.ON_PLAY)
 def prune_juice_purple_activate(ctx: Ctx) -> None:
     """<{P}> <Select 2 non-Cookie cards from your trash and place them on the
     bottom of your deck in any order.> Return up to 1 {P} Cookie from your

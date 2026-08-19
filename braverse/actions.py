@@ -44,6 +44,28 @@ class PlayCookie(Action):
 
 
 @dataclass(frozen=True)
+class PlayExtra(Action):
+    """Play an 【EXTRA】 card out of the EXTRA deck.
+
+    ``onto`` is the uid of the Cookie being 【Awaken】ed — the EXTRA card goes
+    on top of it and keeps its HP pile. ``None`` is the standalone case: the
+    card is deployed into a free battle slot like any other Cookie.
+    """
+
+    card_uid: int
+    onto: int | None = None
+
+    def describe(self, db, state):
+        found = state.find_card(self.card_uid)
+        name = db[found[2].card_id].name if found else "?"
+        if self.onto is None:
+            return f"Play {name} (EXTRA)"
+        target = state.find_cookie(self.onto)
+        under = target[1].name(db) if target else "?"
+        return f"Awaken {under} \u2192 {name}"
+
+
+@dataclass(frozen=True)
 class PlaySupportCard(Action):
     """Play an ITEM or STAGE from hand (pays its printed cost)."""
 

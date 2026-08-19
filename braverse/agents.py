@@ -84,6 +84,24 @@ class HeuristicAgent:
                 score -= 200.0
             return score
 
+        if isinstance(action, A.PlayExtra):
+            # The gate has already been checked — the engine only offers an
+            # EXTRA card whose condition is met — and the card costs nothing
+            # from hand, so this is close to free value. An 【Awaken】 is rated
+            # on the HP it adds to a Cookie already holding a slot.
+            defn = db[self._card(state, action.card_uid).card_id]
+            if action.onto is not None:
+                return 80.0 + (defn.hp or 0) * 2.0
+            if not me.battle:
+                return 96.0 + (defn.hp or 0)
+            score = 75.0 + (defn.hp or 0) * 2.0
+            if defn.attack:
+                score += defn.attack.damage * 2.0
+            level = defn.level or 1
+            if me.break_level_total(db) + level >= 10:
+                score -= 200.0
+            return score
+
         if isinstance(action, A.Attack):
             return self._attack_score(state, action)
 

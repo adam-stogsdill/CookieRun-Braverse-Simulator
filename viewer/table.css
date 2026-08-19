@@ -1,0 +1,107 @@
+/* Table tab: sleeves and playmats.
+ *
+ * Sits in the same body grid as the table and the deck builder, spanning both
+ * columns of the second row, and is swapped in by `body.view-table`. The
+ * designs themselves live in table.js as custom properties; this file only
+ * lays the tab out and renders the samples, which it does with the very same
+ * rules the board uses — a swatch is a real `.card.back`, a mat sample is the
+ * real mat background — so nothing here can drift from the table it previews.
+ */
+
+.tablekit { display: none; }
+body.view-table #table,
+body.view-table .panel,
+body.view-table .controls,
+body.view-table .turnline { display: none; }
+body.view-table .tablekit {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 18px 24px;
+  gap: 14px;
+}
+
+.kit-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.kit-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.kit-head p { margin: 0; color: var(--dim); font-size: 11.5px; flex: 1 1 260px; }
+
+.kit-seats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.kit-seat {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  padding: 12px;
+  min-width: 0;
+}
+.kit-seat > h3 {
+  margin: 0 0 10px; font-size: 11px; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--dim);
+}
+
+/* ------------------------------------------------------------- preview */
+/* A slice of real playmat with real card backs lying on it. */
+.kit-preview {
+  position: relative;
+  border-radius: 12px;
+  padding: 16px 14px 20px;
+  margin-bottom: 14px;
+  background:
+    var(--felt-pattern),
+    radial-gradient(120% 140% at 50% 0%, rgba(255,255,255,.05), transparent 60%),
+    linear-gradient(160deg, var(--felt-a), var(--felt-b) 70%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.06),
+    inset 0 0 40px rgba(0,0,0,.4),
+    0 6px 18px rgba(0,0,0,.4);
+}
+.kit-row {
+  display: flex; gap: 6px; justify-content: center;
+  border: 1px dashed var(--felt-line);
+  border-radius: 10px;
+  padding: 10px 8px;
+}
+.kit-preview .card.back { --card-w: 46px; --card-h: 64px; cursor: default; }
+.kit-zlabel {
+  position: absolute; left: 20px; bottom: 5px;
+  font-size: 8.5px; letter-spacing: 1.1px; text-transform: uppercase;
+  color: var(--felt-label);
+}
+
+/* ------------------------------------------------------------- swatches */
+.kit-h {
+  margin: 12px 0 6px; font-size: 10.5px; letter-spacing: .6px;
+  text-transform: uppercase; color: var(--dim); font-weight: 600;
+}
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 5px 5px 4px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+  background: rgba(255,255,255,.02);
+  transition: border-color .12s ease, background .12s ease, transform .12s ease;
+}
+.swatch:hover { transform: translateY(-2px); background: rgba(255,255,255,.05); }
+.swatch.on { border-color: var(--accent); background: rgba(240,169,43,.09); }
+.swatch .card.back { --card-w: 40px; --card-h: 56px; cursor: pointer; }
+/* Landscape, and bigger than a sleeve swatch: a mat is a mat, and at card size
+   the darker felts were indistinguishable from one another. */
+.swatch-felt {
+  width: 68px; height: 46px; border-radius: 6px;
+  border: 1px dashed var(--felt-line);
+  background:
+    var(--felt-pattern),
+    radial-gradient(120% 140% at 50% 0%, rgba(255,255,255,.06), transparent 60%),
+    linear-gradient(160deg, var(--felt-a), var(--felt-b) 70%);
+}
+.swatch-name { font-size: 9.5px; color: var(--dim); }
+.swatch.on .swatch-name { color: var(--ink); }

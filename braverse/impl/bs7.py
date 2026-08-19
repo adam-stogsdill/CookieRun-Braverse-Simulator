@@ -182,7 +182,7 @@ def pudding_activate(ctx: Ctx) -> None:
         ctx.me.battle.remove(cookie)
         cookie.card.rested = True
         ctx.me.support.append(cookie.card)
-        ctx.me.trash.extend(cookie.hp_cards)
+        ctx.me.trash.extend(cookie.spent_cards)
 
     ctx.me.support.remove(target)
     ctx.game._deploy_cookie(ctx.me, target, from_zone="support")
@@ -228,7 +228,7 @@ def choco_drizzle_attack(ctx: Ctx) -> None:
     ctx.me.battle.remove(target)
     target.card.rested = False
     ctx.me.support.append(target.card)
-    ctx.me.trash.extend(target.hp_cards)
+    ctx.me.trash.extend(target.spent_cards)
     ctx.game._check_battle_area(ctx.me)
 
 

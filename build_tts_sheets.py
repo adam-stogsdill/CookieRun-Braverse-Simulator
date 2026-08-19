@@ -10,7 +10,7 @@ builds those grids (10x7 = 70 cards each, TTS's maximum) and writes a manifest
 mapping every card id to its sheet and index.
 
     python build_tts_sheets.py --sets ST8 ST9 --out tts/starters
-    python build_tts_sheets.py --deck evolved_deck_heur.txt --out tts/evolved
+    python build_tts_sheets.py --deck decks/evolved_deck_heur.txt --out tts/evolved
     python build_tts_sheets.py --width 400          # smaller files
 
 The manifest also emits a ready-to-paste `CustomDeck` block per sheet; fill in

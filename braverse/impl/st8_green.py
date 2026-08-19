@@ -1,7 +1,7 @@
 """ST8 — Green / Wind Archer Cookie starter deck."""
 
 from braverse.cost import Cost
-from braverse.effects import Ctx, Trigger, effect
+from braverse.effects import Ctx, Trigger, effect, playable_if
 from braverse.enums import CardType, Color
 
 WIND_ARCHER = "Wind Archer Cookie"
@@ -26,6 +26,8 @@ def red_panna_cotta_attack(ctx: Ctx) -> None:
 
 # --- ST8-005 Wind Archer Cookie --------------------------------------------
 @effect("ST8-005", Trigger.ACTIVATE)
+@playable_if(lambda ctx: ctx.hand_size <= 5
+             and ctx.me.items_played_this_turn > 0 and bool(ctx.me.deck))
 def wind_archer_activate(ctx: Ctx) -> None:
     """If there are 5 cards or less in your hand and, during this turn, an Item
     card was activated, draw 1 card."""
@@ -98,6 +100,10 @@ def cookiemals_faint(ctx: Ctx) -> None:
 
 # --- ST8-012 Windcatcher ---------------------------------------------------
 @effect("ST8-012", Trigger.ACTIVATE)
+@playable_if(lambda ctx: (ctx.me.items_played_this_turn > 0
+                          and bool(ctx.enemy_cookies()))
+             or (bool(ctx.own_cookies(lambda c: c.name(ctx.db) == WIND_ARCHER))
+                 and ctx.can_pay(Cost.parse("{G}"))))
 def windcatcher_activate(ctx: Ctx) -> None:
     """<Rest this card.> During this turn, if an Item card was activated,
     select up to 1 of your opponent's Cookies. That Cookie receives 1 damage.
@@ -119,6 +125,9 @@ def windcatcher_activate(ctx: Ctx) -> None:
 
 # --- ST8-013 Windgrass (ITEM) ----------------------------------------------
 @effect("ST8-013", Trigger.ITEM)
+@playable_if(lambda ctx: ctx.active_support_count(mine=False) > 0
+             or (ctx.name_in_battle(WIND_ARCHER)
+                 and ctx.active_support_count() < ctx.support_count()))
 def windgrass(ctx: Ctx) -> None:
     """Rest up to 1 card in your opponent's support area. Then, if [Wind Archer
     Cookie] is in your battle area, set up to 1 card from your support area as
@@ -130,6 +139,10 @@ def windgrass(ctx: Ctx) -> None:
 
 # --- ST8-014 Cape of the Vanquisher (ITEM) ---------------------------------
 @effect("ST8-014", Trigger.ITEM)
+@playable_if(lambda ctx: ctx.support_count() >= 5
+             and bool(ctx.own_cookies(
+                 lambda c: c.defn(ctx.db).color is Color.GREEN
+                 and c.remaining_hp <= 3)))
 def cape_of_the_vanquisher(ctx: Ctx) -> None:
     """If there are 5 cards or more in your support area, select up to 1 of
     your {G} Cookies with 3 or less HP remaining. That Cookie gains +1 HP."""
@@ -144,6 +157,10 @@ def cape_of_the_vanquisher(ctx: Ctx) -> None:
 
 # --- ST8-015 Essence of the Tempest (ITEM) ---------------------------------
 @effect("ST8-015", Trigger.ITEM)
+@playable_if(lambda ctx: ((ctx.name_in_battle(WIND_ARCHER)
+                           or ctx.name_in_support(WIND_ARCHER))
+                          and bool(ctx.me.deck))
+             or bool(ctx.me.support))
 def essence_of_the_tempest(ctx: Ctx) -> None:
     """If [Wind Archer Cookie] is in your battle or support area, place up to 1
     card from the top of your deck into your support area as rested. Then,
@@ -155,6 +172,8 @@ def essence_of_the_tempest(ctx: Ctx) -> None:
 
 # --- ST8-016 Wind's Grace Earrings (ITEM) ----------------------------------
 @effect("ST8-016", Trigger.ITEM)
+@playable_if(lambda ctx: ctx.name_in_battle(WIND_ARCHER)
+             and ctx.support_count() >= 5 and bool(ctx.enemy_cookies()))
 def winds_grace_earrings(ctx: Ctx) -> None:
     """If [Wind Archer Cookie] is in your battle area and there are 5 cards or
     more in your support area, all of your opponent's Cookies receive 1 damage."""
@@ -165,6 +184,9 @@ def winds_grace_earrings(ctx: Ctx) -> None:
 
 # --- ST8-017 Hindering Darkness (TRAP) -------------------------------------
 @effect("ST8-017", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies())
+             or (ctx.support_count() == ctx.support_count(mine=False)
+                 and bool(ctx.me.deck)))
 def hindering_darkness(ctx: Ctx) -> None:
     """-2 attack damage. Then, if the number of cards in both support areas
     match, draw up to 1 card."""
@@ -177,6 +199,7 @@ def hindering_darkness(ctx: Ctx) -> None:
 
 # --- ST8-018 Piercing Arrow of Purity (TRAP) -------------------------------
 @effect("ST8-018", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies()))
 def piercing_arrow(ctx: Ctx) -> None:
     """-1 attack damage. Then, if there are 5 cards or more in your support
     area, an additional -1."""
@@ -190,6 +213,7 @@ def piercing_arrow(ctx: Ctx) -> None:
 
 # --- ST8-019 Bad Omen (TRAP) -----------------------------------------------
 @effect("ST8-019", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.enemy_cookies()))
 def bad_omen(ctx: Ctx) -> None:
     """-2 attack damage. Then, if the number of cards in both support areas
     match, an additional -1."""

@@ -52,7 +52,7 @@ def lobster_activate(ctx: Ctx) -> None:
 
 
 # --- ST4-013 Captain Caviar Cookie ------------------------------------------
-@effect("ST4-013", Trigger.ACTIVATE)
+@effect("ST4-013", Trigger.ON_PLAY)
 def captain_caviar_activate(ctx: Ctx) -> None:
     """View the top 3 cards of your deck; you can draw 1 of them to your hand.
     Then, place the remaining cards at the bottom of your deck in any order."""
@@ -90,7 +90,7 @@ def _trash_cookie_or_stage(ctx: Ctx, max_level: int | None) -> None:
         ctx.opp.trash.append(picked)
 
 
-@effect("ST5-001", Trigger.ACTIVATE)
+@effect("ST5-001", Trigger.ON_PLAY)
 def madeleine_activate(ctx: Ctx) -> None:
     """<{P}> Place 1 of your opponent's LV.1 Cookies from their battle area or
     1 stage card from their stage area into the trash."""
@@ -99,7 +99,7 @@ def madeleine_activate(ctx: Ctx) -> None:
         _trash_cookie_or_stage(ctx, max_level=1)
 
 
-@effect("ST5-006", Trigger.ACTIVATE)
+@effect("ST5-006", Trigger.ON_PLAY)
 def string_gummy_activate(ctx: Ctx) -> None:
     """<{P}{P}> ... LV.2 or lower Cookies ... or 1 stage card ... into the trash."""
     from braverse.cost import Cost

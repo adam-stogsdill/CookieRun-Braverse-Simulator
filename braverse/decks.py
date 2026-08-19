@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from . import config as cfg
 from .cards import CardDB
+from .enums import CardType
 
 
 def _expand(entries: dict[str, int]) -> list[str]:
@@ -118,21 +119,43 @@ class DeckReport:
     size: int
     flip_count: int
     level_counts: dict[int, int]
+    extra_size: int = 0
 
 
-def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT) -> DeckReport:
+def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT,
+             extra: list[str] | None = None) -> DeckReport:
+    """Check a 60-card deck, and the EXTRA deck beside it.
+
+    The two piles are built separately and checked together: the 4-per-number
+    cap spans both, because it counts card numbers you own, not zones.
+    """
     problems: list[str] = []
-    unknown = [c for c in deck if c not in db]
+    extra = list(extra or [])
+    unknown = [c for c in (*deck, *extra) if c not in db]
     if unknown:
         problems.append(f"unknown card ids: {sorted(set(unknown))[:5]}")
 
     known = [db[c] for c in deck if c in db]
+    known_extra = [db[c] for c in extra if c in db]
     if len(deck) != rules.deck_size:
         problems.append(f"deck has {len(deck)} cards, expected {rules.deck_size}")
 
+    # EXTRA cards are played out of their own pile and are never drawn, so one
+    # sitting in the main 60 is a dead card that also breaks the count.
+    if not rules.extra_cards_in_main_deck:
+        misfiled = sorted({c.id for c in known if c.type is CardType.EXTRA})
+        if misfiled:
+            problems.append(f"EXTRA cards belong in the EXTRA deck: {misfiled[:5]}")
+    not_extra = sorted({c.id for c in known_extra if c.type is not CardType.EXTRA})
+    if not_extra:
+        problems.append(f"EXTRA deck holds non-EXTRA cards: {not_extra[:5]}")
+    if len(extra) > rules.extra_deck_size:
+        problems.append(f"EXTRA deck has {len(extra)} cards, "
+                        f"max {rules.extra_deck_size}")
+
     # "You can include up to 4 cards with the same card number" — per number,
-    # so alt-art reprints of one number share the cap.
-    by_number = Counter(c.base_id for c in known)
+    # so alt-art reprints of one number share the cap, and so do the two piles.
+    by_number = Counter(c.base_id for c in (*known, *known_extra))
     over = {n: k for n, k in by_number.items() if k > rules.max_copies_by_number}
     if over:
         problems.append(f"more than {rules.max_copies_by_number} copies: {over}")
@@ -141,7 +164,7 @@ def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT) 
     if flips > rules.max_flip_cards:
         problems.append(f"{flips} FLIP cards, max {rules.max_flip_cards}")
 
-    if any(c.is_ban for c in known):
+    if any(c.is_ban for c in (*known, *known_extra)):
         problems.append("deck contains banned cards")
 
     levels = Counter(c.level for c in known if c.is_cookie)
@@ -152,6 +175,7 @@ def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT) 
         ok=not problems,
         problems=problems,
         size=len(deck),
+        extra_size=len(extra),
         flip_count=flips,
         level_counts=dict(sorted(levels.items(), key=lambda kv: kv[0] or 0)),
     )

@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""A browser front end for the engine: play against a bot, or watch two play.
+"""A browser front end for the engine: play against a bot, a person, or watch.
 
     python play_server.py                 # http://localhost:8080
+    python play_server.py --lan           # also reachable from the network
+
+Two people on one network play through a *room*: one hosts, the other opens the
+link and joins. The server owns the game either way — the browser is only ever
+shown a seat's own view and offered a list of moves the server built, so it can
+neither see the other hand nor name a card that was not on offer.
 
 The engine calls its controllers *re-entrantly* — a trap window and every
 mid-effect decision happen inside ``game.step`` — so a human seat cannot be
@@ -21,6 +27,8 @@ import json
 import mimetypes
 import os
 import random
+import secrets
+import socket
 import sys
 import threading
 import time
@@ -30,6 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from braverse.deckfile import DECK_DIR, read_decklist
 from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, default_db,
                       implemented_pool, validate)
@@ -60,6 +69,14 @@ TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5, "draw": 0.7,
                 "damage": 0.9}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
+
+# How long a polling browser is held before being answered with "nothing new".
+# Long enough that an idle match costs no traffic at all, short enough that a
+# proxy or a sleeping laptop never sits on a dead connection.
+POLL_HOLD = 25.0
+
+# Filled in by `main` when the server is told to listen off this machine.
+LAN_URLS: list[str] = []
 
 
 def scene_seconds(events: list) -> float:
@@ -100,24 +117,49 @@ def scan(pattern: str) -> list[Path]:
     return sorted(found.values(), key=lambda p: p.name)
 
 
+def deck_files() -> dict[str, Path]:
+    """Decklist files by name: loose beside the script, then in `decks/`.
+
+    `decks/` is scanned second so the curated folder wins a name clash with a
+    loose file — co-evolution writes there, and those lists are the ones a run
+    actually stands behind.
+    """
+    found = {p.stem: p for p in scan("*.txt")}
+    found.update({p.stem: p for p in scan(f"{DECK_DIR}/*.txt")})
+    return found
+
+
 def available_decks() -> dict[str, list[str]]:
-    """Starter lists, any decklist file `evolve_deck.py` wrote, saved decks.
+    """Starter lists, every decklist file on disk, then saved decks.
 
     Saved decks come last, so a deck built in the browser wins a name clash
     with a starter list — the user made that one on purpose.
     """
-    decks = {name: list(cards) for name, cards in STARTER_DECKS.items()}
-    for path in sorted(scan("*.txt")):
+    return {name: deck for name, (deck, _) in available_decklists().items()}
+
+
+def available_extra_decks() -> dict[str, list[str]]:
+    """The EXTRA deck that goes with each name in ``available_decks()``.
+
+    Empty for every list that does not play them, which is most of them — a
+    deck without an EXTRA deck is a legal deck.
+    """
+    return {name: extra for name, (_, extra) in available_decklists().items()}
+
+
+def available_decklists() -> dict[str, tuple[list[str], list[str]]]:
+    """Every playable list as ``(deck, extra)``."""
+    lists: dict[str, tuple[list[str], list[str]]] = {
+        name: (list(cards), []) for name, cards in STARTER_DECKS.items()}
+    for name, path in sorted(deck_files().items()):
         try:
-            text = path.read_text()
-            blob = json.loads(text[text.index("{", text.rindex("\n\n")):])
-            deck = list(blob["deck"])
+            deck, extra = read_decklist(path)
         except Exception:
-            continue
+            continue        # not one of ours, or half-written by a live run
         if len(deck) >= 10:
-            decks[path.stem] = deck
-    decks.update(load_saved_decks())
-    return decks
+            lists[name] = (deck, extra)
+    lists.update(load_saved_decks())
+    return lists
 
 
 def deck_source(name: str) -> str:
@@ -126,6 +168,9 @@ def deck_source(name: str) -> str:
         return "saved"
     if name in STARTER_DECKS:
         return "starter"
+    path = deck_files().get(name)
+    if path is not None and path.parent.name == DECK_DIR:
+        return "evolved"
     return "file"
 
 
@@ -150,7 +195,13 @@ def deck_store() -> Path:
     return home / DECK_STORE_NAME
 
 
-def load_saved_decks() -> dict[str, list[str]]:
+def load_saved_decks() -> dict[str, tuple[list[str], list[str]]]:
+    """Browser-built decks, as ``{name: (deck, extra)}``.
+
+    Two stored shapes: a bare list, which is every deck saved before EXTRA
+    decks existed, and ``{"deck": [...], "extra": [...]}``. Both are read, so
+    an existing store keeps working untouched.
+    """
     path = deck_store()
     if not path.is_file():
         return {}
@@ -160,14 +211,29 @@ def load_saved_decks() -> dict[str, list[str]]:
         return {}
     if not isinstance(blob, dict):
         return {}
-    return {str(name): [str(c) for c in cards]
-            for name, cards in blob.items() if isinstance(cards, list)}
+    out: dict[str, tuple[list[str], list[str]]] = {}
+    for name, saved in blob.items():
+        if isinstance(saved, list):
+            out[str(name)] = ([str(c) for c in saved], [])
+        elif isinstance(saved, dict) and isinstance(saved.get("deck"), list):
+            out[str(name)] = ([str(c) for c in saved["deck"]],
+                              [str(c) for c in saved.get("extra") or []])
+    return out
 
 
-def write_saved_decks(decks: dict[str, list[str]]) -> None:
+def write_saved_decks(decks: dict) -> None:
+    """Store every deck in the ``{"deck": ..., "extra": ...}`` shape.
+
+    A bare list of card ids is accepted as a deck with no EXTRA deck, which is
+    the shape every caller used before EXTRA decks existed.
+    """
     path = deck_store()
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(decks, indent=2, sort_keys=True))
+    blob = {}
+    for name, saved in decks.items():
+        deck, extra = (saved, []) if isinstance(saved, list) else saved
+        blob[name] = {"deck": list(deck), "extra": list(extra)}
+    tmp.write_text(json.dumps(blob, indent=2, sort_keys=True))
     tmp.replace(path)          # never leave a half-written store behind
 
 
@@ -237,16 +303,29 @@ def card_json(db: CardDB, card_id: str) -> dict:
 POOL_LIMIT = 120          # cards returned per search; the browser pages through
 
 
-def deck_payload(db: CardDB, deck: Sequence[str], name: str = "") -> dict:
-    """One decklist, collapsed to distinct cards, with its legality report."""
+def _collapse(db: CardDB, deck: Sequence[str]) -> list[dict]:
     counts: dict[str, int] = {}
     for card_id in deck:
         counts[card_id] = counts.get(card_id, 0) + 1
     cards = [dict(card_json(db, cid), count=n)
              for cid, n in counts.items() if cid in db]
     cards.sort(key=lambda c: (c["type"], -(c["level"] or 0), c["name"]))
-    report = validate(list(deck), db)
-    return {"name": name, "cards": cards, "size": len(deck),
+    return cards
+
+
+def deck_payload(db: CardDB, deck: Sequence[str], name: str = "",
+                 extra: Sequence[str] | None = None) -> dict:
+    """One decklist, collapsed to distinct cards, with its legality report.
+
+    The EXTRA deck rides along as its own list: it is a separate pile with its
+    own size cap, but the two are validated together because the copy limit
+    counts card numbers across both.
+    """
+    extra = list(extra or [])
+    report = validate(list(deck), db, extra=extra)
+    return {"name": name, "cards": _collapse(db, deck), "size": len(deck),
+            "extra": _collapse(db, extra), "extraSize": len(extra),
+            "extraMax": RULES.extra_deck_size,
             "legal": report.ok, "problems": report.problems,
             "flipCount": report.flip_count, "levels": report.level_counts}
 
@@ -285,7 +364,8 @@ def pool_meta(db: CardDB) -> dict:
         "colors": colors,
         "rules": {"deckSize": RULES.deck_size,
                   "maxCopies": RULES.max_copies_by_number,
-                  "maxFlip": RULES.max_flip_cards},
+                  "maxFlip": RULES.max_flip_cards,
+                  "extraSize": RULES.extra_deck_size},
     }
 
 
@@ -357,6 +437,9 @@ def cookie_json(db: CardDB, cookie: Cookie) -> dict:
         # The HP pile is face down. Only its size is public.
         "hpPile": len(cookie.hp_cards),
         "hpPileCards": [instance_json(db, c) for c in cookie.hp_cards],
+        # 【Awaken】: the cards this one was stacked on top of, so the board can
+        # show that a Cookie is two cards deep.
+        "under": [instance_json(db, c) for c in cookie.under],
     }
     return out
 
@@ -374,6 +457,10 @@ def player_json(db: CardDB, player, state: GameState) -> dict:
         "trash": [instance_json(db, c) for c in player.trash],
         "trashCount": len(player.trash),
         "break": [instance_json(db, c) for c in player.break_area],
+        # The EXTRA deck is not a hidden zone: both players may read it at any
+        # time, so it is projected in full for either seat.
+        "extra": [instance_json(db, c) for c in player.extra_deck],
+        "extraCount": len(player.extra_deck),
         "breakLevel": player.break_level_total(db),
         "supportedThisTurn": player.supported_this_turn,
     }
@@ -406,6 +493,8 @@ def skill_label(db: CardDB, state: GameState, action: A.Action) -> str:
         return (attack.name if attack and attack.name else "Attack")
     if isinstance(action, A.ActivateSkill):
         return "Activate"
+    if isinstance(action, A.PlayExtra):
+        return "Awaken" if action.onto is not None else "EXTRA"
     if isinstance(action, A.PlayCookie):
         return "Play"
     if isinstance(action, A.PlaySupportCard):
@@ -441,6 +530,13 @@ def action_json(db: CardDB, state: GameState, index: int, action: A.Action) -> d
     if target is not None:
         out["uids"].append(target)
         out["target"] = target
+    host = getattr(action, "onto", None)
+    if host is not None:
+        # An 【Awaken】 is offered on the Cookie it lands on, not on the card in
+        # the EXTRA deck: that is the piece of the board you are pointing at.
+        out["uids"].append(host)
+        out["target"] = host
+        out["subject"] = host
     return out
 
 
@@ -507,6 +603,11 @@ def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
     lowered = prompt.lower()
     if "discard" in lowered:
         verb = "Discard"
+    elif "break area" in lowered:
+        # The refresh cost sends a Cookie to your break area — one step closer
+        # to losing. Naming it "Play Cookie" because the word "Cookie" appears
+        # in the prompt reads as a reward for the click it actually punishes.
+        verb = "To Break Area"
     elif "cookie" in lowered:
         verb = "Play Cookie"
     else:
@@ -588,6 +689,7 @@ class MatchConfig:
     delay: float = 0.7
     paused: bool = False
     reveal: bool = False   # show both hands even in a human game
+    online: bool = False   # two browsers, one seat each: hide per viewer
 
 
 class Match:
@@ -607,7 +709,8 @@ class Match:
         self.step_once = False
         self.error: Optional[str] = None
         self.started = time.time()
-        self._view_cache: tuple = (-1, None)
+        self.online = bool(config.online)
+        self._view_cache: dict = {}   # (version, reveal, viewer) -> rendered view
         self._prev: Optional[dict] = None   # last snapshot, for reveal diffing
         self._event_id = 0
         self._gated_event = 0
@@ -616,14 +719,16 @@ class Match:
         self._log_mark = 0        # log lines already turned into events
         self._event_mark = 0      # structured engine records already consumed
 
-        decks = available_decks()
-        self.deck_lists = [list(decks[name]) for name in config.decks]
+        decks = available_decklists()
+        self.deck_lists = [list(decks[name][0]) for name in config.decks]
+        self.extra_lists = [list(decks[name][1]) for name in config.decks]
         seed = config.seed if config.seed is not None else random.randrange(1 << 30)
         self.seed = seed
         self.controllers = [
             make_pilot(config.pilots[i], i, db, seed + 100 * i, self) for i in range(2)
         ]
-        self.game = Game(self.deck_lists, self.controllers, db=db, seed=seed)
+        self.game = Game(self.deck_lists, self.controllers,
+                         extra_decks=self.extra_lists, db=db, seed=seed)
         self.human_seats = [i for i, p in enumerate(config.pilots) if p == "human"]
         self.toss = None
         self.thread = threading.Thread(target=self._run, daemon=True)
@@ -953,42 +1058,106 @@ class Match:
             return [] if count > 1 else None
         return [answer] if count > 1 else answer
 
-    def answer(self, index) -> bool:
+    def answer(self, index, *, seat: Optional[int] = None,
+               pending_id: Optional[int] = None) -> bool:
+        """Answer the open question. Returns False if it was not yours to answer.
+
+        ``seat`` is checked against the seat the engine is actually asking, so
+        an online opponent cannot play your turn for you, and ``pending_id``
+        drops an answer to a question that has already moved on — a double
+        click either side of a resolution would otherwise land on whatever
+        came next.
+        """
         with self.cond:
             if self.pending is None:
                 return False
+            if seat is not None and self.pending["seat"] != seat:
+                return False
+            if pending_id is not None and self.pending["id"] != pending_id:
+                return False
             self._answer = index
             self._answered = True
+            # Retire the question here rather than waiting for the match thread
+            # to wake: a held poll is released by the version bump below, and it
+            # must not be released onto a prompt that has already been answered.
+            self.pending = None
+            self.version += 1
             self.cond.notify_all()
         return True
 
+    def wait_for(self, version: int, timeout: float = POLL_HOLD) -> None:
+        """Hold a polling browser until the match moves past ``version``."""
+        deadline = time.time() + timeout
+        with self.cond:
+            while not self.stopped and self.version <= version:
+                left = deadline - time.time()
+                if left <= 0:
+                    return
+                self.cond.wait(min(0.5, left))
+
     # -- what the browser is allowed to see -------------------------------
-    def view(self) -> dict:
+    def view(self, viewer: Optional[int] = None) -> dict:
+        """The match as one seat is allowed to see it.
+
+        ``viewer`` is the seat asking, or None for a spectator — and in an
+        online match that is the *only* thing that decides what comes out, so
+        two browsers polling the same match get two different answers.
+        """
         with self.cond:
             version = self.version
-            key = (version, self.config.reveal)
-            if self._view_cache[0] == key:
-                cached = dict(self._view_cache[1])
+            key = (version, self.config.reveal, viewer)
+            if key in self._view_cache:
+                cached = dict(self._view_cache[key])
                 cached["paused"] = self.config.paused
                 cached["delay"] = self.config.delay
                 return cached
             snap = json.loads(json.dumps(self.snapshot)) if self.snapshot else {}
             pending = self.pending
             error = self.error
+        pending = self._hide_pending(pending, viewer)
         if snap:
-            self._hide(snap)
+            self._hide(snap, viewer)
             snap["version"] = version
             snap["pending"] = pending
             snap["error"] = error
             snap["paused"] = self.config.paused
             snap["delay"] = self.config.delay
             snap["reveal"] = self.config.reveal
-        result = snap or {"version": version, "error": error, "pending": None}
+            snap["online"] = self.online
+            snap["viewerSeat"] = viewer
+        result = snap or {"version": version, "error": error, "pending": pending,
+                          "online": self.online, "viewerSeat": viewer}
         with self.cond:
-            self._view_cache = (key, result)
+            # One entry per (version, viewer); versions turn over constantly, so
+            # drop the lot rather than grow a cache nobody reads twice.
+            if len(self._view_cache) > 16:
+                self._view_cache.clear()
+            self._view_cache[key] = result
         return result
 
-    def _hide(self, snap: dict) -> None:
+    def _hide_pending(self, pending: Optional[dict], viewer: Optional[int]) -> Optional[dict]:
+        """What the seat *not* being asked is told about the question.
+
+        Its options are the asking player's hand as often as not, so nothing
+        but the fact that a question is out goes to anyone else. The prompt
+        text stays: "Sea Fairy Cookie — choose a card to discard" is public
+        information, and without it the wait reads as the game having hung.
+        """
+        if pending is None or not self.online or pending["seat"] == viewer:
+            return pending
+        return {
+            "seat": pending["seat"],
+            "prompt": pending["prompt"],
+            "id": pending["id"],
+            "options": [],
+            "optional": False,
+            "count": 1,
+            "pick": None,
+            "centre": None,
+            "waiting": True,
+        }
+
+    def _hide(self, snap: dict, viewer: Optional[int] = None) -> None:
         """Strip hidden information on the way out to the browser.
 
         Filtering here rather than at snapshot time keeps one true state on the
@@ -1002,9 +1171,16 @@ class Match:
         # human seat means it never is.
         reveal = self.config.reveal and not self.human_seats
         for player in snap["players"]:
+            if self.online:
+                # Two browsers, two seats: the hot-seat rule below would hand
+                # each player the other's hand, and `reveal` is not offered at
+                # all. A viewer holds one seat's cards and nobody else's; a
+                # spectator (seat None) holds none.
+                if player["index"] != viewer:
+                    player["hand"] = []
             # Hot seat sees both hands — two people sharing one screen have no
             # secrets from each other, and the setup dialog says so.
-            if not reveal and player["index"] not in self.human_seats:
+            elif not reveal and player["index"] not in self.human_seats:
                 player["hand"] = []
             for cookie in player["battle"]:
                 # The HP pile stays face down for everyone, including its owner
@@ -1014,12 +1190,201 @@ class Match:
 
 
 # ---------------------------------------------------------------------------
+# rooms: one match, two browsers
+# ---------------------------------------------------------------------------
+# No I, O, 0 or 1 — the code gets read down a phone or typed off a screen.
+CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def room_code() -> str:
+    return "".join(secrets.choice(CODE_LETTERS) for _ in range(4))
+
+
+class Room:
+    """A two-seat match, addressed by a code and entered with a token.
+
+    The code is public — it is in the link you send — so it grants nothing but
+    the right to watch. The token is the seat: it is minted once when you take
+    the seat, never appears in another player's view, and is what lets the
+    server answer "is this yours to play?" on every move.
+    """
+
+    # A seat polling normally sits *inside* a held request for most of its life,
+    # so the last time it was heard from is no use on its own — it would read as
+    # away seconds after taking its turn. Presence is "holding a poll right now,
+    # or heard from since before the longest one could have started".
+    GONE = POLL_HOLD + 10
+    IDLE_LIMIT = 30 * 60    # a room nobody has polled for this long is reaped
+
+    def __init__(self, code: str, db: CardDB, deck: str, name: str):
+        self.code = code
+        self.db = db
+        self.lock = threading.Lock()
+        self.cond = threading.Condition(self.lock)
+        self.decks: list[Optional[str]] = [deck, None]
+        self.names = [name or "Player 1", ""]
+        self.tokens: list[Optional[str]] = [secrets.token_urlsafe(16), None]
+        self.seen = [time.time(), 0.0]
+        self.holding = [0, 0]   # polls this seat has in flight right now
+        self.created = time.time()
+        self.match: Optional[Match] = None
+        self.version = 0        # lobby version, so a waiting host is woken
+
+    # -- seats -----------------------------------------------------------
+    def seat_of(self, token: Optional[str]) -> Optional[int]:
+        if not token:
+            return None
+        for seat, held in enumerate(self.tokens):
+            # Constant-time compare: the token is the only thing standing
+            # between a spectator and playing someone else's turn.
+            if held is not None and secrets.compare_digest(held, token):
+                return seat
+        return None
+
+    def join(self, deck: str, name: str) -> tuple[int, str]:
+        """Take the first free seat — which is not always seat 1.
+
+        The host can walk away from their own room, and someone else should be
+        able to sit down in the empty chair rather than find the room wedged
+        with one player in it and no way in.
+        """
+        with self.cond:
+            free = next((i for i, t in enumerate(self.tokens) if t is None), None)
+            if free is None:
+                raise ValueError("that room is full")
+            token = secrets.token_urlsafe(16)
+            self.decks[free] = deck
+            self.names[free] = name or f"Player {free + 1}"
+            self.tokens[free] = token
+            self.seen[free] = time.time()
+            ready = all(t is not None for t in self.tokens)
+            self.version += 1
+            self.cond.notify_all()
+        if ready:
+            self._start()
+        return free, token
+
+    def _start(self) -> None:
+        config = MatchConfig(
+            decks=[self.decks[0], self.decks[1]],
+            pilots=["human", "human"],
+            # `reveal` is a spectator's toggle over two bots; with two people
+            # playing it would be a cheat, and the control route refuses it.
+            reveal=False,
+            delay=0.0,
+            online=True,
+        )
+        match = Match(config, self.db)
+        with self.cond:
+            old, self.match = self.match, match
+            if old is not None:
+                # A rematch has to keep counting from where the last game left
+                # off. A browser holding a poll is asking to be told when the
+                # state passes the version it already has; restarting at zero
+                # would leave it waiting out the full hold before it noticed
+                # that the game it is waiting on is not the game any more.
+                match.version = old.version + 1
+            self.version += 1
+            self.cond.notify_all()
+        if old is not None:
+            old.stop()
+        match.start()
+
+    def rematch(self) -> bool:
+        """Deal again with the same decks. Only once the last game is over."""
+        with self.cond:
+            match = self.match
+            if any(t is None for t in self.tokens):
+                return False
+            if match is not None and not (match.stopped or match.error
+                                          or match.snapshot.get("over")):
+                return False
+        self._start()
+        return True
+
+    def leave(self, seat: int) -> None:
+        with self.cond:
+            match, self.match = self.match, None
+            self.tokens[seat] = None
+            self.decks[seat] = None
+            self.names[seat] = ""
+            self.seen[seat] = 0.0
+            self.version += 1
+            self.cond.notify_all()
+        if match is not None:
+            # Releases the match thread, which may be blocked forever on a
+            # question the seat that just walked away was being asked.
+            match.stop()
+
+    # -- presence --------------------------------------------------------
+    def touch(self, seat: Optional[int]) -> None:
+        if seat is not None:
+            self.seen[seat] = time.time()
+
+    def holds(self, seat: Optional[int], delta: int) -> None:
+        """Count a poll into or out of flight, so a held one reads as present."""
+        if seat is not None:
+            with self.cond:
+                self.holding[seat] = max(0, self.holding[seat] + delta)
+
+    def here(self, seat: Optional[int]) -> bool:
+        if seat is None or self.tokens[seat] is None:
+            return False
+        if self.holding[seat] > 0:
+            return True
+        return time.time() - self.seen[seat] < self.GONE
+
+    def idle(self) -> bool:
+        return time.time() - max(self.seen + [self.created]) > self.IDLE_LIMIT
+
+    def wait_for_start(self, timeout: float = POLL_HOLD) -> None:
+        """Hold the host's poll in the lobby until someone joins."""
+        deadline = time.time() + timeout
+        with self.cond:
+            while self.match is None:
+                left = deadline - time.time()
+                if left <= 0:
+                    return
+                self.cond.wait(min(0.5, left))
+
+    def lobby(self) -> dict:
+        with self.cond:
+            return {
+                "code": self.code,
+                "seats": [
+                    {"taken": t is not None, "name": n, "deck": d, "here": self.here(i)}
+                    for i, (t, n, d) in enumerate(zip(self.tokens, self.names, self.decks))
+                ],
+                "started": self.match is not None,
+                "version": self.version,
+            }
+
+
+def lan_urls(port: int) -> list[str]:
+    """Addresses this machine can be reached on, for the host to share."""
+    urls = []
+    try:
+        # No packet is sent; this just asks the routing table which interface
+        # would carry traffic out, which is the one a phone on the wifi can see.
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.connect(("192.0.2.1", 9))   # TEST-NET-1: routable, never live
+            urls.append(f"http://{probe.getsockname()[0]}:{port}/")
+        finally:
+            probe.close()
+    except OSError:
+        pass
+    return urls
+
+
+# ---------------------------------------------------------------------------
 # HTTP
 # ---------------------------------------------------------------------------
 class Server:
     def __init__(self, db: CardDB):
         self.db = db
         self.match: Optional[Match] = None
+        self.rooms: dict[str, Room] = {}
         self.lock = threading.Lock()
 
     def new_match(self, config: MatchConfig) -> Match:
@@ -1030,6 +1395,41 @@ class Server:
             self.match = match
         match.start()
         return match
+
+    # -- rooms -----------------------------------------------------------
+    def new_room(self, deck: str, name: str) -> Room:
+        with self.lock:
+            self._reap()
+            for _ in range(50):
+                code = room_code()
+                if code not in self.rooms:
+                    break
+            else:
+                raise ValueError("too many rooms open")
+            room = Room(code, self.db, deck, name)
+            self.rooms[code] = room
+        return room
+
+    def room(self, code: Optional[str]) -> Optional[Room]:
+        if not code:
+            return None
+        with self.lock:
+            return self.rooms.get(code.strip().upper())
+
+    def _reap(self) -> None:
+        """Drop rooms nobody has polled in a long while. Caller holds the lock."""
+        for code, room in [(c, r) for c, r in self.rooms.items() if r.idle()]:
+            del self.rooms[code]
+            if room.match is not None:
+                room.match.stop()
+
+    def close(self) -> None:
+        with self.lock:
+            rooms = list(self.rooms.values())
+            self.rooms.clear()
+        for room in rooms:
+            if room.match is not None:
+                room.match.stop()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1062,6 +1462,31 @@ class Handler(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         self._send(200, path.read_bytes(), ctype, cache=cache)
 
+    def _is_local(self) -> bool:
+        """Did this request come from the machine running the server?
+
+        With `--lan` the port is open to the network, and the deck store is a
+        file on the host's disk. Someone who joined a game has no business
+        saving over or deleting the decks of whoever invited them, so the
+        routes that write go no further than the keyboard they belong to.
+        """
+        host = (self.client_address[0] or "").split("%")[0]
+        return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _deck_problem(self, name: str) -> str:
+        """Why this deck cannot be taken into an online match, or "".
+
+        A local match will happily start on a half-built list — you are only
+        playing yourself — but someone else is waiting on the other end of this
+        one, so it is checked at the door.
+        """
+        decks = available_decklists()
+        if name not in decks:
+            return "unknown deck"
+        deck, extra = decks[name]
+        report = validate(deck, self.app.db, extra=extra)
+        return "" if report.ok else "; ".join(report.problems)
+
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
@@ -1077,7 +1502,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self._file(VIEWER / "index.html")
         elif path in ("/app.js", "/sfx.js", "/style.css",
-                      "/builder.js", "/builder.css"):
+                      "/builder.js", "/builder.css",
+                      "/table.js", "/table.css"):
             self._file(VIEWER / path.lstrip("/"))
         elif path.startswith("/card_images/"):
             name = Path(path).name
@@ -1090,35 +1516,113 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "decks": [{"name": n, "size": len(c)} for n, c in decks.items()],
                 "pilots": available_pilots(),
+                # Empty unless the server was started with --lan: without it
+                # nothing off this machine can reach the port, and offering a
+                # link that cannot work is worse than offering none.
+                "lan": LAN_URLS,
             })
         elif path == "/api/state":
-            match = self.app.match
-            self._json(match.view() if match else {"version": 0, "idle": True})
+            self._state(self._query())
+        elif path == "/api/room":
+            room = self.app.room(self._query().get("room"))
+            if room is None:
+                self._json({"error": "no room with that code", "gone": True}, 404)
+                return
+            seat = room.seat_of(self._query().get("token"))
+            room.touch(seat)
+            self._json({"room": room.lobby(), "seat": seat})
         elif path == "/api/deck":
             name = self._query().get("name", "")
-            decks = available_decks()
+            decks = available_decklists()
             if name not in decks:
                 self._json({"error": "unknown deck"}, 404)
                 return
-            payload = deck_payload(self.app.db, decks[name], name)
+            deck, extra = decks[name]
+            payload = deck_payload(self.app.db, deck, name, extra)
             payload["source"] = deck_source(name)
-            payload["list"] = decks[name]
+            payload["list"] = deck
+            payload["extraList"] = extra
             self._json(payload)
         elif path == "/api/pool":
             self._json({**pool_meta(self.app.db),
                         **search_pool(self.app.db, self._query())})
         elif path == "/api/decks":
-            decks = available_decks()
+            decks = available_decklists()
             self._json({"decks": [
                 {"name": name, "size": len(cards), "source": deck_source(name),
-                 "legal": validate(cards, self.app.db).ok}
-                for name, cards in decks.items()]})
+                 "extraSize": len(extra),
+                 "legal": validate(cards, self.app.db, extra=extra).ok}
+                for name, (cards, extra) in decks.items()]})
         else:
             self._send(404, b"not found", "text/plain")
 
     def _query(self) -> dict:
         from urllib.parse import parse_qs, urlparse
         return {k: v[0] for k, v in parse_qs(urlparse(self.path).query).items()}
+
+    @staticmethod
+    def _since(query: dict) -> Optional[int]:
+        """The version the browser already has, if it asked to be held."""
+        try:
+            return int(query["since"])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _state(self, query: dict) -> None:
+        """The board, for a local match or a room.
+
+        With `since`, the response is held until something actually changes —
+        an idle match costs one open connection instead of three polls a
+        second, and a move reaches the other player as fast as the network
+        carries it rather than on the next tick.
+        """
+        since = self._since(query)
+        code = query.get("room")
+        if not code:
+            match = self.app.match
+            if match is None:
+                self._json({"version": 0, "idle": True})
+                return
+            if since is not None:
+                match.wait_for(since)
+            self._json(match.view())
+            return
+
+        room = self.app.room(code)
+        if room is None:
+            self._json({"error": "no room with that code", "gone": True}, 404)
+            return
+        seat = room.seat_of(query.get("token"))
+        room.touch(seat)
+        match = room.match
+        room.holds(seat, +1)
+        try:
+            if match is None:
+                # Sitting in the lobby: hold the host's poll until someone joins.
+                if since is not None:
+                    room.wait_for_start()
+                match = room.match
+            if match is None:
+                self._json({"version": 0, "idle": True, "lobby": True,
+                            "room": room.lobby(), "seat": seat})
+                return
+            if since is not None:
+                match.wait_for(since)
+        finally:
+            room.touch(seat)
+            room.holds(seat, -1)
+        view = match.view(seat)
+        view["room"] = room.lobby()
+        view["seat"] = seat
+        view["opponentHere"] = room.here(1 - seat) if seat is not None else None
+        self._json(view)
+
+    def _seated(self, body: dict) -> tuple[Optional[Room], Optional[int]]:
+        """The room and seat this request is entitled to act as, if any."""
+        room = self.app.room(body.get("room"))
+        if room is None:
+            return None, None
+        return room, room.seat_of(body.get("token"))
 
     def do_POST(self):
         path = self.path.split("?")[0]
@@ -1150,14 +1654,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "seed": match.seed})
         elif path == "/api/deck/validate":
             cards = clean_card_list(body.get("cards"))
-            self._json(deck_payload(self.app.db, cards, clean_deck_name(body.get("name"))))
+            self._json(deck_payload(self.app.db, cards,
+                                    clean_deck_name(body.get("name")),
+                                    clean_card_list(body.get("extra"))))
         elif path == "/api/decks/save":
+            if not self._is_local():
+                self._json({"error": "decks can only be changed on the machine "
+                                     "running the server"}, 403)
+                return
             name = clean_deck_name(body.get("name"))
             cards = clean_card_list(body.get("cards"))
+            extra = clean_card_list(body.get("extra"))
             if not name:
                 self._json({"error": "give the deck a name"}, 400)
                 return
-            unknown = sorted({c for c in cards if c not in self.app.db})
+            unknown = sorted({c for c in (*cards, *extra) if c not in self.app.db})
             if unknown:
                 self._json({"error": f"unknown card ids: {unknown[:5]}"}, 400)
                 return
@@ -1166,16 +1677,20 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with _store_lock:
                     decks = load_saved_decks()
-                    decks[name] = cards
+                    decks[name] = (cards, extra)
                     write_saved_decks(decks)
             except OSError as exc:
                 self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
                 return
-            payload = deck_payload(self.app.db, cards, name)
+            payload = deck_payload(self.app.db, cards, name, extra)
             payload["saved"] = True
             payload["path"] = str(deck_store())
             self._json(payload)
         elif path == "/api/decks/delete":
+            if not self._is_local():
+                self._json({"error": "decks can only be changed on the machine "
+                                     "running the server"}, 403)
+                return
             name = clean_deck_name(body.get("name"))
             try:
                 with _store_lock:
@@ -1189,19 +1704,87 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
                 return
             self._json({"ok": True})
+        elif path == "/api/room/new":
+            deck = str(body.get("deck") or "")
+            problem = self._deck_problem(deck)
+            if problem:
+                self._json({"error": problem}, 400)
+                return
+            try:
+                room = self.app.new_room(deck, clean_deck_name(body.get("name")))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 503)
+                return
+            self._json({"room": room.code, "seat": 0, "token": room.tokens[0]})
+        elif path == "/api/room/join":
+            room = self.app.room(body.get("room"))
+            if room is None:
+                self._json({"error": "no room with that code", "gone": True}, 404)
+                return
+            deck = str(body.get("deck") or "")
+            problem = self._deck_problem(deck)
+            if problem:
+                self._json({"error": problem}, 400)
+                return
+            try:
+                seat, token = room.join(deck, clean_deck_name(body.get("name")))
+            except ValueError as exc:
+                self._json({"error": str(exc)}, 409)
+                return
+            self._json({"room": room.code, "seat": seat, "token": token})
+        elif path == "/api/room/leave":
+            room, seat = self._seated(body)
+            if room is None or seat is None:
+                self._json({"error": "not your seat"}, 403)
+                return
+            room.leave(seat)
+            self._json({"ok": True})
+        elif path == "/api/room/rematch":
+            room, seat = self._seated(body)
+            if room is None or seat is None:
+                self._json({"error": "not your seat"}, 403)
+                return
+            if not room.rematch():
+                self._json({"error": "that game is still going"}, 409)
+                return
+            self._json({"ok": True})
         elif path == "/api/choose":
-            match = self.app.match
+            room, seat = self._seated(body)
+            if body.get("room"):
+                if room is None:
+                    self._json({"error": "no room with that code", "gone": True}, 404)
+                    return
+                if seat is None:
+                    # A spectator has the room code — everyone with the link
+                    # does — but no token, and so no move to make.
+                    self._json({"error": "not your seat"}, 403)
+                    return
+                match = room.match
+            else:
+                match = self.app.match
             if match is None:
                 self._json({"error": "no match"}, 400)
                 return
             index = body.get("index")
-            if isinstance(index, list):
-                picked = [int(i) for i in index]
-            else:
-                picked = None if index is None else int(index)
-            ok = match.answer(picked)
+            try:
+                if isinstance(index, list):
+                    picked = [int(i) for i in index]
+                else:
+                    picked = None if index is None else int(index)
+            except (TypeError, ValueError):
+                self._json({"error": "bad index"}, 400)
+                return
+            pending_id = body.get("pendingId")
+            ok = match.answer(picked, seat=seat,
+                              pending_id=int(pending_id) if pending_id is not None else None)
             self._json({"ok": ok})
         elif path == "/api/control":
+            if body.get("room"):
+                # Pause, step, speed and reveal are a spectator's controls over
+                # a bot game. In a match against a person, pausing would freeze
+                # the opponent and reveal would be a cheat.
+                self._json({"error": "not available in an online match"}, 403)
+                return
             match = self.app.match
             if match is None:
                 self._json({"error": "no match"}, 400)
@@ -1244,10 +1827,18 @@ def main() -> None:
     import signal
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8080)
+    # $PORT lets a supervisor (or a preview harness juggling several sessions)
+    # hand the server a free port without rewriting the command line.
+    parser.add_argument("--port", type=int,
+                        default=int(os.environ.get("PORT") or 8080))
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--lan", action="store_true",
+                        help="listen on every interface so someone else on this "
+                             "network can join a room")
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
+    if args.lan and args.host == "127.0.0.1":
+        args.host = "0.0.0.0"
 
     db = default_db()
     Handler.app = Server(db)
@@ -1262,8 +1853,13 @@ def main() -> None:
         print(f"or pick another port:\n    python play_server.py --port {args.port + 1}")
         raise SystemExit(1)
 
-    url = f"http://{args.host}:{args.port}/"
+    local = f"http://127.0.0.1:{args.port}/"
+    url = local if args.host in ("0.0.0.0", "::") else f"http://{args.host}:{args.port}/"
     print(f"CookieRun: Braverse — visual player on {url}   (ctrl-c to stop)")
+    if args.host not in ("127.0.0.1", "localhost"):
+        LAN_URLS[:] = lan_urls(args.port)
+        for shared in LAN_URLS:
+            print(f"  others on this network can join at {shared}")
     if not args.no_browser:
         import webbrowser
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
@@ -1283,6 +1879,7 @@ def main() -> None:
     finally:
         if Handler.app.match is not None:
             Handler.app.match.stop()   # release a match thread blocked on a human
+        Handler.app.close()            # and the same for every open room
         httpd.server_close()
         print("bye")
 

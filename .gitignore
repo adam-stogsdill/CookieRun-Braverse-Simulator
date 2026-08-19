@@ -22,3 +22,9 @@ saved_decks.json
 # Training / evolution output.
 *.log
 *.err
+
+ClAUDE.md
+
+*.pt
+rl_agent_*
+*.sh

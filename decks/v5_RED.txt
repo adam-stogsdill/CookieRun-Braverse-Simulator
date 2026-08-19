@@ -1,0 +1,110 @@
+# run: v5
+# archetype: RED
+# round: 7
+# holdout: 0.66
+# validation: 0.65
+
+COOKIE (35)
+  4x ST6-003    Devil Cookie                     LV2 HP4
+  4x ST6-004    Pitaya Dragon Cookie             LV2 HP4
+  4x ST6-011    Habanero Cookie                  LV1 HP2
+  3x ST1-002    Ninja Cookie                     LV2 HP2
+  3x ST1-005    Leek Cookie                      LV2 HP3
+  3x ST6-010    Peperoncino Cookie               LV1 HP3
+  2x ST1-008    Cherry Blossom Cookie            LV3 HP1
+  2x ST1-009    Espresso Cookie                  LV3 HP5
+  2x ST1-014    Peperoncino Cookie               LV3 HP6
+  2x ST6-001    Mala Sauce Cookie                LV1 HP2
+  2x ST6-002    Fire Spirit Cookie               LV3 HP6
+  2x ST6-012    Picky Pyro-tiger                 LV1 HP2
+  1x ST1-006    GingerBright                     LV2 HP4
+  1x ST1-007    Mint Choco Cookie                LV3 HP3
+FLIP (16)
+  3x ST1-004    Carrot Cookie                    LV1 HP1
+  3x ST1-015    Pistachio Cookie                 LV3 HP3
+  3x ST6-006    Cherry Cookie                    LV2 HP4
+  2x ST1-001    Princess Cookie                  LV2 HP2
+  2x ST6-007    Chili Pepper Cookie              LV3 HP4
+  2x ST6-008    Candy Apple Cookie               LV2 HP3
+  1x ST1-013    Adventurer Cookie                LV1 HP1
+ITEM (5)
+  2x ST1-017    Exceptional Cake Knife           
+  2x ST6-016    Dragon's Breath                  
+  1x ST1-018    Sugar-Coated Snail Shell         
+TRAP (3)
+  2x ST1-020    Overhydrated Dough Swamp         
+  1x ST6-019    Power Unleashed                  
+STAGE (1)
+  1x ST1-022    Burning Jelly Volcano            
+
+legal: True  size 60  flips 16
+
+{
+ "deck": [
+  "ST1-004",
+  "ST6-004",
+  "ST1-001",
+  "ST1-018",
+  "ST1-014",
+  "ST1-017",
+  "ST6-011",
+  "ST6-008",
+  "ST1-009",
+  "ST6-004",
+  "ST1-015",
+  "ST6-001",
+  "ST1-015",
+  "ST1-007",
+  "ST6-001",
+  "ST1-008",
+  "ST1-002",
+  "ST1-001",
+  "ST1-009",
+  "ST6-006",
+  "ST1-002",
+  "ST6-007",
+  "ST6-010",
+  "ST6-008",
+  "ST6-016",
+  "ST6-012",
+  "ST6-011",
+  "ST1-014",
+  "ST6-012",
+  "ST1-013",
+  "ST6-004",
+  "ST6-003",
+  "ST6-011",
+  "ST6-006",
+  "ST6-003",
+  "ST6-006",
+  "ST6-010",
+  "ST6-002",
+  "ST6-007",
+  "ST6-004",
+  "ST1-008",
+  "ST1-015",
+  "ST1-017",
+  "ST1-005",
+  "ST6-003",
+  "ST6-002",
+  "ST1-005",
+  "ST1-006",
+  "ST1-004",
+  "ST1-002",
+  "ST6-019",
+  "ST6-016",
+  "ST1-022",
+  "ST6-011",
+  "ST1-020",
+  "ST6-003",
+  "ST6-010",
+  "ST1-005",
+  "ST1-004",
+  "ST1-020"
+ ],
+ "run": "v5",
+ "archetype": "RED",
+ "round": 7,
+ "holdout": 0.66,
+ "validation": 0.65
+}

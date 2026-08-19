@@ -8,8 +8,8 @@ players' attack costs.
 from __future__ import annotations
 
 from braverse.cost import Cost
-from braverse.effects import (ATTACK_COST_MODIFIERS, PLAY_CONDITIONS,
-                              STATIC_ABILITY_CARDS, Ctx, Trigger, effect)
+from braverse.effects import (ATTACK_COST_MODIFIERS, STATIC_ABILITY_CARDS,
+                              Ctx, Trigger, effect)
 from braverse.enums import CardType, Color
 
 
@@ -38,20 +38,9 @@ def _break_self(ctx: Ctx) -> bool:
     return not ctx.state.over
 
 
-# --- 【EXTRA】 play gates -----------------------------------------------------
-def _extra_play_gates(db, player, opponent, defn) -> bool:
-    """"Can be played if ..." conditions printed on 【EXTRA】 Cookies."""
-    card_id = defn.base_id
-    if card_id == "BS8-005":     # 2 or more of your Cookies fainted this turn
-        return player.cookies_fainted_this_turn >= 2
-    if card_id == "BS8-069":     # support area 2+ cards behind the opponent's
-        return len(opponent.support) - len(player.support) >= 2
-    if card_id == "BS8-090":     # 2 cards or less in hand
-        return len(player.hand) <= 2
-    return True
-
-
-PLAY_CONDITIONS.append(_extra_play_gates)
+# The 【EXTRA】 play gates for BS8-005/069/090 live in `impl/extra.py` with the
+# rest of the EXTRA deck, so one module holds every card that is played out of
+# that pile rather than drawn.
 STATIC_ABILITY_CARDS.update(("BS8-005", "BS8-069", "BS8-090"))
 
 
@@ -444,7 +433,7 @@ def icicle_yeti_attack(ctx: Ctx) -> None:
         return
     ctx.me.battle.remove(cookie)
     ctx.me.deck.append(cookie.card)
-    ctx.me.trash.extend(cookie.hp_cards)
+    ctx.me.trash.extend(cookie.spent_cards)
     ctx.game._check_battle_area(ctx.me)
 
     ctx.draw(1)
@@ -470,7 +459,7 @@ def snow_sugar_blue_activate(ctx: Ctx) -> None:
         return
     ctx.me.battle.remove(cookie)
     ctx.me.deck.append(cookie.card)
-    ctx.me.trash.extend(cookie.hp_cards)
+    ctx.me.trash.extend(cookie.spent_cards)
 
     card = ctx.choose("Play a {B} LV.2+ Cookie from your hand", options,
                       optional=True)

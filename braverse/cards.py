@@ -28,6 +28,69 @@ _KEYWORD_FIXES = {"AREMA": "ARENA"}
 _SYMBOL_FIXES = {"{bl}": "【Blocker】", "{mou}": "", "{mt)": "【Your Turn】"}
 
 
+# The dump prints 【Activate】 on these cards; the cards themselves print
+# 【On Play】. Checked badge by badge against the scans in `card_images/` —
+# the two markers are colour-coded on the card face (teal for On Play,
+# magenta for Activate), so they can be read off the art directly. Every
+# affected card is from BS1-BS4, ST1-ST5 or P; nothing from BS5 onward is
+# wrong, which is what a dump-side defect in the early sets looks like.
+#
+# The difference is not cosmetic. An 【Activate】 is a main-phase skill its
+# controller presses, once per turn, for as long as the Cookie lives; an
+# 【On Play】 fires once, as the Cookie is played, and never again. Read the
+# wrong way round, a third of BS3's Cookies gain a repeatable skill they do
+# not have.
+_ON_PLAY_MISPRINTS = frozenset({
+    "BS1-001", "BS1-017", "BS1-028", "BS1-029", "BS1-034", "BS1-036",
+    "BS1-037", "BS1-054", "BS1-056", "BS1-063", "BS1-068", "BS1-071",
+    "BS1-073", "BS2-002", "BS2-003", "BS2-012", "BS2-018", "BS2-022",
+    "BS2-027", "BS2-031", "BS2-036", "BS2-046", "BS2-055", "BS2-057",
+    "BS2-058", "BS2-061", "BS2-062", "BS2-064", "BS2-065", "BS2-068",
+    "BS2-069", "BS3-002", "BS3-009", "BS3-010", "BS3-013", "BS3-026",
+    "BS3-028", "BS3-030", "BS3-031", "BS3-036", "BS3-038", "BS3-040",
+    "BS3-052", "BS3-055", "BS3-057", "BS3-060", "BS3-062", "BS3-063",
+    "BS3-065", "BS3-076", "BS3-078", "BS3-083", "BS3-088", "BS3-089",
+    "BS3-097", "BS3-098", "BS3-100", "BS3-109", "BS3-111", "BS3-112",
+    "BS3-113", "BS4-004", "BS4-015", "BS4-025", "BS4-026", "BS4-028",
+    "BS4-030", "BS4-033", "BS4-038", "BS4-046", "BS4-049", "BS4-053",
+    "BS4-073", "BS4-074", "BS4-081", "BS4-082", "BS4-089", "BS4-092",
+    "BS4-095", "BS4-099", "P-007", "P-010", "P-016", "P-018", "P-030",
+    "P-041", "P-043", "P-044", "P-045", "P-046", "P-054", "P-055",
+    "ST1-002", "ST1-007", "ST2-001", "ST2-004", "ST2-008", "ST2-010",
+    "ST3-004", "ST3-010", "ST4-008", "ST4-013", "ST5-001", "ST5-006",
+    "ST5-010", "ST5-015",
+})
+
+
+# Two rows carry a different card's text altogether — not a marker slip but the
+# wrong card. Both are 【EXTRA】 【Awaken】 cards, and the dump gives them the
+# rules text and attack line of the ordinary Cookie they awaken, which reads as
+# a plausible card and so passes every structural check. Transcribed from the
+# scans in `card_images/`. Values are (description, attack_text).
+_TEXT_OVERRIDES: dict[str, tuple[str, str]] = {
+    "BS10-024": (
+        "【EXTRA】 <Discard 1 card.> You can 【Awaken】 your [Hollyberry Cookie] "
+        "with 3 or less HP remaining.\n"
+        "【On Play】 Until the end of your opponent's next turn, this Cookie "
+        "receives -1 from all damage.",
+        "<{R}{R}> Shield of Conviction deals 2\n"
+        "Then, <{R}{R}> Select up to 1 of your opponent's Cookies. "
+        "That Cookie receives 2 damage.",
+    ),
+    "BS10-073": (
+        "【EXTRA】 If there are 8 cards or more in your support area, you can "
+        "【Awaken】 your [White Lily Cookie].",
+        "<{G}{G}{G}{G}> Dawn Lily Protection deals 4\n"
+        "Then, <return 1 Cookie from your support area to your hand.> Place up "
+        "to 1 card from the top of your deck in your support area as rested.",
+    ),
+}
+
+
+def _fix_on_play(text: str, base_id: str) -> str:
+    return text.replace("【Activate】", "【On Play】") \
+        if base_id in _ON_PLAY_MISPRINTS else text
+
 def _normalise_symbols(text: str) -> str:
     for token, replacement in _SYMBOL_FIXES.items():
         text = text.replace(token, replacement)
@@ -225,9 +288,26 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
         if word in Keyword.__members__:
             keywords.add(Keyword[word])
 
-    description = _normalise_symbols(row.get("description", ""))
-    attack_text = _normalise_symbols(row.get("attackText", ""))
-    all_text = _normalise_symbols(row.get("all_rules_text", ""))
+    base_id = row.get("base_id") or row["id"].split("@")[0]
+    if base_id in _TEXT_OVERRIDES:
+        description, attack_text = _TEXT_OVERRIDES[base_id]
+        all_text = description + "\n" + attack_text
+    else:
+        description = _fix_on_play(_normalise_symbols(row.get("description", "")), base_id)
+        attack_text = _fix_on_play(_normalise_symbols(row.get("attackText", "")), base_id)
+        all_text = _fix_on_play(_normalise_symbols(row.get("all_rules_text", "")), base_id)
+
+    # The dump routinely files an ITEM/TRAP/STAGE's rules text under attackText
+    # instead of description — sometimes the whole card (160 of them leave
+    # description empty), sometimes only the 【Activate】 half of a stage whose
+    # description holds just the placement line. None of these types has an
+    # attack line, so the two fields are one body of rules text and joining them
+    # is what lets the lead cost and the compiler see it at all. Cookies and NPCs
+    # are left alone: for them attackText really is an attack.
+    if card_type in (CardType.ITEM, CardType.TRAP, CardType.STAGE) and attack_text.strip():
+        description = "\n".join(
+            part for part in (description.strip(), attack_text.strip()) if part)
+        attack_text = ""
 
     # ITEM/TRAP/STAGE print their activation cost at the head of the description.
     play_cost = Cost()
@@ -236,7 +316,7 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
         if lead:
             play_cost = Cost.parse(lead.group(1))
 
-    flip_text = _normalise_symbols(row.get("flipText", ""))
+    flip_text = _fix_on_play(_normalise_symbols(row.get("flipText", "")), base_id)
     # Some rows duplicate the attack line into the flip field, minus its damage
     # number, so the attack *name* would be parsed as a flip effect. A flip
     # field that is only a cost plus the attack's name is that defect.
@@ -248,7 +328,7 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
 
     return CardDef(
         id=row["id"],
-        base_id=row.get("base_id") or row["id"].split("@")[0],
+        base_id=base_id,
         set_id=row.get("setId", ""),
         number=row.get("number", ""),
         name=" ".join(row.get("name", "").split()),

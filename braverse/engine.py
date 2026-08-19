@@ -21,9 +21,9 @@ from . import actions as A
 from . import config as cfg
 from .cards import CardDB, CardDef, default_db
 from .cost import Cost, plan_payment
-from .effects import (Ctx, Trigger, ask_many, cannot_attack,
-                      forced_attack_target, get_effect, may_play,
-                      modified_attack_cost)
+from .effects import (Ctx, Trigger, ask_many, cannot_attack, effect_is_live,
+                      extra_play_of, forced_attack_target, get_effect,
+                      may_play, modified_attack_cost)
 from .enums import CardType, Color, Marker, Phase
 from .state import CardInstance, Cookie, GameState, PlayerState
 
@@ -36,6 +36,7 @@ class Game:
         decks: Sequence[Sequence[str]],
         controllers: Sequence,
         *,
+        extra_decks: Sequence[Sequence[str]] | None = None,
         db: CardDB | None = None,
         rules: cfg.RulesConfig = cfg.DEFAULT,
         seed: int | None = None,
@@ -54,6 +55,11 @@ class Game:
         self._actions_this_turn = 0
         self._controllers = list(controllers)
         self._deck_lists = [list(d) for d in decks]
+        # The EXTRA deck is a second, separate pile. Callers that predate it
+        # pass nothing and play with none, which is a legal way to build.
+        self._extra_lists = [list(e) for e in (extra_decks or [])]
+        while len(self._extra_lists) < len(self._deck_lists):
+            self._extra_lists.append([])
         self.state = GameState(
             players=[PlayerState(index=0), PlayerState(index=1)],
             rng=random.Random(seed),
@@ -77,9 +83,15 @@ class Game:
 
     def setup(self) -> None:
         state = self.state
-        for player, deck_list in zip(state.players, self._deck_lists):
+        for player, deck_list, extra_list in zip(state.players, self._deck_lists,
+                                                 self._extra_lists):
             player.deck = [CardInstance.make(cid, player.index) for cid in deck_list]
             state.rng.shuffle(player.deck)
+            # The EXTRA deck is not shuffled and not drawn from: every card in
+            # it is visible to its owner all game, and is played out of the
+            # pile directly when its gate opens.
+            player.extra_deck = [CardInstance.make(cid, player.index)
+                                 for cid in extra_list]
             self._draw_opening_hand(player)
         for player in state.players:
             self._redraw_until_cookie(player)
@@ -150,6 +162,7 @@ class Game:
             cookie.level_override = None
             cookie.activate_locked = False
             cookie.effect_damage_reduction = 0
+            cookie.all_damage_reduction = 0
             if cookie.skip_next_active:
                 # "That Cookie is not set as active during your opponent's next
                 # Active Phase" — it stays rested for exactly one phase.
@@ -168,6 +181,7 @@ class Game:
         self._actions_this_turn = 0
         player.hp_gained_this_turn = False
         player.played_from_break_this_turn.clear()
+        player.played_from_trash_this_turn.clear()
         player.support_trashed_this_turn = 0
         player.hp_gain_locked = False
         state.opponent.blockers_disabled = False
@@ -244,6 +258,42 @@ class Game:
             return self._response_player
         return self.state.turn_player
 
+    def _would_do_something(self, player: PlayerState, trigger: Trigger, *,
+                            card: CardInstance | None = None,
+                            cookie: Cookie | None = None) -> bool:
+        """Whether a card's effect has anything to accomplish right now.
+
+        An effect whose condition is false, whose target does not exist or whose
+        bracketed cost cannot be met resolves into nothing at all, and offering
+        it as a move is the engine telling the player something untrue. This is
+        what keeps such a move off the list.
+
+        Cards the engine cannot read this way stay on offer — including a card
+        with no implementation at all, whose blank is the engine's gap rather
+        than something the rules say. See `effects.effect_is_live`.
+        """
+        source = cookie.card if cookie is not None else card
+        if source is None:
+            return True
+        fn = get_effect(self.db[source.card_id].id, trigger)
+        if fn is None:
+            return True
+        ctx = self._ctx(player, source_cookie=cookie, source_card=source,
+                        trigger=trigger.value)
+        # An item or trap is still in hand while the action list is built, but
+        # is gone from it by the time its effect runs. Conditions that count the
+        # hand — "if there are 5 cards or less", "<Discard 3 cards.>" — would
+        # otherwise be probed against a hand one card larger than the real one.
+        try:
+            slot = player.hand.index(source)
+        except ValueError:
+            return effect_is_live(fn, ctx)
+        player.hand.pop(slot)
+        try:
+            return effect_is_live(fn, ctx)
+        finally:
+            player.hand.insert(slot, source)
+
     def _main_actions(self, player: PlayerState) -> list[A.Action]:
         out: list[A.Action] = [A.EndTurn()]
         db = self.db
@@ -258,8 +308,16 @@ class Game:
             if defn.is_cookie:
                 out.extend(self._cookie_plays(player, card, defn))
             elif defn.type in (CardType.ITEM, CardType.STAGE):
-                if plan_payment(defn.play_cost, colors) is not None:
+                if plan_payment(defn.play_cost, colors) is None:
+                    continue
+                # A stage is worth placing for its own sake; its 【Activate】 is
+                # a separate move, gated separately below. An item is only its
+                # effect, so an item that would fizzle is not a move at all.
+                if (defn.type is CardType.STAGE
+                        or self._would_do_something(player, Trigger.ITEM, card=card)):
                     out.append(A.PlaySupportCard(card.uid))
+
+        out.extend(self._extra_plays(player))
 
         for cookie in player.battle:
             defn = cookie.defn(db)
@@ -271,7 +329,9 @@ class Game:
                     and not cookie.activate_locked
                     and get_effect(defn.id, Trigger.ACTIVATE)
                     and cookie.uid not in player.activated_this_turn
-                    and not (cookie.rested and "Rest this card" in defn.description)):
+                    and not (cookie.rested and "Rest this card" in defn.description)
+                    and self._would_do_something(player, Trigger.ACTIVATE,
+                                                 cookie=cookie)):
                 out.append(A.ActivateSkill(cookie.uid))
             if self._can_attack(player, cookie, colors):
                 defender = self.state.opponent_of(player.index)
@@ -284,9 +344,34 @@ class Game:
             defn = db[card.card_id]
             if (not card.rested
                     and card.uid not in player.activated_this_turn
-                    and get_effect(defn.id, Trigger.STAGE_ACTIVATE)):
+                    and get_effect(defn.id, Trigger.STAGE_ACTIVATE)
+                    and self._would_do_something(player, Trigger.STAGE_ACTIVATE,
+                                                 card=card)):
                 out.append(A.ActivateSkill(card.uid))
 
+        return out
+
+    def _extra_plays(self, player: PlayerState) -> list[A.Action]:
+        """The 【EXTRA】 cards whose gate is open right now.
+
+        An EXTRA card is never drawn, so this is the only way it enters the
+        game. The gate is a hard condition rather than a cost — a card whose
+        "Can be played if ..." is false is not a move at all — which keeps the
+        rule that a move on offer is a move that does something.
+        """
+        out: list[A.Action] = []
+        for card in player.extra_deck:
+            play = extra_play_of(self.db, card.card_id)
+            if play is None:
+                continue        # an EXTRA card the engine cannot read yet
+            ctx = self._ctx(player, source_card=card)
+            if not play.gate(ctx):
+                continue
+            if play.is_awaken:
+                out.extend(A.PlayExtra(card.uid, onto=host.uid)
+                           for host in play.hosts(ctx))
+            elif len(player.battle) < self.rules.max_battle_cookies:
+                out.append(A.PlayExtra(card.uid))
         return out
 
     def _cookie_plays(self, player: PlayerState, card: CardInstance,
@@ -327,7 +412,9 @@ class Game:
         if self._trap_used < self.rules.traps_per_attack and not player.traps_disabled:
             for card in player.hand:
                 defn = db[card.card_id]
-                if defn.type is CardType.TRAP and plan_payment(defn.play_cost, colors) is not None:
+                if (defn.type is CardType.TRAP
+                        and plan_payment(defn.play_cost, colors) is not None
+                        and self._would_do_something(player, Trigger.ITEM, card=card)):
                     out.append(A.PlayTrap(card.uid))
         if self._pending_attack:
             _, target = self._pending_attack
@@ -363,6 +450,7 @@ class Game:
         handler = {
             A.PlaceSupport: self._do_place_support,
             A.PlayCookie: self._do_play_cookie,
+            A.PlayExtra: self._do_play_extra,
             A.PlaySupportCard: self._do_play_support_card,
             A.ActivateSkill: self._do_activate,
             A.Attack: self._do_attack,
@@ -385,6 +473,56 @@ class Game:
         card = self._take_from_hand(player, action.card_uid)
         self._deploy_cookie(player, card, onto=action.onto)
 
+    def _do_play_extra(self, action: A.PlayExtra) -> None:
+        player = self.state.current
+        card = next((c for c in player.extra_deck if c.uid == action.card_uid), None)
+        if card is None:
+            return
+        play = extra_play_of(self.db, card.card_id)
+        if play is None:
+            return
+        ctx = self._ctx(player, source_card=card)
+        # Re-check on the way in: the gate was true when the list was built,
+        # but a response window between then and now could have closed it.
+        if not play.gate(ctx):
+            return
+        host = player.find_cookie(action.onto) if action.onto is not None else None
+        if play.is_awaken and host not in play.hosts(ctx):
+            return
+        if play.pay is not None and not play.pay(ctx):
+            return
+        player.extra_deck.remove(card)
+        defn = self.db[card.card_id]
+        if host is not None:
+            self._awaken(player, host, card)
+        else:
+            self.state.record(f"plays {defn.name} from the EXTRA deck")
+            self._deploy_cookie(player, card, from_zone="extra")
+
+    def _awaken(self, player: PlayerState, host: Cookie,
+                card: CardInstance) -> None:
+        """Stack an 【EXTRA】 card on top of a Cookie already in the battle area.
+
+        The Cookie keeps the HP it has left and gains the card's printed HP
+        *modifier* on top — that is what "+1" on an EXTRA card means, and it is
+        why an 【Awaken】 is worth taking on a Cookie that has been chipped down
+        rather than a fresh one. Everything else about the Cookie now reads off
+        the new card: name, Level, attack, skills.
+        """
+        defn = self.db[card.card_id]
+        under = self.db[host.card.card_id]
+        host.under.append(host.card)
+        host.card = card
+        host.used_markers.clear()          # a new card, so its 【Once Per Turn】 resets
+        player.activated_this_turn.discard(host.uid)
+        gain = defn.hp or 0
+        if not defn.hp_is_modifier:
+            # A full HP value rather than a modifier: top the pile up to it.
+            gain = max(0, gain - host.remaining_hp)
+        self._fill_hp(player, host, host.remaining_hp + gain)
+        self.state.record(f"awakens {under.name} \u2192 {defn.name}")
+        self._run_cookie_effect(host, Trigger.ON_PLAY, player)
+
     def _deploy_cookie(self, player: PlayerState, card: CardInstance,
                        onto: int | None = None, *,
                        run_on_play: bool = True,
@@ -397,7 +535,10 @@ class Game:
         cookie.summoned_this_turn = True
         cookie.rested = False
         self.state.record(f"plays {defn.name}")
-        if from_zone == "trash":
+        if from_zone == "extra":
+            pass            # nothing extra fires: the EXTRA card's own gate was the price
+        elif from_zone == "trash":
+            player.played_from_trash_this_turn.add(cookie.uid)
             self._run_cookie_effect(cookie, Trigger.PLAYED_FROM_TRASH, player)
         elif from_zone == "support":
             self._run_cookie_effect(cookie, Trigger.PLAYED_FROM_SUPPORT, player)
@@ -433,7 +574,11 @@ class Game:
             player.items_played_this_turn += 1
             self.state.record(f"activates {defn.name}")
             self._run_effect(card, Trigger.ITEM, player)
-            player.trash.append(card)
+            # An item that placed itself somewhere — "place this card in your
+            # support area as rested" — has already chosen its zone. Filing it
+            # in the trash as well would leave one CardInstance in two zones.
+            if self.state.find_card(card.uid) is None:
+                player.trash.append(card)
 
     def _do_activate(self, action: A.ActivateSkill) -> None:
         player = self.state.current
@@ -565,6 +710,10 @@ class Game:
         if source_player != cookie.owner and shields_from_opponent(self.db, owner):
             self.state.record(f"{name} takes no {kind} damage (shielded)")
             return
+        amount -= cookie.all_damage_reduction
+        if amount <= 0:
+            self.state.record(f"{name} takes no {kind} damage (reduced)")
+            return
         dealt = 0
         for _ in range(amount):
             if not cookie.hp_cards:
@@ -626,7 +775,9 @@ class Game:
             return
         owner.battle.remove(cookie)
         owner.hand.append(cookie.card)
-        owner.trash.extend(cookie.hp_cards)
+        # Only the Cookie the effect names returns to hand; anything it was
+        # 【Awaken】ed on top of is spent along with its HP pile.
+        owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{self.db[cookie.card.card_id].name} returns to hand")
         self._check_battle_area(owner)
 
@@ -649,7 +800,7 @@ class Game:
             return
         owner.battle.remove(cookie)
         owner.trash.append(cookie.card)
-        owner.trash.extend(cookie.hp_cards)
+        owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{self.db[cookie.card.card_id].name} is trashed")
         self._check_battle_area(owner)
 
@@ -674,7 +825,7 @@ class Game:
                                 cookie.defn(self.db).color,
                                 cookie.level(self.db)))
         owner.break_additions_this_turn += 1
-        owner.trash.extend(cookie.hp_cards)
+        owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{self.db[cookie.card.card_id].name} faints")
         self._check_win()
         if not self.state.over:

@@ -301,6 +301,20 @@ class Op:
     def run(self, ctx, env: dict) -> bool:  # pragma: no cover - interface
         raise NotImplementedError
 
+    def is_live(self, ctx, env: dict) -> bool:
+        """Would running this op accomplish anything, right now?
+
+        A probe, not a rehearsal: it must never touch the game state. Anything
+        it cannot decide is live, so an unknown op keeps its card on offer —
+        wrongly hiding a playable card is a worse failure than wrongly showing
+        one, because a hidden card cannot be argued with.
+
+        The default answers for every op that reads a selection: once a
+        ``Select`` finds nothing, the ops downstream of it are dead too.
+        """
+        ref = getattr(self, "ref", None)
+        return ref is None or env.get(ref, None) != []
+
 
 @dataclass
 class Select(Op):
@@ -312,11 +326,7 @@ class Select(Op):
     ref: str = REF_IT
 
     def run(self, ctx, env) -> bool:
-        pool = []
-        if self.scope in (SCOPE_OPPONENT, SCOPE_ALL):
-            pool += [c for c in ctx.opp.battle if self.filter.matches(c, ctx)]
-        if self.scope in (SCOPE_OWN, SCOPE_ALL):
-            pool += [c for c in ctx.me.battle if self.filter.matches(c, ctx)]
+        pool = self._pool(ctx)
         if not pool:
             env[self.ref] = []
             # "Select up to 1" with no legal target simply does nothing; a
@@ -340,6 +350,26 @@ class Select(Op):
             chosen.append(pick)
         env[self.ref] = chosen
         return True
+
+    def _pool(self, ctx) -> list:
+        pool = []
+        if self.scope in (SCOPE_OPPONENT, SCOPE_ALL):
+            pool += [c for c in ctx.opp.battle if self.filter.matches(c, ctx)]
+        if self.scope in (SCOPE_OWN, SCOPE_ALL):
+            pool += [c for c in ctx.me.battle if self.filter.matches(c, ctx)]
+        return pool
+
+    def is_live(self, ctx, env) -> bool:
+        """Nothing to select means nothing downstream can happen.
+
+        True even for an optional select, whose ``run`` returns True on an empty
+        pool so the clause carries on — it carries on doing nothing, because
+        every op after it reads the selection this one failed to make.
+        """
+        if self._pool(ctx):
+            return True
+        env[self.ref] = []
+        return False
 
 
 def _resolve(ref: str, ctx, env) -> list:
@@ -520,6 +550,19 @@ class DamageEqualToRested(Op):
         return True
 
 
+# Prompts name both ends of the move: "a card from your trash" alone does not
+# say whether answering it puts the card somewhere good or somewhere fatal.
+_ZONE_LABELS = {
+    ZONE_TRASH: "trash",
+    ZONE_BREAK: "break area",
+    ZONE_HAND: "hand",
+    ZONE_SUPPORT: "support area",
+    ZONE_BATTLE: "battle area",
+    ZONE_DECK_TOP: "deck (top)",
+    ZONE_DECK_BOTTOM: "deck (bottom)",
+}
+
+
 @dataclass
 class MoveCards(Op):
     """Move up to ``count`` filtered cards from one zone to another.
@@ -535,6 +578,9 @@ class MoveCards(Op):
     filter: CardFilter = field(default_factory=CardFilter)
     from_opponent: bool = False
     optional: bool = True
+    # Only read when the destination is the support area: a card placed there
+    # arrives rested unless the text says "as active".
+    rested: bool = True
 
     def run(self, ctx, env) -> bool:
         owner = ctx.opp if self.from_opponent else ctx.me
@@ -563,14 +609,17 @@ class MoveCards(Op):
         pool = self._pool(ctx, owner)
         if not pool:
             return None
-        picked = ctx.choose(f"Move a card from your {self.source}", pool,
-                            optional=self.optional)
+        picked = ctx.choose(
+            f"Move a card from your {_ZONE_LABELS.get(self.source, self.source)}"
+            f" to your {_ZONE_LABELS.get(self.destination, self.destination)}",
+            pool, optional=self.optional)
         if picked is None:
             return None
         if self.source == ZONE_BATTLE:
-            # A Cookie leaving the field sheds its HP pile to the trash.
+            # A Cookie leaving the field sheds its HP pile — and anything it
+            # was 【Awaken】ed on top of — to the trash.
             owner.battle.remove(picked)
-            owner.trash.extend(picked.hp_cards)
+            owner.trash.extend(picked.spent_cards)
             card = picked.card
             ctx.game._check_battle_area(owner)
             return card
@@ -592,7 +641,7 @@ class MoveCards(Op):
         elif self.destination == ZONE_DECK_BOTTOM:
             owner.deck.append(card)
         elif self.destination == ZONE_SUPPORT:
-            card.rested = True
+            card.rested = self.rested
             owner.support.append(card)
         else:
             self._pile_of(owner, self.destination).append(card)
@@ -611,6 +660,9 @@ class PayCost(Op):
             return True
         return ctx.pay(self.cost)
 
+    def is_live(self, ctx, env) -> bool:
+        return not self.cost or ctx.can_pay(self.cost)
+
 
 @dataclass
 class Guard(Op):
@@ -619,6 +671,11 @@ class Guard(Op):
     conditions: tuple = ()
 
     def run(self, ctx, env) -> bool:
+        return all(c.holds(ctx) for c in self.conditions)
+
+    def is_live(self, ctx, env) -> bool:
+        # `holds` is a pure read of the board, so the probe is the real answer
+        # rather than an approximation of it.
         return all(c.holds(ctx) for c in self.conditions)
 
 
@@ -661,6 +718,21 @@ class Clause:
     def _affordable(self, ctx) -> bool:
         return all(ctx.can_pay(op.cost) for op in self.ops if isinstance(op, PayCost))
 
+    def is_live(self, ctx, env) -> bool:
+        """Would this clause do anything if it ran now?
+
+        Same order as ``run``: an unaffordable cost kills the clause, then each
+        op is asked in turn so that a dead ``Select`` takes its dependants with
+        it. Ops are probed even after the first failure would have aborted, so
+        that every ``Select`` gets to record its empty result in ``env`` for the
+        later clauses that read it.
+        """
+        live = self._affordable(ctx)
+        for op in self.ops:
+            if not op.is_live(ctx, env):
+                live = False
+        return live
+
 
 
 @dataclass
@@ -674,6 +746,15 @@ class Program:
         env: dict = {}
         for clause in self.clauses:
             clause.run(ctx, env)
+
+    def is_live(self, ctx) -> bool:
+        """Would any clause of this effect accomplish something right now?
+
+        One live clause is enough — a card whose second sentence is dead is
+        still worth playing for its first.
+        """
+        env: dict = {}
+        return any(clause.is_live(ctx, env) for clause in self.clauses)
 
     def __len__(self) -> int:
         return len(self.clauses)

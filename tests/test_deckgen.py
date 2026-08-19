@@ -86,6 +86,45 @@ def test_colour_seeding_beats_uniform_on_the_wide_pool(db, wide):
     assert mean_fitness(1) > mean_fitness(0) + 0.15
 
 
+def test_the_pool_offers_one_archetype_per_colour(db, wide):
+    pool, gauntlet = wide
+    evolver = DeckEvolver(pool, gauntlet, DeckGenConfig(seed=1), db=db)
+    assert [c.value for c in evolver.available_colors()] == [
+        "BLUE", "GREEN", "PURPLE", "RED", "YELLOW"]
+
+
+@pytest.mark.parametrize("color", ["RED", "BLUE", "GREEN", "YELLOW", "PURPLE"])
+def test_a_pinned_evolver_only_ever_builds_its_own_colour(db, wide, color):
+    pool, gauntlet = wide
+    evolver = DeckEvolver(pool, gauntlet, DeckGenConfig(seed=2), db=db,
+                          colors=[color])
+    deck = evolver.random_deck()
+    for _ in range(5):
+        deck = evolver.mutate(deck)
+    child = evolver.crossover(deck, evolver.random_deck())
+    for candidate in (deck, child):
+        assert validate(candidate, db).ok
+        assert {db[c].color.value for c in candidate} == {color}
+
+
+def test_pinning_accepts_colour_members_as_well_as_names(db, wide):
+    pool, gauntlet = wide
+    by_name = DeckEvolver(pool, gauntlet, DeckGenConfig(seed=3), db=db,
+                          colors=["red"])
+    member = by_name.fixed_colors[0]
+    by_member = DeckEvolver(pool, gauntlet, DeckGenConfig(seed=3), db=db,
+                            colors=[member])
+    assert by_member.fixed_colors == by_name.fixed_colors
+    assert by_member.random_deck() == by_name.random_deck()
+
+
+def test_pinning_to_a_colour_the_pool_lacks_is_an_error(db):
+    pool = set_pool(db, ["ST9"])          # mono-blue
+    with pytest.raises(ValueError, match="RED"):
+        DeckEvolver(pool, [starter_deck(db, "ST9")], DeckGenConfig(), db=db,
+                    colors=["RED"])
+
+
 def test_crossover_of_two_mono_parents_stays_legal(db, wide):
     evolver = _evolver(db, wide, 1)
     a, b = evolver.random_deck(), evolver.random_deck()

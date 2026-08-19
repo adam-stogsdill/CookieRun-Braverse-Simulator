@@ -81,7 +81,8 @@ class DeckEvolver:
                  config: DeckGenConfig = DeckGenConfig(),
                  db: CardDB | None = None,
                  agent_factory: Callable[[int, int], object] | None = None,
-                 agent_factories: Sequence[Callable[[int, int], object]] | None = None):
+                 agent_factories: Sequence[Callable[[int, int], object]] | None = None,
+                 colors: Sequence | None = None):
         self.db = db or default_db()
         self.pool = list(pool)
         self.gauntlet = [list(d) for d in gauntlet]
@@ -104,6 +105,10 @@ class DeckEvolver:
                         if sum(1 for x in cards if x.is_cookie) >= 8]
         if not self._colors:
             self._colors = list(self._by_color)
+        # Pinning the colours turns the search into "the best deck this colour
+        # can build" rather than "the best deck", which is what you want when
+        # the goal is one champion per archetype rather than one overall.
+        self.fixed_colors = self.resolve_colors(colors) if colors else None
 
     def _default_agent(self, seat: int, seed: int):
         return SeatedAgent(HeuristicAgent(db=self.db, seed=seed), seat)
@@ -131,6 +136,22 @@ class DeckEvolver:
         return factory
 
     # -- colour identity --------------------------------------------------
+    def resolve_colors(self, colors: Sequence) -> list:
+        """Accept Color members or their names ('BLUE', 'blue')."""
+        known = {c.value.upper(): c for c in self._by_color}
+        out = []
+        for color in colors:
+            resolved = known.get(str(getattr(color, "value", color)).upper())
+            if resolved is None:
+                raise ValueError(f"no {color!r} cards in this pool; "
+                                 f"have {sorted(known)}")
+            out.append(resolved)
+        return out
+
+    def available_colors(self) -> list:
+        """Colours this pool can build a standalone deck in, name-ordered."""
+        return sorted(self._colors, key=lambda c: c.value)
+
     def _subpool(self, colors) -> tuple[list, list]:
         """The pool restricted to ``colors``, as (cards, cookies)."""
         if not colors:
@@ -143,11 +164,15 @@ class DeckEvolver:
         return cards, cookies
 
     def _pick_colors(self) -> list:
+        if self.fixed_colors:
+            return list(self.fixed_colors)
         n = min(self.cfg.color_identity, len(self._colors))
         return self.rng.sample(self._colors, n) if n else []
 
     def _deck_colors(self, deck: Sequence[str]) -> list:
         """The colours a deck already commits to, most-played first."""
+        if self.fixed_colors:
+            return list(self.fixed_colors)
         if not self.cfg.color_identity:
             return []
         counts = Counter(self.db[c].color for c in deck if c in self.db)

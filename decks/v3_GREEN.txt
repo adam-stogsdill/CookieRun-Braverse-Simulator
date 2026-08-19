@@ -1,0 +1,117 @@
+# run: v3
+# archetype: GREEN
+# round: 55
+# holdout: 0.67
+# validation: 0.7333333333333333
+
+COOKIE (32)
+  4x ST8-005    Wind Archer Cookie               LV3 HP6
+  4x ST8-008    Sugar Swan Cookie                LV2 HP4
+  3x ST3-004    Vampire Cookie                   LV3 HP3
+  3x ST3-009    Avocado Cookie                   LV2 HP2
+  3x ST8-012    Windcatcher                      LV1 HP2
+  2x ST3-001    Muscle Cookie                    LV2 HP2
+  2x ST3-010    Aloe Cookie                      LV2 HP3
+  2x ST3-013    Knight Cookie                    LV1 HP3
+  2x ST8-003    Leek Cookie                      LV2 HP4
+  2x ST8-011    Kiwi Cookie                      LV1 HP3
+  1x ST3-006    Beet Cookie                      LV2 HP3
+  1x ST3-012    GingerBrave                      LV1 HP2
+  1x ST8-001    Greenbell Cookie                 LV1 HP2
+  1x ST8-004    Red Panna Cotta Cookie           LV3 HP5
+  1x ST8-010    Cookiemals                       LV1 HP2
+FLIP (15)
+  3x ST3-007    Sparkling Cookie                 LV3 HP3
+  3x ST8-006    Basil Pesto Cookie               LV3 HP4
+  2x ST3-008    Spinach Cookie                   LV1 HP1
+  2x ST3-011    Onion Cookie                     LV2 HP2
+  2x ST8-007    Blue Slushy Cookie               LV1 HP1
+  1x ST3-014    Angel Cookie                     LV1 HP1
+  1x ST8-002    Muscle Cookie                    LV2 HP4
+  1x ST8-009    Cucumber Cookie                  LV2 HP3
+ITEM (6)
+  1x ST3-016    Ancient Healer's Gaze            
+  1x ST3-017    Viney Vines                      
+  1x ST3-018    Parsley Tea of Invigoration      
+  1x ST8-013    Windgrass                        
+  1x ST8-015    Essence of the Tempest           
+  1x ST8-016    Wind's Grace Earrings            
+TRAP (6)
+  3x ST8-018    Piercing Arrow of Purity         
+  1x ST3-020    Divine Light Crystal             
+  1x ST3-021    Breath of the Flute              
+  1x ST8-019    Bad Omen                         
+STAGE (1)
+  1x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 15
+
+{
+ "deck": [
+  "ST8-009",
+  "ST3-014",
+  "ST3-009",
+  "ST8-008",
+  "ST3-011",
+  "ST8-002",
+  "ST8-012",
+  "ST3-011",
+  "ST8-005",
+  "ST3-008",
+  "ST3-013",
+  "ST8-003",
+  "ST3-010",
+  "ST8-010",
+  "ST8-005",
+  "ST3-007",
+  "ST3-001",
+  "ST3-004",
+  "ST8-013",
+  "ST3-009",
+  "ST8-008",
+  "ST3-007",
+  "ST3-010",
+  "ST3-004",
+  "ST8-001",
+  "ST3-016",
+  "ST3-001",
+  "ST8-006",
+  "ST8-006",
+  "ST8-005",
+  "ST3-008",
+  "ST8-012",
+  "ST8-008",
+  "ST3-017",
+  "ST8-016",
+  "ST8-012",
+  "ST8-018",
+  "ST8-011",
+  "ST8-019",
+  "ST8-008",
+  "ST8-007",
+  "ST8-005",
+  "ST3-013",
+  "ST3-006",
+  "ST8-007",
+  "ST8-003",
+  "ST3-020",
+  "ST3-012",
+  "ST8-018",
+  "ST3-018",
+  "ST3-021",
+  "ST8-020",
+  "ST8-018",
+  "ST3-009",
+  "ST8-006",
+  "ST8-015",
+  "ST3-004",
+  "ST8-011",
+  "ST8-004",
+  "ST3-007"
+ ],
+ "run": "v3",
+ "archetype": "GREEN",
+ "round": 55,
+ "holdout": 0.67,
+ "validation": 0.7333333333333333
+}

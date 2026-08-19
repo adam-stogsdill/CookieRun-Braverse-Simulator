@@ -23,8 +23,6 @@ There are many things that are still needing to be updated and reworked, but I i
 
 - Introducing customizability for sleeves and mats. Right now the placeholder images are a bit ugly and I'd like to make the game feel more fun.
 
-- Adding extra deck features. This is an important game feature and requires refactoring to allow for this to be included.
-
 - There is code to ensure we allow for as many cards as possible, however the newer sets have cards that are still missing and so this needs to be fixed.
 
 - I would like to add a deck builder to this implementation. I think text base deck building can be easy to implement but is not as fun and requires more work.
@@ -79,8 +77,10 @@ braverse/             the engine (library, UI-agnostic)
   decks.py            starter decklists + deck validation
   rps.py              the opening rock-paper-scissors for turn order
   config.py           every tunable rule, cited to the PLAY GUIDE
-play_server.py        the visual player: play a bot, or watch two bots play
+play_server.py        the visual player: play a bot, play a person, or watch two bots
 viewer/               its browser front end (no build step, no dependencies, no assets)
+                        app.js/style.css the table, builder.* the deck builder,
+                        table.* the sleeve and playmat tab
 selfplay.py           bulk self-play harness and win-rate report
 train_rl.py           train / evaluate the RL agent
 evolve_deck.py        evolve a decklist against a gauntlet
@@ -265,16 +265,53 @@ in without touching the engine.
 - 【On Play】, 【Activate】, 【Once Per Turn】, 【Blocker】, attack riders, FLIP
   effects, faint triggers, Items, Traps (with a real defender response window),
   and Stages.
+- The **EXTRA deck**, including 【Awaken】: a second pile of at most 6 cards,
+  never drawn, each played through the gate printed on it.
 - Both ST8 and ST9 starter decks are fully implemented and legal.
 
-- **1465 of 1540 cards are fully playable**: 244 hand-written, 865 compiled
-  from their printed text, 356 genuinely vanilla. `coverage_report.py` shows
+- **1393 of 1540 cards are fully playable**: 225 hand-written, 967 compiled
+  from their printed text, 201 genuinely vanilla. `coverage_report.py` shows
   the split.
-- **19 of 22 sets are 100% implemented** — every ST starter set plus BS1–BS8
-  and BS10. The 75 cards still outstanding sit in BS9, BS11 and the promo set,
-  and rest on four mechanics the engine does not model: 【Special Play】,
-  【Awaken】, the Extra Deck, and replacement effects that rewrite an
-  opponent's abilities.
+- **7 of 22 sets are 100% implemented** — ST6–ST10 plus BS8 and BS10. The 147
+  cards still outstanding rest on mechanics the engine does not model —
+  【Special Play】, 【Equip】, and replacement effects that rewrite an opponent's
+  abilities — plus a tail of ITEM/TRAP/STAGE text that needs new compiler
+  grammar.
+
+### A move you are offered is a move that does something
+
+The action list used to answer "can this be paid for?" and stop there, so a card
+whose condition was false, whose target was not on the board, or whose
+`<Discard 3 cards.>` you could not cover was still offered as a move. Taking it
+spent the card and produced nothing. That is the engine asserting something
+untrue about the position, which is worse than a missing convenience.
+
+Every effect is now asked whether it would accomplish anything before its move
+is listed. A compiled card answers for itself — its `If ...,` clauses are
+`Guard` ops and its targets are `Select` ops, both of which the engine can read
+without running them. A hand-written body is opaque Python, so it declares the
+same thing with `@playable_if`, which is the `if` at the top of the function
+hoisted to where the action list can see it. Anything that answers neither way
+stays on offer: **wrongly hiding a card is the worse failure**, because a card
+that is missing cannot be argued with, and a card with no implementation at all
+is the engine's gap rather than something the rules say.
+
+Two details decide whether this is right or merely close:
+
+- The probe reads the board and never touches it. A rehearsal on a clone would
+  answer more questions and cost a deep copy per candidate move per turn.
+- An item is still in your hand while the list is built and gone from it by the
+  time it resolves, so "if there are 5 cards or less in your hand" and
+  `<Discard 3 cards.>` are both read against the hand *minus the card being
+  played*. Off by one here hides live cards, which is the failure that matters.
+
+Across 200 starter-deck self-play games this suppresses **5476 moves** and the
+results are bit-identical — 179/200, the same mean turn count, the same
+outcomes. The scripted bot was never taking those moves, because a move that
+does nothing scores nothing. They were only ever shown to a person.
+
+The cost is about 15% of raw simulation throughput (188 → 179 games/s on the
+starters), paid on every `legal_actions()` call.
 
 Cards whose text the compiler does not fully understand stay vanilla and are
 kept out of the generated deck pools. `coverage_report.py` shows exactly where
@@ -284,6 +321,7 @@ that line falls.
 
 ```bash
 python play_server.py            # --port 8080 --no-browser
+python play_server.py --lan      # also reachable from the rest of the network
 ```
 
 Stop it with ctrl-c. It also shuts down on SIGHUP and SIGTERM, so closing the
@@ -352,6 +390,32 @@ so every scripted agent behaves exactly as before, bit for bit, and only the
 human seat sees the difference. It also normalises a short, padded or repeated
 answer, because "discard 2" has to remove exactly two cards however the client
 phrases it.
+
+**Sleeves and playmats, per seat.** The **Table** tab picks a card back and a
+felt for each side, the way a kit belongs to a player rather than to a chair.
+Everything is drawn in CSS — gradients, not image files — for the same reason
+the rest of the front end has no assets: the viewer stays a folder of text, and
+the one-file build does not grow by a megabyte per sleeve.
+
+The choice is written to `<body>` as `-me-` / `-opp-` custom properties, which
+`style.css` maps onto `.side.me` and `.side.opponent`. That one indirection is
+what lets the kit survive a re-render, a seat swap and a refresh without any of
+the board code knowing the tab exists — and it has to be variables rather than
+classes, because `seatPerspective` decides which section is which by
+overwriting `className`. Every sample in the tab is the real thing at a smaller
+size: a swatch is an actual `.card.back`, a mat sample is the actual mat
+background, so a preview cannot drift from the table it previews.
+
+A mat carries its dashed zone outlines and label colour with it, since a pale
+felt wearing the dark felt's outlines is unreadable. The two seats start on
+different sleeves, because telling your cards from your opponent's at a glance
+is what sleeving them is for.
+
+**Traps stand up when they can be sprung.** A response window is the one moment
+your hand can act on someone else's turn, and the only card in it that can act
+is a trap you can pay for. Those rise out of the hand with a green ring; the
+rest stay flush. Finding out which of six cards was live meant clicking through
+all six, during the one decision in the game that is genuinely time-shaped.
 
 **Drag and drop.** Pick up one of your cards and the legal drops light up:
 a Cookie card onto your battle area to play it, any card onto your support area
@@ -457,6 +521,56 @@ before the browser polled it; and the obvious way to write the flip —
 stayed back-side up through the whole animation. It is a 2D squash-and-swap
 instead.
 
+### Playing someone else
+
+Start the server with `--lan` and hit **New match → Play someone**. Hosting
+gives you a four-character room code and a link to send; the other person opens
+the link on their own machine, picks a deck and joins, and the game deals
+itself. One machine runs the server and the engine; both browsers are only ever
+renderers, exactly as they already were against a bot.
+
+Everything that makes this safe was already true of the single-player design,
+which is why the whole feature is a few hundred lines rather than a rewrite:
+
+- **The server holds the one true state.** It always did — the match runs on its
+  own thread and the browser polls a snapshot — so "the opponent's browser"
+  never has a state of its own to disagree with, and there is no reconciliation
+  to get wrong.
+- **A move is an index into a list the server just built.** The browser cannot
+  name a card, a target or an amount; it can only pick from the legal moves it
+  was offered. So a hacked client cannot play a card it does not have, attack
+  out of turn, or invent a cost payment — the worst it can do is choose badly.
+- **Hidden information is filtered on the way out, per viewer.** `Match.view`
+  takes the seat asking and hands back that seat's hand and nobody else's. The
+  question the engine is putting to your opponent is stripped too, down to its
+  prompt text: its options are routinely *their hand*, so sending them would
+  leak the game through the one channel the board does not.
+- **A seat is a token, not a claim.** Joining mints a token; the room code, which
+  travels in the link, buys nothing but a spectator's view. Every move is
+  checked against the seat the engine is actually asking, so your opponent
+  cannot answer for you — with the same code, in the same room, holding the
+  same page.
+
+The browser is told to wait rather than to ask again: a poll carries the version
+it already has and the server holds the connection until something happens, so
+a move lands on the other screen as fast as the network carries it, and an idle
+game costs one open connection instead of three requests a second. That is also
+why a rematch keeps counting versions from where the last game stopped — a
+browser parked on "tell me when this changes" has to be told that the game it is
+waiting on is not the game any more.
+
+Two conveniences that fall out of it: closing the tab and reopening the link
+puts you back in your seat mid-game rather than making you a spectator of your
+own match, and the pacing controls — pause, step, speed, reveal — are refused
+outright in a room. Pausing would freeze a person rather than a bot, and reveal
+would simply be cheating.
+
+What this is not, yet: there is no matchmaking, no accounts, no ranking, and no
+clock on a decision, so a player who wanders off leaves the game sitting there
+until someone hits **Leave**. Decks come from the host machine's collection,
+not from the joiner's, which is the next thing to fix if this ever leaves the
+LAN.
+
 ### The deck builder tab
 
 The second tab in the header is a deck builder, so a deck can be put together
@@ -546,7 +660,50 @@ Finding the grammar also surfaced two real bugs in the card parser: the older
 `<{P}> Deals 3 damage.` printing left a bare `" damage."` as rider text on 223
 cards, and the clause splitter was breaking `LV.2` at the period.
 
-Coverage reached **93.7%** of effect-bearing cards by alternating two passes:
+A third was worth more than both. The dump files an ITEM/TRAP/STAGE's rules
+text under `attackText`, not `description` — the whole card for 160 of them,
+and for 18 stages just the 【Activate】 half, leaving a description holding only
+the placement line. The parser read non-Cookie text and its lead cost from
+`description` alone, so all 160 parsed as **free, textless vanillas**: they cost
+nothing to play, did nothing when played, and went straight to the trash.
+Wanderer's Apple Pie (BS1-075) is the whole card in one line — `<{G}{G}> Place
+this card in your support area as rested.` — and it was doing none of it.
+
+Joining the two fields is what makes them visible, and **94 of them compile
+immediately** against grammar that already existed. Eleven stage cards go the
+other way: they had been counted as implemented because a placement-only
+description reads as a legitimately vanilla stage, and the 【Activate】 they were
+hiding does not compile yet.
+
+That is why headline coverage *fell* from 93.7% to 89.0% here. The number went
+down because the denominator got honest — those 160 cards had been sitting in
+the "playable as printed" column, counted as complete because their text could
+not be seen, and every set that read as 100% before was resting partly on that.
+
+Two smaller things fell out of it. The compiler was paying an item's lead cost a
+second time on top of the `play_cost` the engine already charges, so a `{Y}{Y}`
+item rested four support cards instead of two. And once the stages were joined
+back together, **no card in the pool is placement-only any more** — the "vanilla
+stage" case now describes a card the pool does not actually contain.
+
+A fourth defect is not a parsing bug but a wrong fact. The dump prints
+【Activate】 on 106 cards whose printed badge is 【On Play】 — every one of them
+from BS1–BS4, ST1–ST5 or P, and nothing from BS5 onward, which is the shape of
+an upstream error in the early sets rather than anything this repo does. The two
+markers are colour-coded on the card face (teal for On Play, magenta for
+Activate), so the correction was read off the scans in `card_images/` badge by
+badge and pinned as `cards._ON_PLAY_MISPRINTS`, applied when the row is loaded.
+
+It matters more than a label. An 【Activate】 is a main-phase skill its controller
+presses, once a turn, for as long as the Cookie lives; an 【On Play】 fires once,
+as the Cookie is played, and never again. Read the dump's way, a third of BS3's
+Cookies were repeatable engines — Wind Archer Cookie (BS2-058) trashed one of
+your opponent's LV.3 Cookies *every turn* for `{P}`. Nineteen hand-written
+effects moved trigger with the data; the other 82 recompile under `ON_PLAY` on
+their own, so pool coverage is unchanged and ST8/ST9 self-play — neither set is
+affected — stays bit-identical.
+
+Coverage is **89.0%** of effect-bearing cards, reached by alternating two passes:
 structural compiler work, then hand-writing whatever a set had left. Working
 set by set was what surfaced the engine's real gaps — each set needed fewer new
 mechanics than the last (BS1 needed six, BS10 two), and the compiler carried a
@@ -685,6 +842,42 @@ A cost that cannot be met is never offered, and a clause whose cost *is* an op
 
 `HeuristicAgent` answers yes to every cost, so bot play and the self-play
 numbers above are unchanged; it is a human seat that gains the choice.
+
+### The EXTRA deck
+
+An 【EXTRA】 card is never shuffled in and never drawn. It sits in a second pile,
+visible to both players all game, and enters play only through the gate printed
+on it — "Can be played if 2 or more of your Cookies fainted this turn". The gate
+is modelled as a *condition, not a cost*: while it is false the card is not in
+the legal-action list at all, which is the same rule as everywhere else here —
+a move you are offered is a move that does something.
+
+Ten cards, two shapes. Six are standalone Cookies that take a free battle slot.
+Four are 【Awaken】 cards, and those are the interesting ones: they print HP as
+`+1` or `+2` rather than a total, because they go *on top of* a Cookie already
+in the battle area, which keeps the HP it has left and gains the modifier. That
+is what makes an Awaken worth most on a Cookie that has been chipped down —
+awakening a fresh Hollyberry Cookie wastes most of the card. The stack lives in
+`Cookie.under`, and only the card on top faints into the break area: banking
+both would count two Levels toward the opponent's win for one Cookie.
+
+Every removal path had to learn about the stack, and there were sixteen of them
+scattered across the compiler, the IR and the card modules, each doing
+`trash.extend(cookie.hp_cards)` by hand. Rather than patch sixteen call sites
+with a second line each — and miss one — the pile a Cookie leaves behind became
+`Cookie.spent_cards`, and every site sheds that instead.
+
+The PLAY GUIDE this project was written from does not cover the EXTRA deck at
+all, so its construction limits are recorded in `config.py` with where they came
+from: a separate pile of at most **6**, under the same 4-per-number cap as the
+main deck, which the validator counts across both piles. Six against a pool of
+ten distinct EXTRA cards means the pile is a real deckbuilding choice rather
+than a place to put all of them.
+
+Two of the ten cards needed their text corrected before any of this could work:
+the dump gives BS10-024 and BS10-073 the rules text *and attack line* of the
+ordinary Cookie they awaken. That reads as a perfectly plausible card, so
+nothing structural catches it — it was found by reading the scans.
 
 ## Rules fidelity
 
@@ -940,9 +1133,10 @@ cloneable and actions are fully specified, determinized MCTS is a drop-in
 replacement — `game.clone()`, shuffle the unknown zones, roll out with
 `RandomAgent`.
 
-Known gaps: 【Awaken】, 【Special Play】, 【Equip】, 【Skill】 and the EXTRA deck
-are not modelled, and ST9-009 Wave Drop's "discarded by Sea Fairy" trigger is
-handled inside Sea Fairy's effect rather than as a trigger of its own.
+Known gaps: 【Special Play】, 【Equip】 and 【Skill】 are not modelled, 【Awaken】
+is modelled only where the EXTRA deck uses it, and ST9-009 Wave Drop's
+"discarded by Sea Fairy" trigger is handled inside Sea Fairy's effect rather
+than as a trigger of its own.
 
 ## Source
 

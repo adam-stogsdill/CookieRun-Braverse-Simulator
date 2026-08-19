@@ -10,6 +10,7 @@
 
 const build = {
   list: [],             // card ids, one per copy
+  extra: [],            // the EXTRA deck, a separate pile of its own
   cards: new Map(),     // id -> card json, so a row can render without a fetch
   meta: null,           // sets/types/colours and the deck-building rules
   offset: 0,
@@ -24,17 +25,33 @@ const build = {
 const TYPE_ORDER = ["COOKIE", "FLIP", "EXTRA", "ITEM", "TRAP", "STAGE", "NPC"];
 const DECK_SIZE = () => (build.meta && build.meta.rules.deckSize) || 60;
 const MAX_COPIES = () => (build.meta && build.meta.rules.maxCopies) || 4;
+const EXTRA_SIZE = () => (build.meta && build.meta.rules.extraSize) || 10;
+/* An EXTRA card is played out of its own pile and is never drawn, so clicking
+ * one in the pool has to add it there rather than to the 60. */
+const isExtra = (card) => !!card && card.type === "EXTRA";
 
 /* ------------------------------------------------------------------- tabs */
+/* One list, so a new tab is one entry rather than a new pair of toggles to
+ * keep in step. "play" owns no body class: it is what is left when no other
+ * view has claimed the second row. */
+const TABS = [
+  { name: "play", button: "#tab-play" },
+  { name: "build", button: "#tab-build", body: "view-build" },
+  { name: "table", button: "#tab-table", body: "view-table" },
+];
+
 function showTab(name) {
-  document.body.classList.toggle("view-build", name === "build");
-  el("#tab-play").classList.toggle("on", name !== "build");
-  el("#tab-build").classList.toggle("on", name === "build");
+  TABS.forEach((tab) => {
+    if (tab.body) document.body.classList.toggle(tab.body, tab.name === name);
+    el(tab.button).classList.toggle("on", tab.name === name);
+  });
   if (name === "build" && !build.meta) openBuilder();
+  // table.js defines this; it is loaded after this file, so it is checked for
+  // rather than assumed.
+  if (name === "table" && typeof renderTableKit === "function") renderTableKit();
 }
 
-el("#tab-play").onclick = () => showTab("play");
-el("#tab-build").onclick = () => showTab("build");
+TABS.forEach((tab) => { el(tab.button).onclick = () => showTab(tab.name); });
 
 async function openBuilder() {
   await Promise.all([searchPool(), refreshDeckList()]);
@@ -148,9 +165,10 @@ el("#pool-next").onclick = () => {
 };
 
 /* --------------------------------------------------------------- the deck */
+/* The copy limit counts card numbers you own, so it spans both piles. */
 function countsByBase() {
   const counts = new Map();
-  build.list.forEach((id) => {
+  [...build.list, ...build.extra].forEach((id) => {
     const card = build.cards.get(id);
     const key = card ? card.baseId : id;
     counts.set(key, (counts.get(key) || 0) + 1);
@@ -159,21 +177,26 @@ function countsByBase() {
 }
 
 function addCard(card) {
-  if (build.list.length >= DECK_SIZE()) {
-    return flash(`deck is full at ${DECK_SIZE()} cards`);
+  const extra = isExtra(card);
+  const pile = extra ? build.extra : build.list;
+  const cap = extra ? EXTRA_SIZE() : DECK_SIZE();
+  if (pile.length >= cap) {
+    return flash(extra ? `EXTRA deck is full at ${cap} cards`
+                       : `deck is full at ${cap} cards`);
   }
   if ((countsByBase().get(card.baseId) || 0) >= MAX_COPIES()) {
     return flash(`${MAX_COPIES()} copies of ${card.baseId} already`);
   }
   build.cards.set(card.id, card);
-  build.list.push(card.id);
+  pile.push(card.id);
   touched();
 }
 
 function removeCard(id) {
-  const at = build.list.lastIndexOf(id);
+  const pile = isExtra(build.cards.get(id)) ? build.extra : build.list;
+  const at = pile.lastIndexOf(id);
   if (at < 0) return;
-  build.list.splice(at, 1);
+  pile.splice(at, 1);
   touched();
 }
 
@@ -206,7 +229,7 @@ function renderDeck() {
 
   // Group for reading: Cookies first, then the support cards.
   const groups = new Map();
-  countsById().forEach((count, id) => {
+  countsById(build.list).forEach((count, id) => {
     const card = build.cards.get(id);
     if (!card) return;
     const bucket = groups.get(card.type) || [];
@@ -225,14 +248,28 @@ function renderDeck() {
   });
   if (!size) listNode.appendChild(h("div", "deck-hint", "empty — click cards on the left"));
 
+  /* The EXTRA deck is listed under the 60 rather than mixed into it: they are
+   * two piles on the table, filled and capped separately. */
+  if (build.extra.length) {
+    listNode.appendChild(h("div", "group",
+      `EXTRA DECK · ${build.extra.length}/${EXTRA_SIZE()}`));
+    const rows = [...countsById(build.extra).entries()]
+      .map(([id, count]) => ({ card: build.cards.get(id), count }))
+      .filter((r) => r.card)
+      .sort((a, b) => a.card.name.localeCompare(b.card.name));
+    rows.forEach(({ card, count }) => listNode.appendChild(deckRow(card, count)));
+  }
+
   const cookies = build.list.filter((id) => isCookie(build.cards.get(id))).length;
   const flips = build.list.filter((id) => build.cards.get(id) &&
     build.cards.get(id).type === "FLIP").length;
   const maxFlip = (build.meta && build.meta.rules.maxFlip) || 16;
   const mix = el("#deck-mix");
   mix.innerHTML = "";
-  [`${size}/${target} cards`, `${cookies} cookies`, `${flips}/${maxFlip} flip`]
-    .forEach((text) => mix.appendChild(h("span", null, text)));
+  const line = [`${size}/${target} cards`, `${cookies} cookies`,
+                `${flips}/${maxFlip} flip`];
+  if (build.extra.length) line.push(`${build.extra.length}/${EXTRA_SIZE()} extra`);
+  line.forEach((text) => mix.appendChild(h("span", null, text)));
 
   validateSoon();
 }
@@ -241,9 +278,9 @@ function isCookie(card) {
   return !!card && (card.type === "COOKIE" || card.type === "FLIP" || card.type === "EXTRA");
 }
 
-function countsById() {
+function countsById(pile = build.list) {
   const counts = new Map();
-  build.list.forEach((id) => counts.set(id, (counts.get(id) || 0) + 1));
+  pile.forEach((id) => counts.set(id, (counts.get(id) || 0) + 1));
   return counts;
 }
 
@@ -271,7 +308,8 @@ let validateTimer = null;
 function validateSoon() {
   clearTimeout(validateTimer);
   validateTimer = setTimeout(async () => {
-    const data = await api("/api/deck/validate", { cards: build.list });
+    const data = await api("/api/deck/validate",
+                           { cards: build.list, extra: build.extra });
     if (build.note) return;     // a flash message owns the line right now
     const status = el("#deck-status");
     status.className = "deck-status " + (data.legal ? "good" : "bad");
@@ -305,7 +343,9 @@ el("#deck-load").addEventListener("change", async (e) => {
   const data = await api("/api/deck?name=" + encodeURIComponent(name));
   if (data.error) { alert(data.error); return; }
   data.cards.forEach((card) => build.cards.set(card.id, card));
+  (data.extra || []).forEach((card) => build.cards.set(card.id, card));
   build.list = data.list.slice();
+  build.extra = (data.extraList || []).slice();
   build.loaded = data.source === "saved" ? name : null;
   build.dirty = false;
   // A starter or generated list opens as a copy, so editing one cannot
@@ -322,7 +362,8 @@ function confirmDiscard() {
 el("#deck-save").onclick = async () => {
   const name = el("#deck-name").value.trim();
   if (!name) { flash("give the deck a name first"); el("#deck-name").focus(); return; }
-  const data = await api("/api/decks/save", { name, cards: build.list });
+  const data = await api("/api/decks/save",
+                        { name, cards: build.list, extra: build.extra });
   if (data.error) { alert(data.error); return; }
   build.loaded = name;
   build.dirty = false;
@@ -334,6 +375,7 @@ el("#deck-save").onclick = async () => {
 el("#deck-new").onclick = () => {
   if (!confirmDiscard()) return;
   build.list = [];
+  build.extra = [];
   build.loaded = null;
   build.dirty = false;
   el("#deck-name").value = "";

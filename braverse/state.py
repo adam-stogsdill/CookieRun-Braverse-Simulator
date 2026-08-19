@@ -40,8 +40,11 @@ class CardInstance:
 class Cookie:
     """A Cookie in the battle area: one card plus its face-down HP pile.
 
-    Cookies do not stack — there is no level-up in Braverse. A Cookie is played
-    from hand for free and its Level only feeds the break-area clock.
+    Cookies do not stack in normal play — there is no level-up in Braverse. A
+    Cookie is played from hand for free and its Level only feeds the break-area
+    clock. The one exception is 【Awaken】, which places an EXTRA card on top of
+    a Cookie already in the battle area: the pile underneath is kept in
+    `under`, and the Cookie takes the EXTRA card's name, Level and attack.
     """
 
     uid: int
@@ -64,10 +67,18 @@ class Cookie:
     activate_locked: bool = False       # its 【Activate】 is suppressed
     effect_damage_reduction: int = 0    # "-N damage from effects"
     equipment: list = field(default_factory=list)  # 【Equip】 attachments
+    # 【Awaken】: the cards this Cookie was stacked on top of, oldest first.
+    # The Cookie *is* `card`; `under` is only the paper underneath it, which
+    # travels with the stack and joins it wherever the stack ends up.
+    under: list = field(default_factory=list)
     flip_disabled: bool = False         # its HP FLIPs cannot activate
     attack_bonus: int = 0                                     # cleared each turn
     attack_bonus_next_turn: int = 0   # applied at the owner's next Active Phase
     incoming_damage_reduction: int = 0   # "receives -N attack damage", per battle
+    # "receives -N from all damage" — attack and effect alike, and unlike
+    # `incoming_damage_reduction` it lasts until the owner's next Active Phase
+    # rather than being cleared between battles.
+    all_damage_reduction: int = 0
     hp_bonus: int = 0                                         # +N HP effects, persistent
 
     def defn(self, db: CardDB) -> CardDef:
@@ -76,6 +87,16 @@ class Cookie:
     @property
     def remaining_hp(self) -> int:
         return len(self.hp_cards)
+
+    @property
+    def spent_cards(self) -> list:
+        """What is left behind when this Cookie leaves the battle area.
+
+        Its HP pile, plus anything it was 【Awaken】ed on top of. Every caller
+        that moves a Cookie out of play sheds this to the trash — the Cookie's
+        own card is the only part that follows it to wherever it is going.
+        """
+        return [*self.hp_cards, *self.under]
 
     def name(self, db: CardDB) -> str:
         return self.defn(db).name
@@ -121,6 +142,9 @@ class PlayerState:
     used_once_per_game: set = field(default_factory=set)  # card uids
     support_skip_untap: set = field(default_factory=set)  # support card uids
     played_from_break_this_turn: set = field(default_factory=set)
+    # 【Awaken】 gates ask which Cookie was replayed out of a graveyard zone
+    # this turn, so the trash case is tracked the same way as the break one.
+    played_from_trash_this_turn: set = field(default_factory=set)
     support_trashed_this_turn: int = 0
     hp_gain_locked: bool = False      # "cannot add HP via card effects"
     # (turn_counter, colour, level) for every Cookie of yours that fainted,

@@ -206,7 +206,7 @@ def truffle_activate(ctx: Ctx) -> None:
     if picked in cookies:
         ctx.opp.battle.remove(picked)
         ctx.opp.deck.append(picked.card)
-        ctx.opp.trash.extend(picked.hp_cards)
+        ctx.opp.trash.extend(picked.spent_cards)
         ctx.game._check_battle_area(ctx.opp)
     else:
         owner = ctx.me if picked in ctx.me.stage else ctx.opp

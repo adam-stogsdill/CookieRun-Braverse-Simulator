@@ -26,6 +26,12 @@ _ACTION_TYPES = (
     A.Attack, A.PlayTrap, A.Block, A.Pass, A.EndTurn,
 )
 _TYPE_INDEX = {cls: i for i, cls in enumerate(_ACTION_TYPES)}
+# An 【EXTRA】 play *is* a Cookie play — a body arriving in the battle area —
+# so it shares that one-hot slot rather than claiming a tenth. Giving it its own
+# would widen FEATURE_DIM, and every agent checkpoint on disk was trained at the
+# current width; what actually distinguishes the move (Level, HP, board state)
+# is in the action vector either way.
+_TYPE_INDEX[A.PlayExtra] = _TYPE_INDEX[A.PlayCookie]
 
 
 class Encoder:

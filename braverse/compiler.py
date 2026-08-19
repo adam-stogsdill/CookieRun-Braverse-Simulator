@@ -649,7 +649,7 @@ class SelfToDeckBottom(Op):
             return False
         ctx.me.battle.remove(cookie)
         ctx.me.deck.append(cookie.card)
-        ctx.me.trash.extend(cookie.hp_cards)
+        ctx.me.trash.extend(cookie.spent_cards)
         ctx.game._check_battle_area(ctx.me)
         return True
 
@@ -1098,7 +1098,7 @@ class SelectedCookieToSupport(Op):
             owner.battle.remove(cookie)
             cookie.card.rested = self.rested
             owner.support.append(cookie.card)
-            owner.trash.extend(cookie.hp_cards)
+            owner.trash.extend(cookie.spent_cards)
             ctx.game._check_battle_area(owner)
         return True
 
@@ -1184,7 +1184,7 @@ class MoveSelectedToDeck(Op):
                 owner.deck.append(cookie.card)
             else:
                 owner.deck.insert(0, cookie.card)
-            owner.trash.extend(cookie.hp_cards)
+            owner.trash.extend(cookie.spent_cards)
             ctx.game._check_battle_area(owner)
         return True
 
@@ -1414,7 +1414,7 @@ class SelfToDeck(Op):
             ctx.me.deck.insert(0, cookie.card)
         else:
             ctx.me.deck.append(cookie.card)
-        ctx.me.trash.extend(cookie.hp_cards)
+        ctx.me.trash.extend(cookie.spent_cards)
         ctx.game._check_battle_area(ctx.me)
         return True
 
@@ -1518,6 +1518,18 @@ def _v_select_bare(m) -> list[Op]:
     """"Select up to 1 LV.2 or lower Cookie" — no "of your/opponent's"."""
     scope, exclude = _target_scope(m.group(2))
     return [Select(scope, count=int(m.group(1)),
+                   filter=parse_filter(m.group(2), exclude_self=exclude))]
+
+
+@verb(r"^select (\d+) of (.*?cookies?.*?)$")
+def _v_select_required(m) -> list[Op]:
+    """"Select 1 of your Cookies" — mandatory, unlike "select up to 1".
+
+    The distinction is already in the op: an optional select with no legal
+    target quietly does nothing, a mandatory one aborts the rest of the clause.
+    """
+    scope, exclude = _target_scope(m.group(2))
+    return [Select(scope, count=int(m.group(1)), optional=False,
                    filter=parse_filter(m.group(2), exclude_self=exclude))]
 
 
@@ -2389,7 +2401,8 @@ def _v_mill_support_active_in(m) -> list[Op]:
       r"as (active|rested)\.?$")
 def _v_trash_to_support(m) -> list[Op]:
     return [MoveCards(ZONE_TRASH, ZONE_SUPPORT, int(m.group(1)),
-                      parse_card_filter(m.group(2)))]
+                      parse_card_filter(m.group(2)),
+                      rested=m.group(3).lower() == "rested")]
 
 
 @verb(r"^place this cookie in(?:to)? the break area\.?$")
@@ -2622,6 +2635,9 @@ _MOVE_CLAUSE = re.compile(
     r"from\s+(?P<src>.+?)\s+(?:in)?to\s+(?P<dst>.+?)\.?$", re.I)
 
 
+_SUPPORT_STATE = re.compile(r"\bas (active|rested)\b", re.I)
+
+
 def _generic_move(phrase: str) -> list[Op] | None:
     match = _MOVE_CLAUSE.match(phrase)
     if not match:
@@ -2666,8 +2682,17 @@ def _generic_move(phrase: str) -> list[Op] | None:
             return [PlayFromSupport(filt)]
         return None
 
+    # "... into your support area as active" — the trailing state rides on the
+    # destination phrase, and dropping it would silently rest a card the text
+    # says arrives ready to spend.
+    rested = True
+    if destination == ZONE_SUPPORT:
+        state = _SUPPORT_STATE.search(match.group("dst"))
+        if state is None:
+            return None      # unstated: refuse rather than guess active/rested
+        rested = state.group(1).lower() == "rested"
     return [MoveCards(source, destination, count, parse_card_filter(what),
-                      from_opponent=src_opp)]
+                      from_opponent=src_opp, rested=rested)]
 
 
 def parse_verb(phrase: str) -> list[Op]:
@@ -2770,6 +2795,12 @@ def compile_text(text: str) -> Program:
 _PLACEMENT_ONLY = re.compile(
     r"^\s*(?:<[^>]*>\s*)*place in your stage area\.?\s*$", re.I)
 
+# The energy cost an ITEM/TRAP prints at the head of its text. `cards.py` reads
+# the same run of symbols into `play_cost`, which the engine charges when the
+# card is played, so the compiled body must not pay it a second time. Only an
+# all-symbol cost is stripped — a leading `<Discard 1 card.>` is a real op.
+_LEAD_ENERGY_COST = re.compile(r"^\s*<(?:\{[A-Za-z]+\})+>\s*")
+
 
 def _is_vanilla_stage(card: CardDef) -> bool:
     """A stage card printing only its placement line has nothing to compile.
@@ -2813,7 +2844,10 @@ def _trigger_texts(card: CardDef) -> list[tuple[Trigger, str]]:
                 head, _, tail = description.partition("When your turn ends")
                 out.append((Trigger.END_TURN, tail.lstrip(", ")))
         elif card.type in (CardType.ITEM, CardType.TRAP):
-            out.append((Trigger.ITEM, description))
+            # Without the strip the lead cost is charged twice: once by the
+            # engine as `play_cost`, once by the body's own PayCost. The
+            # hand-written items drop it from their docstrings for this reason.
+            out.append((Trigger.ITEM, _LEAD_ENERGY_COST.sub("", description, count=1)))
         elif "【On Play】" in description:
             out.append((Trigger.ON_PLAY, description))
         elif "【Activate】" in description:

@@ -22,7 +22,69 @@ const state = {
   picked: [],           // indices chosen in a multi-card pick
   eventId: 0,           // last event batch played
   announced: false,     // win chime fired for this match
+  /* Online play. `mySeat` is which side of the table this browser sits on —
+   * 0 for a local match, and whichever seat the room handed out otherwise. It
+   * is the only thing that decides which mat is drawn at the bottom and which
+   * cards can be picked up, so nothing below should compare a seat to 0. */
+  mySeat: 0,
+  room: null,           // room code, when playing someone over the network
+  token: null,          // this seat's key to it
+  lobby: null,          // room status while waiting for an opponent
 };
+
+/* The room outlives the tab: a refresh, or a laptop lid, must come back to the
+ * same seat rather than to a spectator's view of your own game. */
+const Seat = {
+  key: (room) => "braverse.seat." + room,
+  save(room, seat, token) {
+    try {
+      localStorage.setItem(Seat.key(room), JSON.stringify({ seat, token }));
+    } catch (err) { /* private browsing: the seat just will not survive a refresh */ }
+  },
+  load(room) {
+    try {
+      return JSON.parse(localStorage.getItem(Seat.key(room)) || "null");
+    } catch (err) { return null; }
+  },
+  forget(room) {
+    try { localStorage.removeItem(Seat.key(room)); } catch (err) { /* as above */ }
+  },
+};
+
+/** Is this browser the one that answers for `state.mySeat`? */
+function playableSeat() {
+  if (!state.snap) return false;
+  if (state.room) return state.snap.seat === state.mySeat;
+  return (state.snap.humanSeats || []).includes(state.mySeat);
+}
+
+/** How to name a seat: the person in it online, the pilot driving it locally. */
+function seatLabel(seat, snap) {
+  const room = (snap && snap.room) || state.lobby;
+  if (room) {
+    const name = (room.seats[seat] || {}).name || `seat ${seat}`;
+    return seat === state.mySeat && snap && snap.seat !== null ? `${name} (you)` : name;
+  }
+  return `seat ${seat} · ${prettyPilot(snap && snap.pilots ? snap.pilots[seat] : "")}`;
+}
+
+/* Seat the viewer at the bottom of the table.
+ *
+ * The board is two fixed sections, and everything about how a mat is drawn —
+ * the flip, the hand along the bottom edge, which cards can be picked up —
+ * hangs off `.me` and `.opponent`. Rather than teach all of that about seat
+ * numbers, the two sections trade places and classes, so seat 1 sees exactly
+ * the layout seat 0 does, from the other side. */
+function seatPerspective(seat) {
+  state.mySeat = seat;
+  const table = el("#table");
+  const mine = el("#side-" + seat);
+  const theirs = el("#side-" + (1 - seat));
+  mine.className = "side me";
+  theirs.className = "side opponent";
+  table.insertBefore(theirs, table.firstChild);
+  table.insertBefore(mine, el(".middle").nextSibling);
+}
 
 /* ------------------------------------------------------------------ utils */
 function h(tag, cls, text) {
@@ -58,7 +120,7 @@ function animateTurn(node, card, opts) {
   const was = state.restState.get(card.uid);
   if (was === undefined || was === now) return;
 
-  const flipped = document.body.classList.contains("flip-opponent") && opts.seat !== 0;
+  const flipped = document.body.classList.contains("flip-opponent") && opts.seat !== state.mySeat;
   const base = flipped ? 180 : 0;
   const from = base + (was ? 90 : 0);
   const to = base + (now ? 90 : 0);
@@ -166,7 +228,7 @@ function cardNode(card, opts = {}) {
   node.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
   node.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
   if (opts.uid !== undefined && opts.uid !== null) {
-    if (opts.seat === 0) {
+    if (opts.seat === state.mySeat) {
       makeDraggable(node, opts.uid, opts.seat);
     } else {
       node.addEventListener("click", () => toggleFilter(opts.uid));
@@ -203,6 +265,14 @@ function cookieSlot(cookie) {
     front.appendChild(atk);
   }
   if (cookie.blocker) front.appendChild(h("span", "blocker", "BLK"));
+  /* An 【Awaken】ed Cookie is a stack: the EXTRA card on top of the Cookie it
+   * was played onto. Show the card underneath peeking out, so the board reads
+   * as two cards rather than as a Cookie that silently changed its name. */
+  if (cookie.under && cookie.under.length) {
+    const tag = h("span", "awoken", "AWAKENED");
+    tag.title = "Awakened from " + cookie.under.map((c) => c.name).join(", ");
+    front.appendChild(tag);
+  }
   box.appendChild(front);
   box.dataset.cookie = cookie.uid;
   slot.appendChild(box);
@@ -303,12 +373,16 @@ function renderSide(seat, snap) {
   side.innerHTML = "";
   const p = snap.players[seat];
   const isHuman = (snap.humanSeats || []).includes(seat);
-  const opponent = seat !== 0;
+  const opponent = seat !== state.mySeat;
 
   /* -- seat bar ------------------------------------------------------- */
   const bar = h("div", "seatbar");
-  bar.appendChild(h("span", "who", "Seat " + seat));
-  bar.appendChild(h("span", "pill" + (isHuman ? " human" : ""), prettyPilot(snap.pilots[seat])));
+  if (snap.online) {
+    bar.appendChild(h("span", "who", seatLabel(seat, snap)));
+  } else {
+    bar.appendChild(h("span", "who", "Seat " + seat));
+    bar.appendChild(h("span", "pill" + (isHuman ? " human" : ""), prettyPilot(snap.pilots[seat])));
+  }
   bar.appendChild(h("span", "deckname", snap.decks[seat]));
 
   /* -- mat ------------------------------------------------------------ */
@@ -344,6 +418,18 @@ function renderSide(seat, snap) {
   const deckStack = stack("deck", p.deckCount, { title: "Face-down deck" });
   deckStack.dataset.zone = "deck";
   right.appendChild(deckStack);
+  /* The EXTRA deck is public: both players may read it whenever they like, so
+   * it shows its top card face up and opens like the trash rather than sitting
+   * face down as a count. Hidden entirely when a deck does not play one. */
+  if (p.extraCount) {
+    right.appendChild(stack("extra deck", p.extraCount, {
+      faceUp: true,
+      top: p.extra[p.extra.length - 1],
+      title: "EXTRA deck — played from here when its condition is met. "
+           + "Click to look through it.",
+      onClick: () => openBrowser(seat, "extra"),
+    }));
+  }
   right.appendChild(stack("trash", p.trashCount, {
     faceUp: true,
     top: p.trash[p.trash.length - 1],
@@ -362,7 +448,12 @@ function renderSide(seat, snap) {
   const hand = h("div", "hand");
   hand.dataset.zone = "hand";
   if (p.hand.length) {
-    p.hand.forEach((c) => hand.appendChild(cardNode(c, { mid: true, uid: c.uid, seat })));
+    const armed = opponent ? null : armedTraps();
+    p.hand.forEach((c) => {
+      const node = cardNode(c, { mid: true, uid: c.uid, seat });
+      if (armed && armed.has(c.uid)) node.classList.add("armed");
+      hand.appendChild(node);
+    });
   } else {
     for (let i = 0; i < p.handCount; i++) hand.appendChild(faceDown("mid"));
   }
@@ -407,12 +498,12 @@ function renderBanner(snap) {
     banner.classList.add("win");
     banner.textContent = snap.winner === -1 || snap.winner === null
       ? `Draw — ${snap.winReason}`
-      : `Seat ${snap.winner} (${prettyPilot(snap.pilots[snap.winner])}) wins — ${snap.winReason}`;
+      : `${seatLabel(snap.winner, snap)} wins — ${snap.winReason}`;
     return;
   }
   if (snap.pending) {
     banner.classList.add("on");
-    banner.textContent = `Seat ${snap.pending.seat}: ${snap.pending.prompt}`;
+    banner.textContent = `${seatLabel(snap.pending.seat, snap)}: ${snap.pending.prompt}`;
     return;
   }
   banner.textContent = snap.paused ? "paused" : "…";
@@ -420,9 +511,11 @@ function renderBanner(snap) {
 
 function renderTurnline(snap) {
   if (!snap.players) { el("#turnline").textContent = "no match yet — hit New match"; return; }
+  const who = snap.online
+    ? `<b>${seatLabel(snap.turnPlayer, snap)}</b>`
+    : `<b>seat ${snap.turnPlayer}</b> (${prettyPilot(snap.pilots[snap.turnPlayer])})`;
   el("#turnline").innerHTML =
-    `turn <b>${snap.turn}</b> · <b>seat ${snap.turnPlayer}</b> (${prettyPilot(snap.pilots[snap.turnPlayer])})` +
-    ` · phase <b>${snap.phase}</b> · seed ${snap.seed}`;
+    `turn <b>${snap.turn}</b> · ${who} · phase <b>${snap.phase}</b> · seed ${snap.seed}`;
 }
 
 /* ---------------------------------------------------------- the play-out */
@@ -789,11 +882,13 @@ function renderBrowser() {
   if (!state.browsing || !state.snap || !state.snap.players) return;
   const { seat, zone: zoneName } = state.browsing;
   const player = state.snap.players[seat];
-  const cards = zoneName === "trash" ? player.trash : player.break;
+  const cards = { trash: player.trash, extra: player.extra }[zoneName]
+    || player.break;
   const query = el("#browser-search").value.trim().toLowerCase();
 
   el("#browser-title").textContent =
-    (zoneName === "trash" ? "Trash" : "Break area") + ` · seat ${seat}`;
+    ({ trash: "Trash", extra: "EXTRA deck" }[zoneName] || "Break area")
+    + ` · seat ${seat}`;
 
   // One entry per distinct card, because a trash of 30 cards is mostly copies.
   const groups = new Map();
@@ -841,6 +936,7 @@ el("#browser").addEventListener("close", () => {
 const GROUPS = [
   ["Attack", "Attack"],
   ["PlayCookie", "Play a Cookie"],
+  ["PlayExtra", "EXTRA deck"],
   ["PlaySupportCard", "Items & Stages"],
   ["ActivateSkill", "Skills"],
   ["PlayTrap", "Traps"],
@@ -857,6 +953,7 @@ function optionLabelClass(opt) {
   if (opt.kind === "EndTurn" || opt.kind === "Pass") return "opt end";
   if (opt.kind === "Attack") return "opt attack";
   if (opt.kind === "PlaceSupport") return "opt support";
+  if (opt.kind === "PlayExtra") return "opt extra";
   return "opt";
 }
 
@@ -978,11 +1075,16 @@ function renderOptions(snap) {
   const pending = snap.pending;
   const lastLine = (snap.log || []).slice(-1)[0] || "";
   el("#prompt").textContent = pending ? pending.prompt : (snap.over ? "Game over" : "Bots playing…");
-  el("#prompt-who").textContent = pending
-    ? `seat ${pending.seat} · ${prettyPilot(snap.pilots ? snap.pilots[pending.seat] : "")}`
-    : lastLine;
+  el("#prompt-who").textContent = pending ? seatLabel(pending.seat, snap) : lastLine;
 
   if (!pending) { state.filterUid = null; return; }
+  if (pending.waiting) {
+    // The question is the other seat's, and its options are that seat's hand,
+    // so this browser was never sent them. Show what they are being asked.
+    state.filterUid = null;
+    box.appendChild(h("div", "filterbar waiting", "waiting for your opponent…"));
+    return;
+  }
   if (pending.centre) {
     box.appendChild(h("div", "filterbar", "answer in the middle of the table"));
     return;
@@ -1153,6 +1255,19 @@ function pendingOptions() {
   return snap && snap.pending && !state.animating ? snap.pending.options : [];
 }
 
+/* Traps you can actually spring, right now.
+ *
+ * A response window is the one moment the hand can act on someone else's turn,
+ * and the only thing in it that can act is a trap you can pay for — the engine
+ * already leaves out the ones whose effect would land on nothing. Standing them
+ * up out of the hand says so without the player having to click through six
+ * cards to find out which one is live. */
+function armedTraps() {
+  return new Set(pendingOptions()
+    .filter((o) => o.kind === "PlayTrap")
+    .map((o) => o.subject));
+}
+
 /** Legal actions that this card could be the subject of. */
 function movesFor(uid) {
   return pendingOptions().filter((o) => o.subject === uid);
@@ -1254,7 +1369,7 @@ function endDrag(event) {
 
 /** Make a card draggable when it has a legal move behind it. */
 function makeDraggable(node, uid, seat) {
-  if (seat !== 0 || !(state.snap && (state.snap.humanSeats || []).includes(0))) return;
+  if (seat !== state.mySeat || !playableSeat()) return;
   node.addEventListener("pointerdown", (event) => {
     if (event.button !== 0) return;
     if (movesFor(uid).length) node.classList.add("grabbable");
@@ -1270,11 +1385,22 @@ async function answer(index) {
   state.filterUid = null;
   el("#options").innerHTML = "";
   try {
-    await api("/api/choose", { index });
+    // The pending id goes with the answer so the server can drop it if the
+    // question has already moved on — over a network that is not theoretical.
+    await api("/api/choose", {
+      index,
+      pendingId: state.snap && state.snap.pending ? state.snap.pending.id : null,
+      ...roomAuth(),
+    });
   } finally {
     state.busy = false;
   }
   poll();
+}
+
+/** What identifies this seat to the server, on every move it makes. */
+function roomAuth() {
+  return state.room ? { room: state.room, token: state.token } : {};
 }
 
 /* -------------------------------------------------------------------- log */
@@ -1322,6 +1448,10 @@ function render(snap) {
   if (snap.over && !state.announced) {
     state.announced = true;
     Sfx.play("win");
+  } else if (!snap.over) {
+    // A rematch is a new game arriving over the top of a finished one, and only
+    // the player who asked for it goes through the reset above.
+    state.announced = false;
   }
   el("#btn-pause").textContent = snap.paused ? "Resume" : "Pause";
   // Spectator's tool only: there is nothing to reveal in a match you are playing.
@@ -1381,7 +1511,31 @@ async function poll() {
   if (polling) return;
   polling = true;
   try {
-    const snap = await api("/api/state");
+    /* Ask to be held until something changes. The server answers the moment
+     * the opponent moves — which over a network is the difference between a
+     * game that feels live and one that feels like a turn-based email — and
+     * otherwise hangs up quietly after its own timeout. `since` is dropped
+     * while a scene is playing, so the queued state stays fresh. */
+    const params = new URLSearchParams();
+    if (state.room) {
+      params.set("room", state.room);
+      if (state.token) params.set("token", state.token);
+    }
+    if (state.version >= 0 && !state.animating) params.set("since", state.version);
+    const query = params.toString();
+    const snap = await api("/api/state" + (query ? "?" + query : ""));
+    if (snap.gone) { roomIsGone(); return; }
+    if (state.room) {
+      state.lobby = snap.room || null;
+      // A refresh with a stale token comes back as a spectator; say so rather
+      // than silently drawing a game the person thinks they are playing.
+      if (snap.seat !== undefined && snap.seat !== null && snap.seat !== state.mySeat) {
+        seatPerspective(snap.seat);
+      }
+      renderRoomBar(snap);
+      if (snap.lobby) { renderLobby(snap); return; }
+      hideLobby();
+    }
     if (state.animating) { state.queuedSnap = snap; return; }
     const pendingId = snap.pending ? snap.pending.id : null;
     if (snap.version === state.version && pendingId === state.pendingId) return;
@@ -1434,7 +1588,23 @@ el("#btn-copy-log").onclick = () => {
   navigator.clipboard.writeText(((state.snap && state.snap.log) || []).join("\n"));
 };
 
+/* Whether this key is someone typing rather than reaching for a shortcut.
+ *
+ * Every board shortcut is a bare character — space pauses, 1-9 take an option —
+ * so inside a text field all of them are keystrokes the field wanted. Space is
+ * the one that bites: it is swallowed by preventDefault and never reaches the
+ * deck builder's search box at all. Asking what has focus is the fix; the old
+ * guard named two dialogs, which could only ever cover the fields someone had
+ * remembered to add to it. */
+function isTyping(event) {
+  const node = event.target;
+  if (!node) return false;
+  if (node.isContentEditable) return true;
+  return ["INPUT", "TEXTAREA", "SELECT"].includes(node.tagName);
+}
+
 document.addEventListener("keydown", (e) => {
+  if (isTyping(e)) return;
   if (el("#setup").open || el("#browser").open) return;
   if (e.key >= "1" && e.key <= "9") {
     const btn = el("#options").querySelectorAll("button.opt")[Number(e.key) - 1];
@@ -1480,6 +1650,37 @@ async function loadConfig() {
     describeDeck(seat);
   });
   updateHint();
+
+  const online = el("#online-deck");
+  online.innerHTML = "";
+  state.config.decks.forEach((d) => {
+    const o = h("option", null, `${d.name} (${d.size})`);
+    o.value = d.name;
+    online.appendChild(o);
+  });
+  online.value = (state.config.decks[0] || {}).name || "";
+  online.onchange = describeOnlineDeck;
+  describeOnlineDeck();
+  el("#online-hint").textContent = (state.config.lan || []).length
+    ? "Someone on this network can join the room you host."
+    : "Only this machine can reach this server — restart it with --lan to play "
+      + "someone else.";
+  const remembered = localStorage.getItem("braverse.name");
+  if (remembered) el("#online-name").value = remembered;
+  el("#online-name").onchange = (e) =>
+    localStorage.setItem("braverse.name", e.target.value);
+}
+
+async function describeOnlineDeck() {
+  const info = el("#online-deckinfo");
+  const data = await api("/api/deck?name=" + encodeURIComponent(el("#online-deck").value));
+  if (data.error) { info.textContent = data.error; return; }
+  info.className = "deckinfo" + (data.legal ? "" : " bad");
+  // Unlike a local game, an illegal list cannot be taken into a room at all —
+  // say so here rather than at the door.
+  info.textContent = data.legal
+    ? `${data.cards.length} distinct · legal`
+    : data.problems.join("; ") + " — not playable online";
 }
 
 async function describeDeck(seat) {
@@ -1527,6 +1728,190 @@ el("#setup-form").addEventListener("submit", async (e) => {
   poll();
 });
 
-loadConfig();
+/* ----------------------------------------------------------------- online */
+/* One machine runs the server and both people point a browser at it. A room is
+ * a code plus a token per seat: the code is public, because it travels in the
+ * link, and the token is what the server checks before it lets this browser
+ * answer anything. Neither is ever asked to hold a secret — the hand you
+ * cannot see was never sent to this page. */
+
+function setMode(online) {
+  el("#mode-online").classList.toggle("on", online);
+  el("#mode-local").classList.toggle("on", !online);
+  el("#online-pane").classList.toggle("hidden", !online);
+  el("#local-pane").classList.toggle("hidden", online);
+  // "Start" belongs to the local form; a room is entered by its own buttons.
+  el("#start").classList.toggle("hidden", online);
+}
+el("#mode-local").onclick = () => setMode(false);
+el("#mode-online").onclick = () => setMode(true);
+
+function onlineError(message) {
+  const box = el("#online-error");
+  box.textContent = message || "";
+  box.classList.toggle("hidden", !message);
+}
+
+function joinUrl(code) {
+  // Prefer the address the server says the network can reach it on: the host
+  // is very often on http://localhost, which is useless to send to anyone.
+  const lan = (state.config.lan || [])[0];
+  const origin = lan ? lan.replace(/\/$/, "") : location.origin;
+  return `${origin}/?room=${code}`;
+}
+
+/** Take a seat: remember it, point the poll at it, and redraw from its side. */
+function takeSeat(code, seat, token) {
+  state.room = code;
+  state.token = token;
+  Seat.save(code, seat, token);
+  seatPerspective(seat);
+  state.version = -1;
+  state.pendingId = null;
+  state.eventId = 0;
+  state.announced = false;
+  document.body.classList.add("online");
+  const url = new URL(location.href);
+  url.searchParams.set("room", code);
+  history.replaceState(null, "", url);
+  el("#setup").close();
+  poll();
+}
+
+async function hostRoom() {
+  onlineError("");
+  const res = await api("/api/room/new", {
+    deck: el("#online-deck").value,
+    name: el("#online-name").value,
+  });
+  if (res.error) { onlineError(res.error); return; }
+  takeSeat(res.room, res.seat, res.token);
+}
+
+async function joinRoom(code) {
+  onlineError("");
+  const wanted = (code || el("#online-code").value || "").trim().toUpperCase();
+  if (wanted.length !== 4) { onlineError("a room code is four characters"); return; }
+  const res = await api("/api/room/join", {
+    room: wanted,
+    deck: el("#online-deck").value,
+    name: el("#online-name").value,
+  });
+  if (res.error) { onlineError(res.error); return; }
+  takeSeat(res.room, res.seat, res.token);
+}
+
+el("#btn-host").onclick = hostRoom;
+el("#btn-join").onclick = () => joinRoom();
+el("#online-code").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); joinRoom(); }
+});
+
+function renderLobby(snap) {
+  const box = el("#lobby");
+  box.classList.remove("hidden");
+  el("#lobby-code").textContent = state.room;
+  const url = joinUrl(state.room);
+  if (el("#lobby-url").value !== url) el("#lobby-url").value = url;
+  el("#lobby-hint").textContent = (state.config.lan || []).length
+    ? "They need to be on the same network as this machine."
+    : "This server is only listening on this machine — restart it with --lan "
+      + "for someone else to reach it.";
+  el("#turnline").textContent = "waiting for an opponent";
+  el("#prompt").textContent = "Room " + state.room;
+  el("#prompt-who").textContent = "nobody has joined yet";
+  el("#options").innerHTML = "";
+}
+
+function hideLobby() { el("#lobby").classList.add("hidden"); }
+
+el("#lobby-copy").onclick = async () => {
+  await navigator.clipboard.writeText(el("#lobby-url").value);
+  el("#lobby-copy").textContent = "copied";
+  setTimeout(() => { el("#lobby-copy").textContent = "copy"; }, 1200);
+};
+el("#lobby-cancel").onclick = () => leaveRoom();
+
+function renderRoomBar(snap) {
+  const bar = el("#roombar");
+  bar.classList.remove("hidden");
+  el("#room-code").textContent = "room " + state.room;
+  const lobby = state.lobby;
+  const them = lobby ? lobby.seats[1 - state.mySeat] : null;
+  const who = el("#room-who");
+  if (state.snap && state.snap.seat === null) {
+    who.textContent = "watching";
+    who.className = "who";
+  } else if (!them || !them.taken) {
+    who.textContent = "no opponent";
+    who.className = "who away";
+  } else {
+    who.textContent = (them.name || "opponent") + (them.here ? "" : " — away");
+    who.className = "who" + (them.here ? "" : " away");
+  }
+  el("#btn-rematch").classList.toggle("hidden",
+    !(snap && snap.over && state.snap && state.snap.seat !== null));
+}
+
+function roomIsGone() {
+  // The host stopped the server, or the room was reaped after a long silence.
+  if (state.room) Seat.forget(state.room);
+  el("#turnline").textContent = "that room is gone";
+  onlineError("that room is gone");
+  clearRoom();
+}
+
+function clearRoom() {
+  state.room = null;
+  state.token = null;
+  state.lobby = null;
+  state.snap = null;
+  state.version = -1;
+  hideLobby();
+  document.body.classList.remove("online");
+  el("#roombar").classList.add("hidden");
+  seatPerspective(0);
+  const url = new URL(location.href);
+  url.searchParams.delete("room");
+  history.replaceState(null, "", url);
+}
+
+async function leaveRoom() {
+  const room = state.room;
+  if (!room) return;
+  await api("/api/room/leave", roomAuth());
+  Seat.forget(room);
+  clearRoom();
+  el("#turnline").textContent = "idle";
+  el("#setup").showModal();
+}
+el("#btn-leave").onclick = leaveRoom;
+el("#btn-rematch").onclick = async () => {
+  const res = await api("/api/room/rematch", roomAuth());
+  if (res.error) return;
+  state.version = -1;
+  state.eventId = 0;
+  state.announced = false;
+  poll();
+};
+
+/** A link with ?room= in it, or a seat this browser held before a refresh. */
+async function resumeFromUrl() {
+  const code = new URLSearchParams(location.search).get("room");
+  if (!code) return false;
+  const held = Seat.load(code.toUpperCase());
+  if (held) {
+    takeSeat(code.toUpperCase(), held.seat, held.token);
+    return true;
+  }
+  // No token for this room: it is someone else's invitation. Open the dialog
+  // on the online tab with the code already filled in.
+  setMode(true);
+  el("#online-code").value = code.toUpperCase();
+  el("#setup").showModal();
+  return true;
+}
+
+loadConfig().then(resumeFromUrl);
 setInterval(poll, 350);
 poll();

@@ -1,0 +1,112 @@
+# run: v4
+# archetype: YELLOW
+# round: 35
+# holdout: 0.62
+# validation: 0.5333333333333333
+
+COOKIE (33)
+  4x ST7-008    Elder Faerie Cookie              LV2 HP4
+  4x ST7-009    Lilybell Cookie                  LV2 HP4
+  4x ST7-010    Millennial Tree Cookie           LV3 HP5
+  3x ST2-004    Macaron Cookie                   LV2 HP2
+  3x ST7-002    Mango Cookie                     LV1 HP2
+  2x ST2-006    GingerBright                     LV2 HP4
+  2x ST2-011    Cherry Cookie                    LV2 HP3
+  2x ST2-015    Hero Cookie                      LV2 HP3
+  2x ST7-011    Millennial Jade Deer             LV1 HP2
+  1x ST2-001    Roguefort Cookie                 LV3 HP6
+  1x ST2-003    Wizard Cookie                    LV3 HP3
+  1x ST2-008    Eclair Cookie                    LV3 HP5
+  1x ST2-009    GingerBrave                      LV1 HP2
+  1x ST2-010    Purple Yam Cookie                LV3 HP4
+  1x ST2-013    Cheesecake Cookie                LV2 HP3
+  1x ST7-012    Churro Cookie                    LV1 HP3
+FLIP (16)
+  4x ST7-005    Caramel Choux Cookie             LV1 HP1
+  3x ST2-005    Mustard Cookie                   LV1 HP1
+  3x ST2-012    Cheerleader Cookie               LV2 HP2
+  2x ST2-014    Custard Cookie III               LV3 HP3
+  2x ST7-006    Cream Puff Cookie                LV2 HP3
+  2x ST7-007    Fairy Cookie                     LV2 HP4
+ITEM (7)
+  4x ST7-014    Essence of Rejuvenation          
+  2x ST7-016    Tightly Tied Vine                
+  1x ST7-013    Miraculous Nutrient Ampoule      
+TRAP (3)
+  1x ST2-020    Winding Key Shield               
+  1x ST2-021    Pretzel Snare                    
+  1x ST7-017    Vined Cavern                     
+STAGE (1)
+  1x ST7-020    Forest of Life                   
+
+legal: True  size 60  flips 16
+
+{
+ "deck": [
+  "ST7-009",
+  "ST7-002",
+  "ST2-003",
+  "ST7-008",
+  "ST7-011",
+  "ST7-008",
+  "ST7-014",
+  "ST2-012",
+  "ST2-014",
+  "ST7-010",
+  "ST7-009",
+  "ST2-012",
+  "ST2-001",
+  "ST2-014",
+  "ST7-009",
+  "ST7-012",
+  "ST7-006",
+  "ST2-021",
+  "ST7-005",
+  "ST2-004",
+  "ST7-014",
+  "ST7-020",
+  "ST2-005",
+  "ST7-008",
+  "ST7-007",
+  "ST7-008",
+  "ST2-010",
+  "ST7-014",
+  "ST2-012",
+  "ST2-011",
+  "ST2-006",
+  "ST2-011",
+  "ST7-010",
+  "ST7-016",
+  "ST7-007",
+  "ST2-008",
+  "ST2-005",
+  "ST7-002",
+  "ST2-005",
+  "ST2-013",
+  "ST7-006",
+  "ST7-011",
+  "ST2-020",
+  "ST7-013",
+  "ST7-016",
+  "ST2-015",
+  "ST7-002",
+  "ST7-005",
+  "ST2-015",
+  "ST2-006",
+  "ST7-010",
+  "ST7-017",
+  "ST7-005",
+  "ST7-009",
+  "ST2-004",
+  "ST7-010",
+  "ST7-005",
+  "ST7-014",
+  "ST2-009",
+  "ST2-004"
+ ],
+ "run": "v4",
+ "archetype": "YELLOW",
+ "round": 35,
+ "holdout": 0.62,
+ "validation": 0.5333333333333333
+}

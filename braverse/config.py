@@ -57,6 +57,17 @@ class RulesConfig:
     refresh_on_empty_deck: bool = True
     refresh_break_cost: int = 1
 
+    # --- the EXTRA deck ---------------------------------------------------
+    # A second, face-down deck holding only 【EXTRA】 cards, played from that
+    # zone rather than drawn. The size limit is 6, which is not in the PLAY
+    # GUIDE this project was written from — that document does not cover the
+    # EXTRA deck at all — but comes from the game's own rules. It is a real
+    # constraint on a deck rather than a formality: the pool holds 10 distinct
+    # EXTRA cards, so a 6-card pile is already a choice about which to bring,
+    # before the 4-per-number cap is reached.
+    extra_deck_size: int = 6
+    extra_cards_in_main_deck: bool = False   # they live in the EXTRA deck only
+
     # --- NOT IN GUIDE -----------------------------------------------------
     # The guide does not cap how often a repeatable 【Activate】 skill may be
     # used within a turn. Treated as once per turn per source: the printed

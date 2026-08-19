@@ -1,0 +1,112 @@
+# run: v4
+# archetype: GREEN
+# round: 1
+# holdout: 0.835
+# validation: 0.8
+
+COOKIE (32)
+  4x ST3-004    Vampire Cookie                   LV3 HP3
+  4x ST8-003    Leek Cookie                      LV2 HP4
+  4x ST8-005    Wind Archer Cookie               LV3 HP6
+  3x ST3-009    Avocado Cookie                   LV2 HP2
+  3x ST3-010    Aloe Cookie                      LV2 HP3
+  3x ST3-013    Knight Cookie                    LV1 HP3
+  3x ST8-011    Kiwi Cookie                      LV1 HP3
+  3x ST8-012    Windcatcher                      LV1 HP2
+  1x ST3-003    GingerBright                     LV2 HP4
+  1x ST3-005    Blackberry Cookie                LV2 HP2
+  1x ST8-001    Greenbell Cookie                 LV1 HP2
+  1x ST8-008    Sugar Swan Cookie                LV2 HP4
+  1x ST8-010    Cookiemals                       LV1 HP2
+FLIP (16)
+  4x ST3-011    Onion Cookie                     LV2 HP2
+  4x ST3-014    Angel Cookie                     LV1 HP1
+  3x ST3-007    Sparkling Cookie                 LV3 HP3
+  2x ST8-007    Blue Slushy Cookie               LV1 HP1
+  1x ST8-002    Muscle Cookie                    LV2 HP4
+  1x ST8-006    Basil Pesto Cookie               LV3 HP4
+  1x ST8-009    Cucumber Cookie                  LV2 HP3
+ITEM (6)
+  2x ST3-016    Ancient Healer's Gaze            
+  2x ST3-018    Parsley Tea of Invigoration      
+  1x ST3-017    Viney Vines                      
+  1x ST8-013    Windgrass                        
+TRAP (5)
+  2x ST8-018    Piercing Arrow of Purity         
+  1x ST3-019    Supreme Whipped Cream            
+  1x ST3-020    Divine Light Crystal             
+  1x ST3-021    Breath of the Flute              
+STAGE (1)
+  1x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 16
+
+{
+ "deck": [
+  "ST3-007",
+  "ST8-005",
+  "ST3-019",
+  "ST3-010",
+  "ST8-002",
+  "ST8-010",
+  "ST3-003",
+  "ST3-011",
+  "ST8-012",
+  "ST8-012",
+  "ST3-004",
+  "ST3-010",
+  "ST8-011",
+  "ST8-012",
+  "ST8-003",
+  "ST3-014",
+  "ST3-013",
+  "ST8-005",
+  "ST3-004",
+  "ST3-017",
+  "ST3-014",
+  "ST3-007",
+  "ST3-009",
+  "ST8-007",
+  "ST8-003",
+  "ST8-005",
+  "ST3-005",
+  "ST8-011",
+  "ST3-020",
+  "ST3-007",
+  "ST3-011",
+  "ST3-014",
+  "ST8-007",
+  "ST8-009",
+  "ST3-016",
+  "ST8-018",
+  "ST3-018",
+  "ST3-011",
+  "ST3-013",
+  "ST8-003",
+  "ST3-004",
+  "ST8-003",
+  "ST3-014",
+  "ST3-004",
+  "ST8-006",
+  "ST3-013",
+  "ST8-005",
+  "ST3-010",
+  "ST8-013",
+  "ST3-018",
+  "ST3-011",
+  "ST8-018",
+  "ST3-009",
+  "ST8-001",
+  "ST8-008",
+  "ST3-016",
+  "ST8-020",
+  "ST3-009",
+  "ST3-021",
+  "ST8-011"
+ ],
+ "run": "v4",
+ "archetype": "GREEN",
+ "round": 1,
+ "holdout": 0.835,
+ "validation": 0.8
+}

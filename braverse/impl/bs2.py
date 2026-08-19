@@ -44,7 +44,7 @@ def blackberry_activate(ctx: Ctx) -> None:
 
 
 # --- BS2-022 Licorice Cookie ------------------------------------------------
-@effect("BS2-022", Trigger.ACTIVATE)
+@effect("BS2-022", Trigger.ON_PLAY)
 def licorice_activate(ctx: Ctx) -> None:
     """This Cookie takes no damage from effects until the start of the player's
     next turn.
@@ -75,7 +75,7 @@ def pond_dino_activate(ctx: Ctx) -> None:
 
 
 # --- BS2-031 Black Raisin Cookie --------------------------------------------
-@effect("BS2-031", Trigger.ACTIVATE)
+@effect("BS2-031", Trigger.ON_PLAY)
 def black_raisin_activate(ctx: Ctx) -> None:
     """<Discard 3 cards.> Select up to 2 of your opponent's Cookies. Deals 2
     damage to 1 of the Cookies and 1 damage to the other."""
@@ -144,7 +144,7 @@ def beet_faint(ctx: Ctx) -> None:
 
 
 # --- BS2-062 Starfruit Cookie -----------------------------------------------
-@effect("BS2-062", Trigger.ACTIVATE)
+@effect("BS2-062", Trigger.ON_PLAY)
 def starfruit_activate(ctx: Ctx) -> None:
     """<{P}> Other than this Cookie, you can place 1 {P} Cookie that is LV.2 or
     lower from your battle area into the trash. If you did, place up to 1 of

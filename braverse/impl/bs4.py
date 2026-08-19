@@ -75,7 +75,7 @@ STATIC_ABILITY_CARDS.add("BS4-024")
 
 
 # --- BS4-030 Peach Blossom Cookie -------------------------------------------
-@effect("BS4-030", Trigger.ACTIVATE)
+@effect("BS4-030", Trigger.ON_PLAY)
 def peach_blossom_activate(ctx: Ctx) -> None:
     """<{Y}> Select up to 1 of your other {Y} Cookies in your battle area.
     Return 1 card from the top of that Cookie's HP to your hand. Then, place up
@@ -138,7 +138,7 @@ def black_pearl_activate(ctx: Ctx) -> None:
     if picked in cookies:
         ctx.opp.battle.remove(picked)
         ctx.opp.deck.append(picked.card)
-        ctx.opp.trash.extend(picked.hp_cards)
+        ctx.opp.trash.extend(picked.spent_cards)
         ctx.game._check_battle_area(ctx.opp)
     else:
         owner = ctx.me if picked in ctx.me.stage else ctx.opp
@@ -149,7 +149,7 @@ def black_pearl_activate(ctx: Ctx) -> None:
 
 
 # --- BS4-081 Crimson Coral Cookie -------------------------------------------
-@effect("BS4-081", Trigger.ACTIVATE)
+@effect("BS4-081", Trigger.ON_PLAY)
 def crimson_coral_activate(ctx: Ctx) -> None:
     """<Discard 1 card.> Select 1 of the following.
     - Select up to 1 LV.1 Cookie in your opponent's battle area. Place that
@@ -170,12 +170,12 @@ def crimson_coral_activate(ctx: Ctx) -> None:
     if target is not None:
         ctx.opp.battle.remove(target)
         ctx.opp.deck.append(target.card)
-        ctx.opp.trash.extend(target.hp_cards)
+        ctx.opp.trash.extend(target.spent_cards)
         ctx.game._check_battle_area(ctx.opp)
 
 
 # --- BS4-089 Moonlight Cookie -----------------------------------------------
-@effect("BS4-089", Trigger.ACTIVATE)
+@effect("BS4-089", Trigger.ON_PLAY)
 def moonlight_blue_activate(ctx: Ctx) -> None:
     """Place 5 cards from the top of your opponent's deck in the trash. Then,
     if your opponent has 2 Cookies in their battle area, select up to 1 of your

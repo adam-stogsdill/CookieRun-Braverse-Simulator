@@ -1,0 +1,113 @@
+# run: v5
+# archetype: PURPLE
+# round: 13
+# holdout: 0.7
+# validation: 0.6333333333333333
+
+COOKIE (31)
+  4x ST10-005   Dreamcatcher                     LV1 HP2
+  4x ST10-006   Blueberry Pie Cookie             LV1 HP2
+  3x ST10-002   Moonlight Cookie                 LV3 HP6
+  3x ST10-008   Stardust Cookie                  LV2 HP4
+  3x ST5-002    GingerBright                     LV2 HP4
+  2x ST10-010   Prophet Cookie                   LV1 HP2
+  2x ST5-004    Skater Cookie                    LV1 HP1
+  2x ST5-006    String Gummy Cookie              LV2 HP3
+  2x ST5-010    Carol Cookie                     LV2 HP4
+  2x ST5-011    Tiger Lily Cookie                LV2 HP3
+  1x ST10-004   Wizard Cookie                    LV1 HP3
+  1x ST10-011   Cream Unicorn Cookie             LV2 HP4
+  1x ST5-005    Cream Puff Cookie                LV1 HP3
+  1x ST5-015    Rye Cookie                       LV3 HP5
+FLIP (16)
+  4x ST5-012    Clover Cookie                    LV2 HP2
+  3x ST10-001   Dreamweaver Cookie               LV2 HP4
+  3x ST10-007   Sugar Glass Cookie               LV1 HP1
+  3x ST5-014    Pancake Cookie                   LV3 HP3
+  1x ST10-003   Poison Mushroom Cookie           LV2 HP3
+  1x ST10-012   Taurus Cookie                    LV3 HP4
+  1x ST5-003    Fig Cookie                       LV1 HP1
+ITEM (6)
+  2x ST10-016   Delicate Glass Flower            
+  2x ST5-018    Dragonfly Candy Brooch           
+  1x ST5-016    BONUS Coin                       
+  1x ST5-019    Pastry Boomerang                 
+TRAP (4)
+  2x ST10-017   Inside the Clock Tower           
+  1x ST10-018   Reunion of Star and Moon         
+  1x ST5-021    Hidden Warpgate                  
+STAGE (3)
+  2x ST5-022    Windswept Valley                 
+  1x ST10-020   Wizard Archives                  
+
+legal: True  size 60  flips 16
+
+{
+ "deck": [
+  "ST5-014",
+  "ST10-007",
+  "ST10-002",
+  "ST10-005",
+  "ST5-011",
+  "ST5-005",
+  "ST10-001",
+  "ST5-012",
+  "ST10-001",
+  "ST5-014",
+  "ST5-002",
+  "ST10-017",
+  "ST10-005",
+  "ST10-002",
+  "ST5-012",
+  "ST10-012",
+  "ST5-004",
+  "ST10-008",
+  "ST10-003",
+  "ST10-006",
+  "ST10-005",
+  "ST10-011",
+  "ST5-012",
+  "ST5-014",
+  "ST5-003",
+  "ST5-022",
+  "ST10-001",
+  "ST10-010",
+  "ST5-012",
+  "ST10-007",
+  "ST5-010",
+  "ST10-005",
+  "ST10-016",
+  "ST10-007",
+  "ST5-002",
+  "ST10-002",
+  "ST5-011",
+  "ST10-004",
+  "ST10-010",
+  "ST5-002",
+  "ST10-018",
+  "ST10-020",
+  "ST10-006",
+  "ST5-004",
+  "ST5-021",
+  "ST5-022",
+  "ST10-006",
+  "ST5-006",
+  "ST5-019",
+  "ST5-015",
+  "ST10-016",
+  "ST10-006",
+  "ST5-006",
+  "ST5-016",
+  "ST10-008",
+  "ST5-018",
+  "ST5-010",
+  "ST10-008",
+  "ST5-018",
+  "ST10-017"
+ ],
+ "run": "v5",
+ "archetype": "PURPLE",
+ "round": 13,
+ "holdout": 0.7,
+ "validation": 0.6333333333333333
+}

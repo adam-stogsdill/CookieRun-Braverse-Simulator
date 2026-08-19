@@ -321,7 +321,7 @@ def pure_vanilla_attack(ctx: Ctx) -> None:
         return
     ctx.me.battle.remove(target)
     ctx.me.deck.insert(0, target.card)     # top: replay it sooner
-    ctx.me.trash.extend(target.hp_cards)
+    ctx.me.trash.extend(target.spent_cards)
     ctx.game._check_battle_area(ctx.me)
 
 

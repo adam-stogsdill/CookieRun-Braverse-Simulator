@@ -8,6 +8,7 @@ from braverse import (STARTER_DECKS, STARTER_SET_IDS, Game, HeuristicAgent,
 from braverse import actions as A
 from braverse.cost import Cost, plan_payment
 from braverse.enums import CardType, Color, Marker
+from braverse.state import CardInstance
 
 
 @pytest.fixture(scope="module")
@@ -45,6 +46,45 @@ def test_typos_in_the_dump_are_repaired(db):
     # A handful of old rows carry no colour evidence at all; keep that small.
     colourless = [c for c in db.cards.values() if c.is_cookie and c.color is Color.NONE]
     assert len(colourless) < 20, [c.id for c in colourless]
+
+
+def test_early_set_on_play_skills_are_not_read_as_activate(db):
+    """The dump prints 【Activate】 on 106 early-set cards that print 【On Play】.
+
+    Read the dump's way, each of those Cookies gains a main-phase skill it can
+    press every turn for as long as it lives, in place of a one-shot that fires
+    as it is played. The correction is pinned here card by card because it is a
+    hand-checked reading of the card scans, not something the dump can be asked
+    about again.
+    """
+    from braverse.cards import _ON_PLAY_MISPRINTS
+    from braverse.effects import Trigger, get_effect
+
+    assert len(_ON_PLAY_MISPRINTS) == 106
+    for base_id in _ON_PLAY_MISPRINTS:
+        card = db[base_id]
+        assert not card.has(Marker.ACTIVATE), base_id
+        assert "【Activate】" not in (card.description or ""), base_id
+    # Pumpkin Pie Cookie is the one the mislabel was noticed on.
+    pumpkin = db["BS1-071"]
+    assert pumpkin.has(Marker.ON_PLAY)
+    assert get_effect("BS1-071", Trigger.ON_PLAY) is not None
+    assert get_effect("BS1-071", Trigger.ACTIVATE) is None
+    # Nothing outside the early sets was touched: BS5 onward reads clean.
+    assert all(b.split("-")[0] in {"BS1", "BS2", "BS3", "BS4",
+                                   "ST1", "ST2", "ST3", "ST4", "ST5", "P"}
+               for b in _ON_PLAY_MISPRINTS)
+
+
+def test_an_on_play_cookie_offers_no_activate_action(db):
+    """The skill fires as the Cookie is played, so there is no button for it."""
+    game = new_game(db=db, seed=11)
+    player = game.state.current
+    card = CardInstance.make("BS1-029", 0)     # Lime Cookie, 【On Play】
+    player.hand.append(card)
+    cookie = game._deploy_cookie(player, card)
+    assert not [a for a in game.legal_actions()
+                if isinstance(a, A.ActivateSkill) and a.source_uid == cookie.uid]
 
 
 def test_item_play_cost_comes_from_the_leading_bracket(db):
@@ -558,3 +598,154 @@ def test_a_flip_that_names_its_host_still_means_the_host():
     # One card off for the damage, one back on from the flip: net unchanged.
     assert host.remaining_hp == hp_before, "the host was not the one healed"
     assert parfait in player.trash, "a healing flip stays in the trash"
+
+
+# --- offering only moves that would do something ---------------------------
+def _add_to_hand(player, card_id):
+    card = CardInstance.make(card_id, player.index)
+    player.hand.append(card)
+    return card
+
+
+def _offered(game, uid):
+    """Whether any move would play or activate the card with this uid."""
+    return any(getattr(a, "card_uid", getattr(a, "source_uid", None)) == uid
+               for a in game.legal_actions()
+               if isinstance(a, (A.PlaySupportCard, A.PlayTrap, A.ActivateSkill)))
+
+
+def _stock_support(player, card_id, count):
+    player.support.clear()
+    for _ in range(count):
+        player.support.append(CardInstance.make(card_id, player.index))
+
+
+def test_item_with_no_legal_target_is_not_offered(db):
+    """ST7-016 only reaches a Cookie with 2 or less HP remaining. With no such
+    Cookie on the board the card resolves into nothing, and offering it tells
+    the player something untrue about their options."""
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    _stock_support(me, "ST7-016", 4)
+    card = _add_to_hand(me, "ST7-016")
+
+    victim = game.state.opponent_of(me.index).battle[0]
+    assert victim.remaining_hp > 2
+    assert not _offered(game, card.uid)
+
+    del victim.hp_cards[2:]          # now there is something to point at
+    assert _offered(game, card.uid)
+
+
+def test_item_whose_condition_is_false_is_not_offered(db):
+    """ST8-016 needs Wind Archer out and 5 support cards. Both are readable
+    from the board before the card is ever played."""
+    game = new_game(seed=3, db=db)
+    me = game.state.players[1]        # the ST8 seat
+    while game.state.turn_player != me.index:
+        game.end_turn()
+    _stock_support(me, "ST8-016", 4)
+    card = _add_to_hand(me, "ST8-016")
+
+    assert not _offered(game, card.uid), "offered with only 4 support cards"
+    me.support.append(CardInstance.make("ST8-016", me.index))
+    assert _offered(game, card.uid) == bool(
+        any(c.name(db) == "Wind Archer Cookie" for c in me.battle))
+
+
+def test_hand_condition_is_read_as_it_will_be_when_the_card_resolves(db):
+    """The item is still in hand while the action list is built and gone from it
+    by the time its effect runs, so a hand-size condition is off by one unless
+    the probe accounts for the card itself.
+
+    BS8-096: "<{B}{B}> If there are 2 cards or less in your hand, draw up to 4."
+    """
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    _stock_support(me, "ST9-016", 4)          # blue, to pay {B}{B}
+    me.hand.clear()
+    card = _add_to_hand(me, "BS8-096")
+    _add_to_hand(me, "ST9-016")
+    _add_to_hand(me, "ST9-016")
+
+    # Three cards in hand now, two once this one is played: the card is live.
+    assert len(me.hand) == 3
+    assert _offered(game, card.uid)
+
+    _add_to_hand(me, "ST9-016")                # four now, three after playing
+    assert not _offered(game, card.uid)
+
+
+def test_unimplemented_card_is_still_offered(db):
+    """A blank the engine has not filled in is the engine's gap, not something
+    the rules say. Hiding it would be a different kind of lie."""
+    from braverse.effects import is_implemented
+
+    assert not is_implemented("BS3-043")
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    _stock_support(me, "ST7-016", 4)           # yellow, pays {Y}{Y}{Y}
+    card = _add_to_hand(me, "BS3-043")
+    assert _offered(game, card.uid)
+
+
+def test_stage_is_offered_for_placement_even_when_its_ability_is_dead(db):
+    """Placing a stage is worth doing on its own; its 【Activate】 is a separate
+    move that is gated separately."""
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    _stock_support(me, "ST9-016", 5)
+    me.hand.clear()
+    for _ in range(6):
+        _add_to_hand(me, "ST9-016")
+    card = _add_to_hand(me, "ST9-020")          # Tearcrown, activate needs hand <= 3
+    assert _offered(game, card.uid), "a stage must still be placeable"
+
+    game.step(next(a for a in game.legal_actions()
+                   if isinstance(a, A.PlaySupportCard) and a.card_uid == card.uid))
+    assert card in me.stage
+    assert not _offered(game, card.uid), "its 【Activate】 cannot draw with a full hand"
+
+    del me.hand[3:]
+    assert _offered(game, card.uid)
+
+
+def test_trap_that_could_not_do_anything_is_not_offered(db):
+    """During the defender's response window, only traps that would actually
+    land should be on the list."""
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    defender = game.state.opponent_of(me.index)
+    _stock_support(defender, "ST9-018", 4)
+    trap = _add_to_hand(defender, "ST9-018")    # -1 attack damage to an attacker
+
+    attacker = me.battle[0]
+    target = defender.battle[0]
+
+    # Drive the response window directly: what is being tested is which traps
+    # the window offers, not the road to opening one.
+    game._response_player = defender.index
+    game._pending_attack = (attacker, target)
+    game._attacking_cookie = attacker
+    game._trap_used = 0
+    assert _offered(game, trap.uid)
+
+    me.battle.clear()          # nothing left to debuff
+    assert not _offered(game, trap.uid)
+
+
+def test_playable_if_gates_a_hand_written_card(db):
+    """Hand-written bodies are opaque Python, so they declare their condition
+    rather than having it read off them."""
+    from braverse.effects import Trigger, effect_is_live, get_effect
+
+    fn = get_effect("ST9-007", Trigger.ACTIVATE)   # draw if hand <= 3
+    assert hasattr(fn, "playable")
+
+    game = new_game(seed=3, db=db)
+    me = game.state.current
+    ctx = game._ctx(me, source_cookie=me.battle[0], source_card=me.battle[0].card)
+    del me.hand[3:]
+    assert effect_is_live(fn, ctx)
+    me.hand.extend(me.deck[:4])
+    assert not effect_is_live(fn, ctx)

@@ -33,7 +33,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", default="rl_agent.pt")
     parser.add_argument("--holdout", type=int, default=400,
                         help="games on unseen shuffles for the final number")
-    parser.add_argument("--out", default="evolved_deck.txt")
+    parser.add_argument("--out", default="decks/evolved_deck.txt")
     parser.add_argument("--force", action="store_true",
                         help="allow overwriting an existing --out file")
     args = parser.parse_args()
