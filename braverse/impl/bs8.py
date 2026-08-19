@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from braverse.cost import Cost
 from braverse.effects import (ATTACK_COST_MODIFIERS, STATIC_ABILITY_CARDS,
-                              Ctx, Trigger, effect)
+                              Ctx, Trigger, effect, playable_if)
 from braverse.enums import CardType, Color
 
 
@@ -309,10 +309,17 @@ def gim_on_play(ctx: Ctx) -> None:
 
 # --- BS8-059 Mystic Flour Cookie --------------------------------------------
 @effect("BS8-059", Trigger.ACTIVATE)
+@playable_if(lambda ctx: len([c for c in ctx.me.support
+                              if ctx.db[c.card_id].color is Color.GREEN]) >= 2
+             and ctx.can_pay(Cost.parse("{G}"))
+             and bool(ctx.enemy_cookies(lambda c: c.remaining_hp > 0))
+             and not [c for c in ctx.me.battle
+                      if c is not ctx.source_cookie
+                      and c.name(ctx.db) == "Mystic Flour Cookie"])
 def mystic_flour_activate(ctx: Ctx) -> None:
     """<{G}> <Return 2 {G} cards from your support area to your hand.> If
     another [Mystic Flour Cookie] is not in your battle area, place up to 2
-    cards from the top of your deck into your support area as rested."""
+    cards from the top of each of your opponent's Cookies' HP into the trash."""
     green = [c for c in ctx.me.support if ctx.db[c.card_id].color is Color.GREEN]
     if len(green) < 2 or not ctx.pay(Cost.parse("{G}")):
         return
@@ -326,8 +333,12 @@ def mystic_flour_activate(ctx: Ctx) -> None:
     others = [c for c in ctx.me.battle
               if c is not ctx.source_cookie
               and c.name(ctx.db) == "Mystic Flour Cookie"]
-    if not others:
-        ctx.mill_to_support(2)
+    if others:
+        return
+    # Every one of them, two cards deep. Not damage — no FLIP fires — which is
+    # why the card is worded as placing HP into the trash.
+    for cookie in list(ctx.enemy_cookies()):
+        ctx.trash_hp(cookie, 2)
 
 
 # --- BS8-060 Peach Blossom Cookie -------------------------------------------

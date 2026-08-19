@@ -279,6 +279,16 @@ _CONDITION_RULES = [
      lambda m: Condition("revealed_is", card_filter=parse_card_filter(m.group(1)))),
     (re.compile(r"your support area contains (\d+) or more active cards", re.I),
      lambda m: Condition("active_support_count", ">=", int(m.group(1)))),
+    # "2 active cards or more in your support area". Without this the generic
+    # zone rule below matches it, reads "active" as a card filter it cannot
+    # express, and counts the whole support area — Hero Cookie BS5-063 drew
+    # every turn regardless of how much of its support was rested.
+    (re.compile(r"there (?:are|is) (\d+) active cards? or more in your support area",
+                re.I),
+     lambda m: Condition("active_support_count", ">=", int(m.group(1)))),
+    (re.compile(r"there (?:are|is) (\d+) active cards? or less in your support area",
+                re.I),
+     lambda m: Condition("active_support_count", "<=", int(m.group(1)))),
     (re.compile(r"(\d+) or more of your \{([A-Za-z])\} LV\.(\d+) cookies fainted "
                 r"during your opponent's previous turn", re.I),
      lambda m: Condition("faints_prev_turn", ">=", int(m.group(1)),
@@ -417,10 +427,17 @@ def parse_cost(token: str) -> list[Op]:
 
     lowered = token.lower()
 
-    # "can be used as {B}." grants a substitute colour; the engine's payment
-    # planner does not model substitution yet, so treat it as free.
+    # "<can be used as {B}.>" is the rider's cost: one energy, of the colour it
+    # names. It was read as free, which handed 72 cards a rider that fired on
+    # every attack for nothing — Pitaya Dragon Cookie (ST6-004) pinged an extra
+    # damage after every swing it made. The colour substitution the phrase
+    # describes is not modelled, so this is if anything a shade stricter than
+    # the card; being stricter about a cost is the safe direction.
+    substitute = re.search(r"can be used as \{([A-Za-z])\}", lowered, re.I)
+    if substitute:
+        return [PayCost(Cost.parse("{%s}" % substitute.group(1).upper()))]
     if "can be used as" in lowered:
-        return []
+        raise CompileError(f"cost: {token!r}")
 
     match = re.search(r"place (\d+) (.*?)cards? from your support area in(?:to)? "
                       r"(?:the|your) trash", lowered)
@@ -2516,8 +2533,21 @@ def _v_place_stage(m) -> list[Op]:
 
 
 # --- zone movement ---------------------------------------------------------
+# Words that describe a card's *state* on the table rather than what is printed
+# on it. `CardFilter` matches printed cards, so it can never honour one of
+# these — and quietly dropping the word turns "2 active cards in your support
+# area" into "2 cards in your support area", a condition that is true far more
+# often than the card says. Refusing is the all-or-nothing rule: a card the
+# compiler cannot read in full is better left unimplemented.
+_STATE_WORDS = re.compile(r"\b(active|rested|face[- ]up|face[- ]down)\b", re.I)
+
+
 def parse_card_filter(phrase: str) -> CardFilter:
     """Card-level filter for pile contents: colour, level, FLIP, name, type."""
+    state = _STATE_WORDS.search(phrase)
+    if state:
+        raise CompileError(f"card filter describes state, not print: {state.group(0)!r}"
+                           f" in {phrase!r}")
     lowered = phrase.lower()
     color = _COLOR_SYMBOL.search(phrase)
     at_most = _LEVEL_AT_MOST.search(phrase)

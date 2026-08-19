@@ -13,6 +13,7 @@ data tree, so ``game.clone()`` is a valid rollout root for search agents.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import random
 from typing import Sequence
@@ -94,6 +95,8 @@ class Game:
                                  for cid in extra_list]
             self._draw_opening_hand(player)
         for player in state.players:
+            self._offer_mulligan(player)
+        for player in state.players:
             self._redraw_until_cookie(player)
         for player in state.players:
             self._place_opening_cookie(player)
@@ -106,6 +109,32 @@ class Game:
         for _ in range(self.rules.opening_hand):
             if player.deck:
                 player.hand.append(player.deck.pop(0))
+
+    def _offer_mulligan(self, player: PlayerState) -> None:
+        """One optional redraw of the opening hand, before anything is placed.
+
+        The whole hand goes back, the deck is shuffled and a fresh hand is
+        drawn — there is no cost and no card penalty, so it is offered once and
+        the answer is simply taken. It runs *before* `_redraw_until_cookie`, so
+        a mulligan into a Cookie-less hand still triggers the mandatory redraw
+        the guide describes.
+
+        Only a controller that implements `wants_mulligan` is asked. Scripted
+        agents have no read on hand quality, so answering for them would replace
+        every opening hand in every self-play game with a random one and move
+        every number this project measures, for no gain in play strength.
+        """
+        if not self.rules.allow_mulligan:
+            return
+        ask = getattr(self.controller(player.index), "wants_mulligan", None)
+        if ask is None or not ask(self.state, list(player.hand)):
+            return
+        self.state.rng.shuffle(player.hand)   # the hand goes back unordered
+        player.deck.extend(player.hand)
+        player.hand.clear()
+        self.state.rng.shuffle(player.deck)
+        self._draw_opening_hand(player)
+        self.state.record(f"mulligan: P{player.index} draws a new hand")
 
     def _redraw_until_cookie(self, player: PlayerState) -> None:
         """"If a player does not have a Cookie card in their hand, they must
@@ -718,13 +747,16 @@ class Game:
         for _ in range(amount):
             if not cookie.hp_cards:
                 break
-            if cookie.hp_cannot_reach_zero and len(cookie.hp_cards) == 1:
-                break          # "this Cookie's HP cannot reach 0" this battle
             card = cookie.hp_cards.pop()
             card.face_up = True
             owner.trash.append(card)
             dealt += 1
             defn = self.db[card.card_id]
+            # Recorded *before* the FLIP runs, so the viewer can turn the card
+            # over and only then play whatever it did. A diff of the HP pile
+            # cannot express that order — it only knows the card ended up in
+            # the trash, by which time the flip has already resolved.
+            self.record_reveal(cookie, card, flip=defn.is_flip)
             if defn.is_flip and not cookie.flip_disabled:
                 self.state.record(f"FLIP! {defn.name}")
                 self._run_effect(card, Trigger.FLIP, owner, flip_host=cookie)
@@ -733,6 +765,16 @@ class Game:
             if self.state.over or cookie not in owner.battle:
                 self._record_damage(name, dealt, amount, None, kind, cookie)
                 return
+            # "This Cookie's HP cannot reach 0": the card just spent is
+            # replaced off the deck rather than the hit being stopped one
+            # short. The damage keeps turning cards — every FLIP in the pile
+            # still fires — and the Cookie is still standing at the end of it.
+            if cookie.hp_cannot_reach_zero and not cookie.hp_cards:
+                before = len(cookie.hp_cards)
+                self._fill_hp(owner, cookie, 1)
+                if len(cookie.hp_cards) > before:
+                    self.state.record(f"{name}'s HP cannot reach 0 — 1 HP restored")
+                    self._record_heal(cookie, len(cookie.hp_cards) - before)
         self._record_damage(name, dealt, amount, cookie, kind, cookie)
         if not cookie.hp_cards:
             self._faint(cookie)
@@ -761,13 +803,51 @@ class Game:
             line += f" — {cookie.remaining_hp} HP left"
         self.state.record(line)
 
+    def record_reveal(self, cookie: Cookie, card: CardInstance, *,
+                      flip: bool = False) -> None:
+        """An HP card turning face up, at the moment it turns.
+
+        ``flip`` means the reveal is a FLIP going off, which the board plays as
+        a bigger beat. Cards taken off a pile *without* damage — "place N cards
+        from the top of that Cookie's HP into the trash" — are still revealed,
+        but no FLIP fires, so they are not that.
+        """
+        self.state.events.append({
+            "kind": "reveal",
+            "cookie": cookie.uid,
+            "owner": cookie.owner,
+            "card_uid": card.uid,
+            "card_id": card.card_id,
+            "flip": flip,
+        })
+
+    def _record_heal(self, cookie: Cookie, amount: int) -> None:
+        """Structured counterpart to the damage event, so the viewer can play a
+        heal rather than have HP quietly appear between two snapshots."""
+        self.state.events.append({
+            "kind": "heal",
+            "cookie": cookie.uid,
+            "owner": cookie.owner,
+            "amount": amount,
+            "left": cookie.remaining_hp,
+        })
+
     def gain_hp(self, cookie: Cookie, amount: int) -> None:
+        """Heal: cards come off the deck onto the HP pile.
+
+        A Cookie's printed HP is not touched — "gains +1 HP" hands back a card,
+        it does not make the Cookie permanently bigger — so a heal can leave the
+        pile above the printed value, which the viewer shows as an overheal.
+        """
         owner = self.state.players[cookie.owner]
-        cookie.hp_bonus += amount
         before = len(cookie.hp_cards)
         self._fill_hp(owner, cookie, before + amount)
-        if len(cookie.hp_cards) > before:
+        gained = len(cookie.hp_cards) - before
+        if gained:
             owner.hp_gained_this_turn = True
+            self.state.record(f"{cookie.name(self.db)} gains +{gained} HP"
+                              f" — {cookie.remaining_hp} HP")
+            self._record_heal(cookie, gained)
 
     def return_cookie_to_hand(self, cookie: Cookie) -> None:
         owner = self.state.players[cookie.owner]
@@ -927,16 +1007,33 @@ class Game:
         fn = get_effect(cookie.defn(self.db).id, trigger)
         if fn is None:
             return
-        fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
-                     trigger=trigger.value))
+        with self._effect_source(cookie.defn(self.db).name):
+            fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
+                         trigger=trigger.value))
 
     def _run_effect(self, card: CardInstance, trigger: Trigger,
                     player: PlayerState, *, flip_host: Cookie | None = None) -> None:
         fn = get_effect(self.db[card.card_id].id, trigger)
         if fn is None:
             return
-        fn(self._ctx(player, source_cookie=flip_host, source_card=card,
-                     trigger=trigger.value))
+        with self._effect_source(self.db[card.card_id].name):
+            fn(self._ctx(player, source_cookie=flip_host, source_card=card,
+                         trigger=trigger.value))
+
+    @contextlib.contextmanager
+    def _effect_source(self, name: str):
+        """Name the card whose effect is resolving, for the duration.
+
+        Every line `state.record` writes inside this block is stamped with the
+        card that caused it. Nested — a FLIP that fires mid-damage names the
+        FLIP, not the attack that turned it over.
+        """
+        self.state.effect_sources.append(name)
+        try:
+            yield
+        finally:
+            if self.state.effect_sources:
+                self.state.effect_sources.pop()
 
     def _ctx(self, player: PlayerState, **kw) -> Ctx:
         kw.setdefault("attack_target", self._attack_target)

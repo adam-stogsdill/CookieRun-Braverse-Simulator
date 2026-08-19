@@ -62,11 +62,11 @@ SIDE = (Path(sys.executable).resolve().parent
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
 EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
-                 "draw": 0.22, "damage": 0.25}
-# What is still on screen after the last event of its kind *starts*: a revealed
-# card is held face up to be read, and a broken Cookie falls apart.
-TAIL_SECONDS = {"reveal": 2.4, "faint": 1.5, "skill": 1.5, "draw": 0.7,
-                "damage": 0.9}
+                 "draw": 0.22, "damage": 0.25, "heal": 0.25}
+# What is still on screen after an event of its kind *starts*.
+# A revealed card is held face up to be read, and a broken Cookie falls apart.
+TAIL_SECONDS = {"attack": 0.9, "reveal": 2.4, "faint": 1.5, "skill": 1.5,
+                "draw": 0.7, "damage": 0.9, "heal": 0.9}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -82,25 +82,32 @@ LAN_URLS: list[str] = []
 def scene_seconds(events: list) -> float:
     """How long the browser spends playing one batch of events.
 
-    Counts each animation through to its *end*, not its start — the point is
-    that a bot does not move again while a reveal is still being read.
+    Mirrors `playEvents` in viewer/app.js: the events are walked in order, each
+    starting a fixed gap after the one before, and the scene ends when the last
+    thing on screen finishes rather than when the last one starts — a bot must
+    not move again while a reveal is still being read.
     """
-    counts: dict = {}
+    clock = 0.0
+    end = 0.0
+    reveals_clear = 0.0
+    reveals = 0
     for event in events:
         kind = event.get("type", "")
-        # One draw event can be several cards, each of which flies separately.
-        counts[kind] = counts.get(kind, 0) + (event.get("count", 1)
-                                              if kind == "draw" else 1)
-    counts["reveal"] = min(counts.get("reveal", 0), MAX_REVEALS)
-
-    total = 0.0
-    for kind, n in counts.items():
-        if not n:
-            continue
-        gap = EVENT_SECONDS.get(kind, 0.0)
-        tail = TAIL_SECONDS.get(kind)
-        total += (n - 1) * gap + tail if tail else n * gap
-    return min(total, MAX_SCENE_PAUSE)
+        if kind == "reveal":
+            if reveals >= MAX_REVEALS:
+                continue
+            reveals += 1
+        # One draw event is several cards, each of which flies separately.
+        n = max(1, event.get("count", 1) if kind == "draw" else 1)
+        per = EVENT_SECONDS.get(kind, 0.0)
+        tail = TAIL_SECONDS.get(kind, 0.0)
+        # A Cookie leaving the board waits for any revealed card to clear.
+        start = max(clock, reveals_clear) if kind == "faint" else clock
+        end = max(end, start + (n - 1) * per + tail)
+        if kind == "reveal":
+            reveals_clear = max(reveals_clear, start + tail)
+        clock = start + n * per
+    return min(end, MAX_SCENE_PAUSE)
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +571,14 @@ class MatchAborted(Exception):
     """Raised inside the match thread when the match is replaced or stopped."""
 
 
+# The mulligan question, as the browser sees it. Answered in the middle of the
+# table like the opening toss: it is a setup decision with the whole hand on
+# screen behind it, not one item in a list of moves.
+MULLIGAN_CHOICES = ("Mulligan", "Keep this hand")
+MULLIGAN_PROMPT = ("Mulligan? Your whole hand goes back into the deck and you "
+                   "draw 6 new cards.")
+
+
 def centre_style(options: Sequence) -> Optional[str]:
     """Questions that belong in the middle of the table, not off to one side.
 
@@ -577,6 +592,8 @@ def centre_style(options: Sequence) -> Optional[str]:
     if set(labels) == set(THROWS):
         return "throw"
     if set(labels) == set(CHOICES):
+        return "choice"
+    if set(labels) == set(MULLIGAN_CHOICES):
         return "choice"
     return None
 
@@ -642,16 +659,32 @@ class HumanController:
                                pick=pick, centre=centre_style(options))
         return options[index] if index is not None else None
 
+    def wants_mulligan(self, state: GameState, hand: Sequence) -> bool:
+        """The one optional redraw of the opening hand.
+
+        Asked with the hand already on screen — the browser polls the same
+        state — so the question is just the two buttons.
+        """
+        payload = [option_json(self.match.db, i, o)
+                   for i, o in enumerate(MULLIGAN_CHOICES)]
+        index = self.match.ask(self.seat, MULLIGAN_PROMPT, payload,
+                               optional=False, centre="choice")
+        return index == 0
+
     def choose_many(self, state: GameState, prompt: str, options: Sequence, *,
-                    count: int, optional: bool):
-        """Ask for the whole selection at once: pick N, then confirm."""
+                    count: int, optional: bool, up_to: bool = False):
+        """Ask for the whole selection at once: pick N, then confirm.
+
+        ``up_to`` is the "up to N" form — the confirm button is live from zero
+        picks, so declining and picking fewer are both real answers."""
         if not options:
             return []
         db = self.match.db
         payload = [option_json(db, i, o) for i, o in enumerate(options)]
         pick = hand_pick(prompt, options, state.players[self.seat]) or {"verb": "Confirm"}
         picked = self.match.ask(self.seat, prompt, payload,
-                                optional=optional, count=count, pick=pick)
+                                optional=optional, count=count, pick=pick,
+                                up_to=up_to)
         if not isinstance(picked, list):
             picked = [] if picked is None else [picked]
         return [options[i] for i in picked if 0 <= i < len(options)]
@@ -832,24 +865,47 @@ class Match:
 
     _TRAP_LINE = None
 
-    def _damage_events(self) -> list:
-        """Damage, straight from the engine's structured record.
+    def _engine_events(self) -> list:
+        """Damage, healing and reveals, straight from the engine's record.
 
-        Not a diff: a swing and a "Then, ..." rider both take HP off the same
-        Cookie in the same step, and only the engine knows which was which.
+        Not a diff, and the order is the point. A swing and a "Then, ..." rider
+        both take HP off the same Cookie in the same step, and only the engine
+        knows which was which. A heal is the same story in reverse. And a
+        reveal has to be reported *as the card turns*, before the FLIP resolves
+        — read off a zone diff it can only ever be reported afterwards, which
+        is what made flip effects play out before the card was shown.
         """
+        db = self.db
         events = []
         for record in self.game.state.events[self._event_mark:]:
-            if record.get("kind") != "damage":
-                continue
-            events.append({
-                "type": "damage",
-                "cookie": record["cookie"],
-                "owner": record["owner"],
-                "amount": record["amount"],
-                "source": record["source"],
-                "left": record["left"],
-            })
+            kind = record.get("kind")
+            if kind == "damage":
+                events.append({
+                    "type": "damage",
+                    "cookie": record["cookie"],
+                    "owner": record["owner"],
+                    "amount": record["amount"],
+                    "source": record["source"],
+                    "left": record["left"],
+                })
+            elif kind == "heal":
+                events.append({
+                    "type": "heal",
+                    "cookie": record["cookie"],
+                    "owner": record["owner"],
+                    "amount": record["amount"],
+                    "left": record["left"],
+                })
+            elif kind == "reveal":
+                card = card_json(db, record["card_id"])
+                card["uid"] = record["card_uid"]
+                events.append({
+                    "type": "reveal",
+                    "cookie": record["cookie"],
+                    "owner": record["owner"],
+                    "card": card,
+                    "flip": record["flip"],
+                })
         self._event_mark = len(self.game.state.events)
         return events
 
@@ -927,36 +983,6 @@ class Match:
                 })
         return events
 
-    @staticmethod
-    def _reveal_events(prev: Optional[dict], snap: dict) -> list:
-        """HP cards that turned face up since the last snapshot.
-
-        Damage moves an HP card straight from the face-down pile to the trash,
-        so the diff of those two zones *is* the reveal — no engine callback
-        needed, and a card bounced out of the pile by an effect correctly does
-        not count as revealed.
-        """
-        if not prev:
-            return []
-        events = []
-        for index, (was, now) in enumerate(zip(prev["players"], snap["players"])):
-            pile = {}
-            for cookie in was["battle"]:
-                for card in cookie["hpPileCards"]:
-                    pile[card["uid"]] = cookie["uid"]
-            seen = {c["uid"] for c in was["trash"]}
-            for card in now["trash"]:
-                if card["uid"] in seen or card["uid"] not in pile:
-                    continue
-                events.append({
-                    "type": "reveal",
-                    "owner": index,
-                    "cookie": pile[card["uid"]],
-                    "card": card,
-                    "flip": card["type"] == "FLIP",
-                })
-        return events
-
     def publish(self, pending: Optional[dict] = None) -> None:
         """Snapshot the state. Always called from the match thread."""
         snap = state_json(self.db, self.game.state)
@@ -968,13 +994,14 @@ class Match:
         if self._prev is not None and snap["players"] == self._prev["players"]:
             snap["events"] = self._prev.get("events", [])
         else:
-            # Ordered the way the browser should play them: the attack, then
-            # whatever damage turned face up, then anything that fainted.
+            # Ordered the way the browser plays them: what the player did, then
+            # the engine's own record of what that did — damage, reveals and
+            # heals interleaved exactly as they happened — then the two things
+            # still read off a diff, which have no ordering of their own.
             snap["events"] = (self._queued
                               + self._trap_events(snap)
-                              + self._damage_events()
+                              + self._engine_events()
                               + self._draw_events(self._prev, snap)
-                              + self._reveal_events(self._prev, snap)
                               + self._faint_events(self._prev, snap))
             self._queued = []
             if snap["events"]:
@@ -1023,18 +1050,22 @@ class Match:
     # -- questions -------------------------------------------------------
     def ask(self, seat: int, prompt: str, options: list, *, optional: bool,
             count: int = 1, pick: Optional[dict] = None,
-            centre: Optional[str] = None):
+            centre: Optional[str] = None, up_to: bool = False):
         """Block the match thread until the browser answers.
 
-        Returns an index, or a list of them when ``count`` is more than one —
-        the browser shows those as a pick-and-confirm over the hand.
+        Returns an index, or a list of them when the question takes more than
+        one — the browser shows those as a pick-and-confirm over the hand. An
+        "up to N" question always answers with a list, even when N is 1: "none"
+        is one of its legal answers and a bare index cannot say that.
         """
+        multi = count > 1 or up_to
         pending = {
             "seat": seat,
             "prompt": prompt,
             "options": options,
             "optional": optional,
             "count": count,
+            "upTo": up_to,
             "pick": pick,
             "centre": centre,
             "id": self.version + 1,
@@ -1050,13 +1081,13 @@ class Match:
             self._answer = None
             self.pending = None
         if answer is None:
-            return [] if count > 1 else None
+            return [] if multi else None
         if isinstance(answer, list):
             picks = [i for i in answer if isinstance(i, int) and 0 <= i < len(options)]
-            return picks[:count] if count > 1 else (picks[0] if picks else None)
+            return picks[:count] if multi else (picks[0] if picks else None)
         if not 0 <= answer < len(options):
-            return [] if count > 1 else None
-        return [answer] if count > 1 else answer
+            return [] if multi else None
+        return [answer] if multi else answer
 
     def answer(self, index, *, seat: Optional[int] = None,
                pending_id: Optional[int] = None) -> bool:

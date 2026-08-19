@@ -210,6 +210,10 @@ def mystic_flour_bs11_attack(ctx: Ctx) -> None:
     cookie = ctx.source_cookie
     if cookie is None:
         return
+    # Trashing your own attacker is a price, not a consequence: the brackets
+    # make it a choice even though the attack that triggered this was one.
+    if not ctx.wants_to_pay("place this Cookie in your trash."):
+        return
     ctx.trash_cookie(cookie)
     ctx.mill_to_support(1)
 

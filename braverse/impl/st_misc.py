@@ -7,7 +7,8 @@ Everything here was checked against the printed text quoted in each docstring.
 
 from __future__ import annotations
 
-from braverse.effects import Ctx, Trigger, effect
+from braverse.cost import Cost
+from braverse.effects import Ctx, Trigger, effect, playable_if
 from braverse.enums import Color
 
 
@@ -191,3 +192,22 @@ def space_doughnut_trashed(ctx: Ctx) -> None:
     """When this Cookie is placed from your battle area into your trash, draw
     up to 1 card from your deck."""
     ctx.draw(1)
+
+
+# --- ST3-020 Divine Light Crystal (TRAP) ------------------------------------
+@effect("ST3-020", Trigger.ITEM)
+@playable_if(lambda ctx: bool(ctx.own_cookies())
+             and ctx.can_pay(Cost.parse("{G}{G}")))
+def divine_light_crystal(ctx: Ctx) -> None:
+    """<{G}{G}> Select up to 1 of your Cookies. That Cookie's HP cannot reach 0
+    during this battle.
+
+    The Cookie keeps taking the damage — every card the hit would turn is still
+    turned, FLIPs and all — it just cannot be the last one: `deal_damage` pulls
+    a replacement off the deck whenever the pile would empty.
+    """
+    target = ctx.select_own(prompt="Divine Light Crystal: protect one of your Cookies")
+    if target is None or not ctx.pay(Cost.parse("{G}{G}")):
+        return
+    target.hp_cannot_reach_zero = True
+    ctx.note(f"{target.name(ctx.db)}'s HP cannot reach 0 during this battle")

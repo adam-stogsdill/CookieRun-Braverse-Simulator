@@ -903,6 +903,24 @@ body.online #reveal-label { display: none; }
      0 2px 0 rgba(5,8,13,.95), 0 -2px 0 rgba(5,8,13,.95),
      0 4px 12px rgba(0,0,0,.95), 0 0 26px rgba(0,0,0,.8);
 }
+/* Healing: green, and it glows *around* the card instead of shoving it —
+   nothing is being done to the Cookie, it is being handed a card back. */
+.cookiebox.healed, .card.healed { animation: healed 900ms ease-out; }
+@keyframes healed {
+  0%   { filter: none; }
+  25%  { filter: brightness(1.2) drop-shadow(0 0 14px var(--good))
+                 drop-shadow(0 0 26px var(--good)); }
+  60%  { filter: brightness(1.08) drop-shadow(0 0 18px var(--good)); }
+  100% { filter: none; }
+}
+/* An HP card above the printed value: the Cookie is not bigger, it is carrying
+   spare cards, so the extra ticks sit on the end of the bar and glow. */
+.hpbar i.over { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+.hitnum.heal {
+  color: #57e08a; font-size: 38px;
+  animation: hitnum-effect 1000ms cubic-bezier(.25,.7,.3,1) forwards;
+}
 .hitnum.attack {
   color: #ff5f55;
   animation: hitnum-attack 1000ms cubic-bezier(.2,.8,.3,1) forwards;

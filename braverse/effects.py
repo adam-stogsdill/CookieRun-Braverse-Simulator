@@ -241,7 +241,7 @@ def is_implemented(card_id: str) -> bool:
 
 
 def ask_many(controller, state, prompt: str, options: Sequence, count: int,
-             *, optional: bool = False) -> list:
+             *, optional: bool = False, up_to: bool = False) -> list:
     """Pick ``count`` of ``options``, in one question if the controller allows.
 
     Scripted agents answer one card at a time, which is the natural shape for a
@@ -253,7 +253,8 @@ def ask_many(controller, state, prompt: str, options: Sequence, count: int,
     picker = getattr(controller, "choose_many", None)
     pool = list(options)
     if picker is not None:
-        picked = picker(state, prompt, pool, count=count, optional=optional) or []
+        picked = picker(state, prompt, pool, count=count, optional=optional,
+                        up_to=up_to) or []
         # Take each pick *out* of the pool as it is accepted, so the same card
         # named twice is only discarded once. A short, padded or repeated answer
         # still has to leave exactly `count` cards discarded and a legal state.
@@ -264,8 +265,12 @@ def ask_many(controller, state, prompt: str, options: Sequence, count: int,
             if card in pool:
                 pool.remove(card)
                 chosen.append(card)
-        while len(chosen) < count and pool:
-            chosen.append(pool.pop(0))
+        # "Up to N" means the answer is allowed to be short — including empty.
+        # A fixed "N cards" is not: a padded answer still has to leave exactly
+        # `count` cards spent and a legal state.
+        if not up_to:
+            while len(chosen) < count and pool:
+                chosen.append(pool.pop(0))
         return chosen
 
     chosen = []
@@ -391,14 +396,32 @@ class Ctx:
 
     # -- support area ----------------------------------------------------
     def rest_support(self, n: int, *, mine: bool = True) -> int:
+        """"Rest up to N cards in [a] support area" — the controller picks which.
+
+        "Up to" is a real decision: which cards go down decides what is left to
+        pay with, and how many go down feeds effects that scale off the count.
+        So a controller that can answer a batch question (a human) is shown the
+        active cards and rests as few as none. Scripted agents have no opinion
+        worth asking for and would only make self-play numbers wobble, so they
+        keep resting the first N, exactly as before.
+        """
         player = self.me if mine else self.opp
-        rested = 0
-        for index in player.active_support():
-            if rested >= n:
-                break
-            player.support[index].rested = True
-            rested += 1
-        return rested
+        options = [player.support[i] for i in player.active_support()]
+        if not options or n <= 0:
+            return 0
+        limit = min(n, len(options))
+        controller = self.game.controller(self.me.index)
+        if getattr(controller, "choose_many", None) is not None:
+            whose = "your" if mine else "your opponent's"
+            picked = ask_many(controller, self.state,
+                              f"Rest up to {limit} card{'' if limit == 1 else 's'}"
+                              f" in {whose} support area",
+                              options, limit, optional=True, up_to=True)
+        else:
+            picked = options[:limit]
+        for card in picked:
+            card.rested = True
+        return len(picked)
 
     def set_support_active(self, n: int, *, mine: bool = True) -> int:
         player = self.me if mine else self.opp
@@ -564,6 +587,9 @@ class Ctx:
             card = cookie.hp_cards.pop()
             card.face_up = True
             destination.trash.append(card)
+            # Face up on the table, so the board shows it — but not as a FLIP,
+            # because no FLIP fires on this path.
+            self.game.record_reveal(cookie, card)
         if not cookie.hp_cards:
             self.game.faint(cookie)
 

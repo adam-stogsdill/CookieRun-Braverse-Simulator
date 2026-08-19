@@ -1,5 +1,7 @@
 # Cookie Run: Braverse Simulator
 
+Current Version: 0.2.2
+
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
 Example Images:
@@ -39,15 +41,26 @@ There are many things that are still needing to be updated and reworked, but I i
   - [Repository layout](#repository-layout)
   - [Install](#install)
     - [Card art](#card-art)
+    - [A standalone executable](#a-standalone-executable)
   - [Quick start](#quick-start)
   - [What works](#what-works)
+    - [A move you are offered is a move that does something](#a-move-you-are-offered-is-a-move-that-does-something)
   - [The visual player](#the-visual-player)
+    - [Playing someone else](#playing-someone-else)
+    - [The deck builder tab](#the-deck-builder-tab)
   - [The effect compiler](#the-effect-compiler)
-    - [The log says how much damage landed](#the-log-says-how-much-damage-landed)
+    - [The log says how much damage landed, and what dealt it](#the-log-says-how-much-damage-landed-and-what-dealt-it)
+    - ["HP cannot reach 0" does not stop the damage](#hp-cannot-reach-0-does-not-stop-the-damage)
+    - [The mulligan](#the-mulligan)
+    - [Reveals are recorded as the card turns](#reveals-are-recorded-as-the-card-turns)
+    - [Healing is cards, not a bigger Cookie](#healing-is-cards-not-a-bigger-cookie)
     - [Removal that skips the break area](#removal-that-skips-the-break-area)
     - ["This Cookie" on a FLIP is the card, not its host](#this-cookie-on-a-flip-is-the-card-not-its-host)
     - [Who goes first](#who-goes-first)
     - [Costs in angle brackets are a decision](#costs-in-angle-brackets-are-a-decision)
+    - ["Up to N" is a choice of which, and of how many](#up-to-n-is-a-choice-of-which-and-of-how-many)
+    - [A card filter cannot describe a card's state](#a-card-filter-cannot-describe-a-cards-state)
+    - [The EXTRA deck](#the-extra-deck)
   - [Rules fidelity](#rules-fidelity)
   - [Self-play RL](#self-play-rl)
   - [Deck generation](#deck-generation)
@@ -636,6 +649,10 @@ over a snapshot rather than being baked into it.
 
 ## The effect compiler
 
+> Writing a card yourself? **[docs/writing-cards.md](docs/writing-cards.md)** is
+> the practical guide — where the card goes, which trigger to pick, the `Ctx`
+> vocabulary, and how to test it.
+
 Hand-writing 1200 cards was never going to happen, and the text is templated
 enough not to need it. `braverse/compiler.py` parses rules text into the ops in
 `braverse/effect_ir.py`, which the interpreter runs against the same `Ctx` a
@@ -740,6 +757,23 @@ T7 P0 Leek Cookie takes 1 effect damage — 1 HP left
 A swing is `attack damage`; a `Then, ...` rider, a skill and a trap are all
 `effect damage`, since they all route through the same `Ctx.deal_damage`.
 
+`effect damage` says it was not the swing; it does not say *which* card did it,
+and with a dozen cards on the board and a FLIP turning over mid-attack that is
+most of the question. So every line written while an effect is resolving is
+stamped with the card resolving it — `Game._effect_source` pushes the name
+around each effect body and `GameState.record` reads the top of that stack:
+
+```
+T7 P0 Leek Cookie takes 3 attack damage — 2 HP left
+T7 P0 FLIP! Blue Slushy Cookie
+T7 P0 [Blue Slushy Cookie] Leek Cookie gains +1 HP — 3 HP
+T7 P0 [Wind Archer Cookie] draws 1 card
+```
+
+The stack is nested, so a FLIP that fires inside an attack names the FLIP rather
+than the attack that turned it over, and lines the engine writes on its own
+account — playing a Cookie, resting for a cost — carry no name at all.
+
 The board says it too, without a word being read. A swing shoves the card,
 flashes it white and throws a heavy red number out sideways, over the thud of
 the impact; a rider, skill or trap pulses the card cool blue, floats a smaller
@@ -757,13 +791,88 @@ that silently doubles or drops a hit would be worse than none.
 
 The `(of N)` is the interesting part: damage reveals HP cards one at a time, so
 the count that lands is not always the count that was asked for. Auditing 2446
-damage steps across 120 games turned up four reasons it can differ, all correct
-and all now visible in the log — the pile ran dry, "this Cookie's HP cannot
-reach 0" stopped it one short, an effect took the target off the board
-mid-step, or the game ended. A fifth case removes *more* cards than the
-Cookie started with: a FLIP that heals its host (`<Discard 1 card.> ... gains
-+1 HP`) hands HP back while the loop is still running, so a 3-damage attack on
-a 2 HP Cookie legitimately turns three cards. No case applied the wrong number.
+damage steps across 120 games turned up the reasons it can differ, all correct
+and all visible in the log — the pile ran dry, an effect took the target off
+the board mid-step, or the game ended. Another case removes *more* cards than
+the Cookie started with: a FLIP that heals its host (`<Discard 1 card.> ...
+gains +1 HP`) hands HP back while the loop is still running, so a 3-damage
+attack on a 2 HP Cookie legitimately turns three cards. No case applied the
+wrong number.
+
+### "HP cannot reach 0" does not stop the damage
+
+`hp_cannot_reach_zero` — Divine Light Crystal (ST3-020), Squid Ink Cookie
+(BS5-081) — used to be read as a floor: the loop stopped one card short of
+emptying the pile, and the rest of the hit vanished. That is the wrong half of
+the sentence. What cannot happen is the Cookie reaching 0; the damage still
+happens. So `deal_damage` now turns every card the hit paid for and pulls a
+replacement off the deck each time the pile would empty. The Cookie is still
+standing at the end of it, every FLIP in the pile still fired, and `(of N)` no
+longer has a reason to be short. The cards it replaces come off the deck, which
+is a real cost — a big hit into the floor mills the protected player.
+
+Divine Light Crystal itself was on `KNOWN_UNCODED` and did nothing at all: the
+trap was played, the `{G}{G}` was paid, and the Cookie fainted anyway. It is
+hand-written in `impl/st_misc.py` now.
+
+### The mulligan
+
+`RulesConfig.allow_mulligan` had been sitting there as a constant nothing read.
+The opening sequence now runs draw 6 → **mulligan** → the mandatory
+"no Cookie in hand" redraw → place the opening Cookie, in that order, so a
+mulligan into a Cookie-less hand still triggers the forced redraw the guide
+describes. The whole hand goes back, the deck is shuffled, six new cards come
+off it; there is no card penalty and it is offered exactly once.
+
+Only a controller that implements `wants_mulligan` is asked, which in practice
+means a human seat. A scripted agent has no read on hand quality, so answering
+for it would replace every opening hand in every self-play game with a random
+one — every number in this README would move, and the bots would not play any
+better for it. Same carve-out, and the same reasoning, as
+["up to N"](#up-to-n-is-a-choice-of-which-and-of-how-many).
+
+### Reveals are recorded as the card turns
+
+The flip animation used to be driven by a zone diff: an HP card that reached
+the trash between two snapshots had been revealed. That is true, but it can
+only ever be noticed *after* the FLIP has resolved — so the board played the
+heal, the draw or the bounce and only then showed the card that caused it.
+
+The engine records the reveal itself now, at the moment the card turns and
+before the FLIP runs, next to `damage` and `heal` in `state.events`. One batch
+of events reads:
+
+```
+attack > reveal > reveal > reveal > heal > damage
+```
+
+and the browser plays that list **in order** rather than sorting it into piles
+by type first. `playEvents` walks the batch once and lays each event on a clock.
+Two things do not simply take the next slot: attack damage lands part-way
+through the swing that caused it rather than after it, and a faint waits for any
+revealed card to clear, because the board must not change under a card someone
+is still reading. `scene_seconds` on the server mirrors the same walk, since it
+is what decides how long a bot waits before moving again.
+
+`Ctx.trash_hp` reveals too — "place N cards from the top of that Cookie's HP
+into the trash" turns cards face up — but flagged `flip=False`, because no FLIP
+fires on that path and it should not read as one.
+
+### Healing is cards, not a bigger Cookie
+
+"That Cookie gains +1 HP" hands a card back onto the HP pile. It used to also
+raise `Cookie.hp_bonus`, which fed `max_hp` — so a Cookie healed twice read as
+`8/8` and looked like a card it is not. HP *is* the pile; the printed value is
+printed. `max_hp` is now the printed HP alone, `gain_hp` only refills, and a
+pile above the printed value is shown as an overheal: green ticks on the end of
+the HP bar (`8/6 HP (+2)`) rather than a longer bar.
+
+Healing was also invisible while it happened, since a heal inside an attack is
+gone from a before/after diff of the pile by the time the browser polls. It is a
+`heal` event now, next to `damage` in `state.events`, and the board plays it as
+a green glow around the card with a green number rising off it — the same beat
+as the hit that provoked it, and deliberately the opposite shape to the red
+shove of a swing.
 
 ### Removal that skips the break area
 
@@ -842,6 +951,53 @@ A cost that cannot be met is never offered, and a clause whose cost *is* an op
 
 `HeuristicAgent` answers yes to every cost, so bot play and the self-play
 numbers above are unchanged; it is a human seat that gains the choice.
+
+One bracket was being read as free rather than as a cost. `<can be used as
+{R}.>` sits on 72 cards, almost all of them attack riders, and the compiler
+skipped it on the grounds that the colour substitution it describes is not
+modelled — which handed every one of those riders an effect that fired after
+every swing for nothing. Pitaya Dragon Cookie (ST6-004) was pinging an extra
+point of damage on every attack it made, all game. It compiles to `PayCost` of
+one energy of the colour named now: not free, and if anything a shade stricter
+than the printed card, which is the safe direction to be wrong about a cost.
+The starter-deck self-play numbers did not move, because a mono-colour deck can
+almost always pay a single symbol of its own colour.
+
+### "Up to N" is a choice of which, and of how many
+
+"Rest up to 2 cards in your support area" was resolved by resting the first two
+active cards. Both halves of that are decisions the player should be making:
+*which* cards go down decides what colours are left to pay with, and *how many*
+go down is what a card like "receives damage equal to the number of cards rested
+by this effect" reads afterwards. `Ctx.rest_support` now puts the active support
+cards up as a pick-and-confirm — none, one or two — through the same batch
+question a multi-card discard uses (`ask_many`, extended with an `up_to` mode
+that does not pad a short answer). The viewer's confirm button is live from zero
+picks and the counter reads `0 / up to 2`, so declining is visibly an answer
+rather than a stuck prompt.
+
+Scripted agents are deliberately left out of it: they have no opinion worth
+asking for, and giving them one would move the self-play numbers for no gain. A
+controller that implements `choose_many` — which in practice means a human — is
+asked; everyone else still rests the first N.
+
+### A card filter cannot describe a card's state
+
+`parse_card_filter` reads a phrase like "3 {R} Cookies" into a filter over
+*printed* cards. Handed "2 **active** cards or more in your support area" it
+quietly dropped the word it could not express and matched every support card —
+so Hero Cookie (BS5-063) drew two cards at the end of every turn regardless of
+how much of its support was rested, and Longan Dragon Cookie (BS5-056) pinged
+for 2 on the same false condition.
+
+Two fixes, and the second is the one that matters. The phrasing now has its own
+condition rule, mapping to the `active_support_count` the interpreter already
+had. And `parse_card_filter` **refuses** a phrase containing a state word —
+active, rested, face-up, face-down — rather than dropping it: a filter over
+printed cards can never honour one, so silently ignoring it turns a narrow
+condition into a broad one. That is the all-or-nothing rule applied to the
+filter as well as the clause. It cost nothing: coverage is identical before and
+after, because the only phrasings that needed those words now have real rules.
 
 ### The EXTRA deck
 

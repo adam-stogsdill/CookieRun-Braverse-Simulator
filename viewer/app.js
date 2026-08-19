@@ -277,11 +277,17 @@ function cookieSlot(cookie) {
   box.dataset.cookie = cookie.uid;
   slot.appendChild(box);
 
+  /* HP is the pile, and healing can push it past the printed value — the card
+   * does not get bigger, it is carrying spare cards. Printed HP stays the
+   * denominator and every card above it is a green tick on the end of the bar. */
   const bar = h("div", "hpbar");
-  const max = Math.max(cookie.maxHp || cookie.hp, cookie.hp);
+  const max = cookie.maxHp || cookie.hp;
+  const over = Math.max(0, cookie.hp - max);
   for (let i = 0; i < max; i++) bar.appendChild(h("i", i < cookie.hp ? "on" : ""));
+  for (let i = 0; i < over; i++) bar.appendChild(h("i", "on over"));
   slot.appendChild(bar);
-  slot.appendChild(h("div", "hplabel", `${cookie.hp}/${max} HP${cookie.rested ? " · rested" : ""}`));
+  slot.appendChild(h("div", "hplabel",
+    `${cookie.hp}/${max} HP${over ? ` (+${over})` : ""}${cookie.rested ? " · rested" : ""}`));
   return slot;
 }
 
@@ -534,59 +540,106 @@ const SKILL_MS = 400;     // between one skill popping up and the next
 const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
 
-/** Play one action's scene and return how long it runs, in ms. */
+const MAX_REVEALS = 6;    // the most cards one scene turns over on screen
+
+/** Play one action's scene and return how long it runs, in ms.
+ *
+ * The events arrive in the order they happened, and that order is the whole
+ * point: a FLIP heals its host *after* the card turns over, and grouping the
+ * events by type — every hit, then every heal, then every reveal — played the
+ * consequence before the cause. So this walks the list once and lays each
+ * event on a clock, rather than sorting them into piles first.
+ */
 function playEvents(events) {
   if (!events || !events.length) return 0;
-  const hits = events.filter((e) => e.type === "damage");
-  const draws = events.filter((e) => e.type === "draw");
-  const skills = events.filter((e) => e.type === "skill");
-  const attacks = events.filter((e) => e.type === "attack");
-  const reveals = events.filter((e) => e.type === "reveal").slice(0, 6);
-  const faints = events.filter((e) => e.type === "faint");
+  let clock = 0;      // when the next event starts
+  let end = 0;        // when the last thing on screen finishes
+  let reveals = 0;    // how many cards this scene has already turned
+  let swingLand = null;   // when the current attack connects
+  let hitStart = null;    // when the first card of the current hit turned
+  let revealsClear = 0;   // when the last revealed card leaves the screen
+  const holds = (start, hold) => { end = Math.max(end, start + hold); };
+  const shown = events.filter((e) => e.type === "reveal").slice(0, MAX_REVEALS);
+  if (shown.length) renderReveals(shown);
 
-  let clock = 0;
-  let dealt = 0;
-  draws.forEach((event) => {
-    for (let i = 0; i < event.count; i++) playDraw(event, dealt++ * DRAW_MS);
+  events.forEach((event) => {
+    switch (event.type) {
+      case "draw": {
+        const n = Math.max(1, event.count || 1);
+        for (let i = 0; i < n; i++) playDraw(event, clock + i * DRAW_MS);
+        holds(clock, (n - 1) * DRAW_MS + DRAW_FLIGHT);
+        clock += n * DRAW_MS;
+        break;
+      }
+      case "skill":
+        playSkill(event, clock);
+        holds(clock, SKILL_HOLD);
+        clock += SKILL_MS;
+        break;
+      case "attack":
+        playAttack(event, clock);
+        holds(clock, ATTACK_MS);
+        // The swing connects part-way through its flight; that is when the
+        // number it deals should land, not when the card gets home.
+        swingLand = clock + ATTACK_MS * 0.4;
+        clock += ATTACK_MS;
+        break;
+      case "reveal": {
+        if (reveals >= MAX_REVEALS) break;
+        if (hitStart === null) hitStart = clock;
+        playReveal(event, clock, reveals++);
+        holds(clock, FLIP_MS);
+        // What the card *did* plays while it is still up, so the clock only
+        // moves on by the gap between cards. The board changing underneath it
+        // is different — see `faint`.
+        revealsClear = Math.max(revealsClear, clock + FLIP_MS);
+        clock += REVEAL_MS;
+        break;
+      }
+      case "damage": {
+        // Damage is recorded once the whole hit has resolved, because only
+        // then is it known how much landed — but it *reads* as the moment the
+        // first card turned, so that is where it is played.
+        const at = event.source === "attack" && swingLand !== null
+          ? swingLand
+          : (hitStart !== null ? hitStart : clock);
+        playDamage(event, at);
+        holds(at, DAMAGE_HOLD);
+        hitStart = null;
+        clock = Math.max(clock, at + DAMAGE_MS);
+        break;
+      }
+      case "heal":
+        playHeal(event, clock);
+        holds(clock, DAMAGE_HOLD);
+        clock += DAMAGE_MS;
+        break;
+      case "faint": {
+        // A Cookie leaving the board is the one thing that must not happen
+        // under a revealed card still being read.
+        const at = Math.max(clock, revealsClear);
+        playFaint(event, at);
+        holds(at, BREAK_MS);
+        clock = at + FAINT_MS;
+        break;
+      }
+      default:
+        break;
+    }
   });
-  if (dealt) clock += (dealt - 1) * DRAW_MS + DRAW_FLIGHT;
-  skills.forEach((event, i) => playSkill(event, clock + i * SKILL_MS));
-  if (skills.length) clock += (skills.length - 1) * SKILL_MS + SKILL_HOLD;
-  attacks.forEach((event) => { playAttack(event, clock); clock += ATTACK_MS; });
-  // Land the hits with the swing that caused them, or straight away if the
-  // damage came from a rider, a skill or a trap rather than an attack.
-  hits.forEach((event, i) => {
-    const at = event.source === "attack" ? Math.max(0, clock - ATTACK_MS * 0.6) : clock;
-    playDamage(event, at + i * DAMAGE_MS);
-  });
-  if (hits.length) clock = Math.max(clock, (hits.length - 1) * DAMAGE_MS + DAMAGE_HOLD);
-  if (reveals.length) {
-    playReveals(reveals, clock);
-    // Wait for the last card to *leave*, not just to start turning: the board
-    // must not change under a reveal that is still being read.
-    clock += REVEAL_MS * (reveals.length - 1) + FLIP_MS;
-  }
-  faints.forEach((event, i) => playFaint(event, clock + i * FAINT_MS));
-  return clock + (faints.length ? (faints.length - 1) * FAINT_MS + BREAK_MS : 0);
+  return end;
 }
 
 /* An HP card turning face up is the swing moment of a battle — a FLIP can
  * bounce its own host mid-attack — so it gets a real beat rather than a number
  * quietly ticking down. */
-function playReveals(events, delay = 0) {
-  if (!events || !events.length) return;
-  // Several cards can come off the same Cookie in one attack; fan them out so a
-  // three-damage hit reads as three cards rather than one.
-  const perCookie = new Map();
-  events.slice(0, 6).forEach((event, i) => {
-    const rank = perCookie.get(event.cookie) || 0;
-    perCookie.set(event.cookie, rank + 1);
-    setTimeout(() => {
-      flipCard(event, rank, i);
-      Sfx.play(event.flip ? "flipBig" : "flip");
-    }, delay + i * 700);
-  });
-  renderReveals(events);
+function playReveal(event, delay = 0, seq = 0) {
+  // Several cards can come off the same Cookie in one attack; `seq` fans them
+  // out so a three-damage hit reads as three cards rather than one.
+  setTimeout(() => {
+    flipCard(event, seq, seq);
+    Sfx.play(event.flip ? "flipBig" : "flip");
+  }, delay);
 }
 
 /* The attacker steps out of its slot, turns side-on into the defender, and
@@ -672,6 +725,31 @@ function playDamage(event, delay = 0) {
 
     const node = h("div", "hitnum " + (attack ? "attack" : "effect"));
     node.textContent = "-" + event.amount;
+    node.style.left = at.left + at.width / 2 - bounds.left + "px";
+    node.style.top = at.top + at.height / 2 - bounds.top + "px";
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+    setTimeout(() => node.remove(), DAMAGE_HOLD + 200);
+  }, delay);
+}
+
+/* HP handed back — a heal, or "this Cookie's HP cannot reach 0" pulling a
+ * replacement off the deck. Green where damage is red, and it glows around the
+ * card rather than shoving it, because nothing is being done *to* the Cookie. */
+function playHeal(event, delay = 0) {
+  setTimeout(() => {
+    const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
+    Sfx.play("heal");
+    const anchor = host || document.querySelector(`#side-${event.owner} .zone.battle`);
+    if (!anchor) return;
+    if (host) {
+      host.classList.add("healed");
+      setTimeout(() => host.classList.remove("healed"), 900);
+    }
+    const bounds = el("#table").getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
+    const node = h("div", "hitnum heal");
+    node.textContent = "+" + event.amount;
     node.style.left = at.left + at.width / 2 - bounds.left + "px";
     node.style.top = at.top + at.height / 2 - bounds.top + "px";
     node.dataset.born = performance.now();
@@ -985,6 +1063,8 @@ function renderPicker(snap) {
   const pending = snap.pending;
   const pick = pending && pending.pick;
   const count = pick ? Math.max(1, pending.count || 1) : 0;
+  // "Up to N" — confirming with fewer, or with none at all, is a real answer.
+  const upTo = !!(pending && pending.upTo);
   if (!count) {
     bar.classList.add("hidden");
     bar.innerHTML = "";
@@ -1000,7 +1080,8 @@ function renderPicker(snap) {
   bar.innerHTML = "";
   const head = h("div", "picker-head");
   head.appendChild(h("span", "picker-prompt", pending.prompt));
-  head.appendChild(h("span", "picker-count", `${state.picked.length} / ${count}`));
+  head.appendChild(h("span", "picker-count",
+    `${state.picked.length} / ${upTo ? "up to " : ""}${count}`));
   bar.appendChild(head);
 
   const row = h("div", "picker-row");
@@ -1013,7 +1094,7 @@ function renderPicker(snap) {
     wrap.onclick = () => {
       const at = state.picked.indexOf(opt.index);
       if (at >= 0) state.picked.splice(at, 1);
-      else if (count === 1) state.picked = [opt.index];
+      else if (count === 1 && !upTo) state.picked = [opt.index];
       else if (state.picked.length < count) state.picked.push(opt.index);
       renderPicker(snap);
     };
@@ -1024,18 +1105,20 @@ function renderPicker(snap) {
   const foot = h("div", "picker-foot");
   const verb = pick.verb || "Choose";
   const confirm = h("button", "primary",
-    count > 1 ? `${verb} ${state.picked.length || ""}`.trim() : verb);
-  confirm.disabled = state.picked.length !== count;
+    count > 1 || upTo ? `${verb} ${state.picked.length || ""}`.trim() : verb);
+  confirm.disabled = upTo ? false : state.picked.length !== count;
   confirm.onclick = () => {
     const picks = state.picked.slice();
     state.picked = [];
     bar.classList.add("hidden");
-    // A single pick is still a single answer; only a batch sends a list.
-    answer(count > 1 ? picks : picks[0]);
+    // A single pick is still a single answer; only a batch sends a list — and
+    // "up to 1" is a batch, because "none" is one of its answers.
+    answer(count > 1 || upTo ? picks : picks[0]);
   };
-  foot.appendChild(h("span", "hint", state.picked.length === count
-    ? "ready"
-    : `choose ${count - state.picked.length} more`));
+  foot.appendChild(h("span", "hint", upTo
+    ? (state.picked.length ? `${state.picked.length} of up to ${count}` : "none is allowed")
+    : (state.picked.length === count ? "ready"
+       : `choose ${count - state.picked.length} more`)));
   foot.appendChild(confirm);
   bar.appendChild(foot);
   return true;

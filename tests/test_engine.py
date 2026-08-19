@@ -325,9 +325,9 @@ def test_clone_is_independent(db):
     game = new_game(db=db)
     twin = game.clone()
     twin.state.players[0].hand.clear()
-    twin.state.players[0].battle[0].hp_bonus = 99
+    twin.state.players[0].battle[0].attack_bonus = 99
     assert game.state.players[0].hand
-    assert game.state.players[0].battle[0].hp_bonus == 0
+    assert game.state.players[0].battle[0].attack_bonus == 0
 
 
 def test_games_are_deterministic_for_a_seed(db):
@@ -376,7 +376,7 @@ def test_a_multi_card_discard_is_one_question_for_a_controller_that_wants_it():
         def choose(self, state, prompt, options, *, optional):
             raise AssertionError("should have been asked for the batch")
 
-        def choose_many(self, state, prompt, options, *, count, optional):
+        def choose_many(self, state, prompt, options, *, count, optional, up_to=False):
             self.asked.append((prompt, count))
             return [options[i] for i in self.take]
 
@@ -419,7 +419,7 @@ def test_discarding_takes_the_cards_the_controller_picked():
         def choose_action(self, state, options):
             return options[0]
 
-        def choose_many(self, state, prompt, options, *, count, optional):
+        def choose_many(self, state, prompt, options, *, count, optional, up_to=False):
             return list(options)[-count:]
 
     game._controllers[0] = PicksTheLastTwo()
@@ -494,12 +494,16 @@ def test_damage_respects_immunity_and_the_hp_floor():
     assert cookie.remaining_hp == before
     assert "takes no effect damage (immune)" in game.state.log[-1]
 
-    # "This Cookie's HP cannot reach 0" stops one card short of fainting.
+    # "This Cookie's HP cannot reach 0" does not stop the damage: every card
+    # is still turned, and a replacement comes off the deck each time the pile
+    # would empty, so the Cookie is still standing at the end of it.
     cookie.damage_immune = False
     cookie.hp_cannot_reach_zero = True
-    game.deal_damage(cookie, 99, source_player=0)
-    assert cookie.remaining_hp == 1, "the floor let it faint"
+    turned = len(player.trash)
+    game.deal_damage(cookie, 4, source_player=0)
+    assert cookie.remaining_hp >= 1, "the floor let it faint"
     assert cookie in player.battle
+    assert len(player.trash) - turned == 4, "the floor swallowed the damage"
 
 
 def test_the_log_tells_a_swing_apart_from_a_rider_or_a_skill():
@@ -749,3 +753,290 @@ def test_playable_if_gates_a_hand_written_card(db):
     assert effect_is_live(fn, ctx)
     me.hand.extend(me.deck[:4])
     assert not effect_is_live(fn, ctx)
+
+
+# --- what the log says caused a thing --------------------------------------
+def test_the_log_names_the_card_whose_effect_is_running():
+    """Without the name, "draws 1 card" could be any of a dozen cards on the
+    board — and a FLIP that fires mid-attack looks like the attack itself."""
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    _, target = _lone_cookie(game)
+
+    game.deal_damage(target, 1, source_player=0, kind="attack")
+    assert "[" not in game.state.log[-1], "damage is not itself a card effect"
+
+    with game._effect_source("Divine Light Crystal"):
+        game.state.record("something happened")
+    assert game.state.log[-1].endswith("[Divine Light Crystal] something happened")
+    assert game.state.effect_sources == [], "the stack has to unwind"
+
+
+# --- "rest up to N cards" ---------------------------------------------------
+def test_resting_up_to_n_asks_which_cards_and_takes_a_short_answer():
+    """"Up to" is a real choice: which support cards go down decides what is
+    left to pay with, and how many go down is what damage-by-count reads."""
+    from braverse.effects import Ctx
+
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=4)
+    game.setup()
+    player = game.state.players[0]
+    player.support = [player.deck.pop(0) for _ in range(3)]
+
+    asked = []
+
+    class PicksOne:
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose_many(self, state, prompt, options, *, count, optional, up_to=False):
+            asked.append((prompt, count, up_to))
+            return [options[-1]]
+
+    game._controllers[0] = PicksOne()
+    ctx = Ctx(game=game, state=game.state, db=db, me=player, opp=game.state.players[1])
+
+    assert ctx.rest_support(2) == 1, "a short answer must be honoured"
+    assert asked and asked[0][1:] == (2, True)
+    assert "up to 2" in asked[0][0]
+    assert [c.rested for c in player.support] == [False, False, True]
+
+
+def test_resting_up_to_n_still_takes_the_first_cards_for_a_bot():
+    """A scripted agent has no opinion worth asking for, and asking would only
+    move self-play numbers."""
+    from braverse.effects import Ctx
+
+    db = default_db()
+    game = new_game(seed=4, db=db)
+    player = game.state.players[0]
+    player.support = [player.deck.pop(0) for _ in range(3)]
+    ctx = Ctx(game=game, state=game.state, db=db, me=player, opp=game.state.players[1])
+
+    assert ctx.rest_support(2) == 2
+    assert [c.rested for c in player.support] == [True, True, False]
+
+
+# --- healing ----------------------------------------------------------------
+def test_healing_refills_the_pile_without_raising_printed_hp():
+    db = default_db()
+    game = new_game(seed=5, db=db)
+    cookie = game.state.players[0].battle[0]
+    printed = cookie.max_hp(db)
+    cookie.hp_cards.pop()
+    game.state.events.clear()
+
+    game.gain_hp(cookie, 2)
+    assert cookie.remaining_hp == printed + 1, "the cards did not come back"
+    assert cookie.max_hp(db) == printed, "healing made the Cookie bigger"
+    heals = [e for e in game.state.events if e["kind"] == "heal"]
+    assert heals == [{"kind": "heal", "cookie": cookie.uid, "owner": 0,
+                      "amount": 2, "left": printed + 1}]
+
+
+def test_damage_past_the_pile_keeps_going_when_a_flip_heals_the_host():
+    """A FLIP that hands its host a card back mid-hit does not end the hit: the
+    rest of the damage turns the cards the heal just paid for."""
+    db = default_db()
+    game = new_game(seed=5, db=db)
+    _plain_pile(game, db)
+    player = game.state.players[1]
+    cookie = player.battle[0]
+
+    class SaysYes:
+        """Pays the FLIP's <Discard 1 card.> and discards from the front."""
+
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+    game._controllers[1] = SaysYes()
+    while cookie.hp_cards:
+        player.trash.append(cookie.hp_cards.pop())
+    # Two plain cards under one healing FLIP, so the pile is 2 HP deep and the
+    # third point of damage only has a card to turn because the FLIP healed.
+    for card_id in ("ST8-011", "ST8-011", "ST8-007"):
+        card = CardInstance.make(card_id, 1)
+        card.face_up = False
+        cookie.hp_cards.append(card)
+    assert db["ST8-007"].is_flip
+
+    flip = cookie.hp_cards[-1]
+    game.deal_damage(cookie, 3, source_player=0, kind="attack")
+    assert flip in player.trash
+    # Three cards turned off a two-card pile: the healed card paid for the
+    # third point, and one of the originals is still down there holding it up.
+    assert "takes 3 attack damage" in game.state.log[-1]
+    assert "(of " not in game.state.log[-1]
+    assert cookie in player.battle, "the healed card should have absorbed the third"
+    assert cookie.remaining_hp == 1
+    assert cookie.max_hp(db) == db[cookie.card.card_id].hp, "healing raised max HP"
+
+
+# --- ST3-020 Divine Light Crystal -------------------------------------------
+def test_divine_light_crystal_keeps_its_cookie_alive_through_the_damage():
+    from braverse.cost import Cost
+    from braverse.effects import Ctx, Trigger, get_effect
+
+    db = default_db()
+    game = new_game(seed=8, db=db)
+    _plain_pile(game, db)
+    player = game.state.players[0]
+    cookie = player.battle[0]
+    player.support = [CardInstance.make("ST3-004", 0) for _ in range(2)]
+    for card in player.support:
+        card.rested = False
+    assert db["ST3-004"].color is Color.GREEN, "the trap is paid in {G}{G}"
+
+    fn = get_effect("ST3-020", Trigger.ITEM)
+    assert fn is not None, "the trap has to be implemented to do anything"
+    fn(Ctx(game=game, state=game.state, db=db, me=player,
+           opp=game.state.players[1], trigger=Trigger.ITEM.value))
+    assert cookie.hp_cannot_reach_zero
+    assert all(c.rested for c in player.support), "the {G}{G} was not paid"
+
+    swing = cookie.remaining_hp + 2
+    game.deal_damage(cookie, swing, source_player=1, kind="attack")
+    assert cookie in player.battle, "Divine Light Crystal let it faint"
+    assert cookie.remaining_hp >= 1
+    # Every point still turned a card — the floor replaces the cards as they
+    # are spent, it does not swallow the damage. `(of N)` would say otherwise.
+    assert f"takes {swing} attack damage" in game.state.log[-1]
+
+
+# --- the mulligan -----------------------------------------------------------
+def test_a_controller_that_wants_a_mulligan_gets_a_whole_new_hand():
+    db = default_db()
+
+    class Mulligans:
+        def __init__(self):
+            self.asked = 0
+
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+        def wants_mulligan(self, state, hand):
+            self.asked += 1
+            return self.asked == 1      # once, and only once
+
+    seat = Mulligans()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [seat, SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=11)
+    twin = new_game(seed=11, db=db)
+
+    game.setup()
+    assert seat.asked == 1, "the mulligan is offered exactly once"
+    player = game.state.players[0]
+    # Same number of cards, drawn from a reshuffled deck: the opening hand of
+    # the identically-seeded game it did not mulligan out of is gone.
+    assert len(player.hand) + 1 == game.rules.opening_hand, "one went to the board"
+    kept = [c.card_id for c in twin.state.players[0].hand]
+    assert [c.card_id for c in player.hand] != kept, "the hand did not change"
+    # The hand went back into the deck rather than into a pile: every card is
+    # still accounted for.
+    on_the_board = sum(1 + len(c.hp_cards) for c in player.battle)
+    assert (len(player.deck) + len(player.hand) + len(player.trash)
+            + on_the_board) == game.rules.deck_size
+    assert any("mulligan" in line for line in game.state.log)
+
+
+def test_a_bot_is_never_asked_to_mulligan():
+    """Scripted agents have no read on hand quality; answering for them would
+    replace every opening hand in every self-play game."""
+    db = default_db()
+    a = new_game(seed=11, db=db)
+    b = new_game(seed=11, db=db)
+    assert [c.card_id for c in a.state.players[0].hand] == \
+           [c.card_id for c in b.state.players[0].hand]
+    assert not any("mulligan" in line for line in a.state.log)
+
+
+def test_the_mulligan_can_be_turned_off():
+    db = default_db()
+    import dataclasses
+
+    from braverse import config as cfg
+    rules = dataclasses.replace(cfg.DEFAULT, allow_mulligan=False)
+
+    class WouldMulligan:
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+        def wants_mulligan(self, state, hand):
+            raise AssertionError("must not be asked when the rule is off")
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [WouldMulligan(), SeatedAgent(HeuristicAgent(db=db), 1)],
+                db=db, rules=rules, seed=11)
+    game.setup()
+
+
+# --- BS8-059 Mystic Flour Cookie -------------------------------------------
+def test_mystic_flour_trashes_hp_off_every_enemy_cookie():
+    """The 【Activate】 used to mill the controller's *own* deck into their
+    support area — text from a card that does not exist."""
+    from braverse.effects import Ctx, Trigger, get_effect
+    from braverse.state import CardInstance
+
+    db = default_db()
+    game = new_game(seed=12, db=db)
+    me, them = game.state.players[0], game.state.players[1]
+    me.support = [CardInstance.make("ST3-004", 0) for _ in range(3)]
+    for card in me.support:
+        card.rested = False
+    victim = them.battle[0]
+    before = victim.remaining_hp
+    hand = len(me.hand)
+
+    fn = get_effect("BS8-059", Trigger.ACTIVATE)
+    fn(Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+           source_cookie=me.battle[0], trigger=Trigger.ACTIVATE.value))
+
+    assert victim.remaining_hp == before - 2, "the opponent's HP pile is the target"
+    assert len(me.hand) == hand + 2, "the two {G} support cards did not come back"
+    assert len(me.support) == 1
+
+
+# --- BS5-063 Hero Cookie ----------------------------------------------------
+def test_hero_cookie_counts_active_support_not_the_whole_area():
+    """"if there are 2 active cards or more in your support area" — the
+    compiler read the word "active" as a card filter it could not express and
+    counted the rested cards too, so the draw happened every turn."""
+    from braverse.effects import Ctx, Trigger, get_effect
+
+    db = default_db()
+    game = new_game(seed=13, db=db)
+    me = game.state.players[0]
+    me.support = [me.deck.pop(0) for _ in range(4)]
+    for card in me.support:
+        card.rested = True
+
+    fn = get_effect("BS5-063", Trigger.END_TURN)
+    assert fn is not None
+
+    def run():
+        before = len(me.hand)
+        fn(Ctx(game=game, state=game.state, db=db, me=me,
+               opp=game.state.players[1], trigger=Trigger.END_TURN.value))
+        return len(me.hand) - before
+
+    assert run() == 0, "four rested cards are not two active ones"
+    me.support[0].rested = False
+    assert run() == 0, "one active card is still not two"
+    me.support[1].rested = False
+    assert run() == 2

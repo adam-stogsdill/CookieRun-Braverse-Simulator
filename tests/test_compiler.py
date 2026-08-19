@@ -518,7 +518,7 @@ def test_incoming_damage_reduction_applies_to_the_attack(db):
 # in a completed set still fails these tests.
 KNOWN_UNCODED = {
     "ST1-018", "ST2-016", "ST2-019", "ST2-021",
-    "ST3-016", "ST3-018", "ST3-020", "ST3-021", "ST3-022",
+    "ST3-016", "ST3-018", "ST3-021", "ST3-022",
     "ST4-016", "ST4-019", "ST5-022",
     "BS1-023", "BS1-024", "BS1-025", "BS1-026", "BS1-048", "BS1-050", "BS1-078",
     "BS2-014", "BS2-020", "BS2-021", "BS2-048", "BS2-049", "BS2-051",
@@ -702,7 +702,7 @@ def test_bare_level_notation_does_not_split_a_sentence():
     assert len(split_clauses(text)) == 1
 
 
-def test_hp_cannot_reach_zero_leaves_the_cookie_at_one(db):
+def test_hp_cannot_reach_zero_keeps_the_cookie_standing(db):
     game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
                 [SeatedAgent(HeuristicAgent(db=db), 0),
                  SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=21)
@@ -711,9 +711,13 @@ def test_hp_cannot_reach_zero_leaves_the_cookie_at_one(db):
     victim = game.state.players[1].battle[0]
     victim.hp_cannot_reach_zero = True
 
-    game.deal_damage(victim, 99, source_player=0)
+    # The damage lands in full — the pile is topped back up off the deck as it
+    # empties — but the Cookie cannot be the card that runs out.
+    trashed = len(game.state.players[1].trash)
+    game.deal_damage(victim, 5, source_player=0)
     assert victim in game.state.players[1].battle
-    assert victim.remaining_hp == 1
+    assert victim.remaining_hp >= 1
+    assert len(game.state.players[1].trash) - trashed == 5
     assert not game.state.players[1].break_area
 
 
@@ -1122,3 +1126,38 @@ def test_support_placement_without_a_stated_state_is_refused():
     is exactly the kind of half-understanding the compiler refuses."""
     with pytest.raises(CompileError):
         compile_text("Place 1 Cookie from your trash into your support area.")
+
+
+def test_can_be_used_as_is_a_cost_not_a_free_rider(db):
+    """"<can be used as {R}.>" is the rider's price: one energy of the colour
+    it names. Read as free, Pitaya Dragon Cookie (ST6-004) pinged an extra
+    point of damage after every swing it ever made."""
+    from braverse.effects import Ctx, Trigger, get_effect
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=17)
+    game.setup()
+    _plain_hp(game, db)
+    me, them = game.state.players[0], game.state.players[1]
+    victim = them.battle[0]
+
+    fn = get_effect("ST6-004", Trigger.ATTACK)
+
+    def swing():
+        before = victim.remaining_hp
+        fn(Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+               source_cookie=me.battle[0], trigger=Trigger.ATTACK.value))
+        return before - victim.remaining_hp
+
+    me.support = []
+    assert swing() == 0, "the rider fired with nothing to pay it"
+
+    me.support = [CardInstance.make("ST9-013", 0)]      # a {B} card, wrong colour
+    me.support[0].rested = False
+    assert swing() == 0, "any colour paid for a {R} rider"
+
+    me.support = [CardInstance.make("ST6-004", 0)]      # {R}
+    me.support[0].rested = False
+    assert swing() == 1
+    assert me.support[0].rested, "the cost was not actually rested"

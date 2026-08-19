@@ -79,7 +79,6 @@ class Cookie:
     # `incoming_damage_reduction` it lasts until the owner's next Active Phase
     # rather than being cleared between battles.
     all_damage_reduction: int = 0
-    hp_bonus: int = 0                                         # +N HP effects, persistent
 
     def defn(self, db: CardDB) -> CardDef:
         return db[self.card.card_id]
@@ -107,7 +106,10 @@ class Cookie:
         return self.defn(db).level or 1
 
     def max_hp(self, db: CardDB) -> int:
-        return (self.defn(db).hp or 0) + self.hp_bonus
+        """The printed HP. Healing refills the pile, it never raises this — a
+        Cookie above its printed HP is shown as an overheal rather than as a
+        bigger Cookie."""
+        return self.defn(db).hp or 0
 
     def attack_damage(self, db: CardDB) -> int:
         attack = self.defn(db).attack
@@ -207,6 +209,11 @@ class GameState:
     # rider" out of string matching. Append-only; consumers track their own
     # read position.
     events: list = field(default_factory=list)
+    # Names of the cards whose effects are resolving right now, outermost
+    # first. `record` stamps the innermost onto every line it writes, so the
+    # log says *what* caused a draw, a heal or a point of damage — a FLIP, a
+    # trap and an 【Activate】 skill all read identically without it.
+    effect_sources: list = field(default_factory=list)
 
     def player(self, index: int) -> PlayerState:
         return self.players[index]
@@ -227,7 +234,8 @@ class GameState:
         return self.winner is not None
 
     def record(self, message: str) -> None:
-        self.log.append(f"T{self.turn_number} P{self.turn_player} {message}")
+        source = f"[{self.effect_sources[-1]}] " if self.effect_sources else ""
+        self.log.append(f"T{self.turn_number} P{self.turn_player} {source}{message}")
 
     def all_cookies(self) -> list[tuple[int, Cookie]]:
         return [(p.index, c) for p in self.players for c in p.battle]

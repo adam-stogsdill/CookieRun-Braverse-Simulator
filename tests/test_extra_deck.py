@@ -31,7 +31,7 @@ class _Auto:
     def choose(self, state, prompt, options, *, optional=False):
         return options[0] if options else None
 
-    def choose_many(self, state, prompt, options, *, count, optional):
+    def choose_many(self, state, prompt, options, *, count, optional, up_to=False):
         return options[:count]
 
     def confirm(self, state, prompt):

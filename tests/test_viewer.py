@@ -154,34 +154,77 @@ def snapshot_with(pile, trash, battle=True, break_area=()):
     ]}
 
 
-def test_reveal_events_are_a_zone_diff():
-    """The flip animation is driven by a diff, not an engine callback: an HP
-    card that reaches the trash was revealed, one that goes anywhere else was
-    not."""
-    before = snapshot_with(pile=[1, 2, 3], trash=[7])
+def test_reveals_are_reported_as_the_card_turns_not_after_the_flip():
+    """The order is the point.
 
-    revealed = Match._reveal_events(before, snapshot_with(pile=[1, 2], trash=[7, 3]))
-    assert len(revealed) == 1
-    assert revealed[0]["cookie"] == 99 and revealed[0]["card"]["uid"] == 3
-    assert revealed[0]["owner"] == 0 and revealed[0]["flip"] is False
+    A zone diff can only ever say "this card ended up in the trash", which is
+    after its FLIP has already resolved — so the board played the heal, the
+    draw or the bounce before showing the card that caused it. The engine now
+    records the reveal at the moment the card turns, and the browser plays the
+    batch in that order.
+    """
+    from braverse import STARTER_DECKS, Game, HeuristicAgent, SeatedAgent
+    from braverse.state import CardInstance
 
-    # Bounced back to hand rather than trashed: never turned face up.
-    assert Match._reveal_events(before, snapshot_with(pile=[1, 2], trash=[7])) == []
-    # A card that was already in the trash is not re-reported.
-    assert Match._reveal_events(before, snapshot_with(pile=[1, 2, 3], trash=[7])) == []
-    # Nothing to diff against on the very first snapshot.
-    assert Match._reveal_events(None, before) == []
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=5)
+    game.setup()
+
+    class SaysYes:
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+    game._controllers[1] = SaysYes()
+    player = game.state.players[1]
+    cookie = player.battle[0]
+    while cookie.hp_cards:
+        player.trash.append(cookie.hp_cards.pop())
+    # A healing FLIP on top of two plain cards: ST8-007 hands its host a card
+    # back, so the reveal and the heal are in the same hit.
+    for card_id in ("ST8-011", "ST8-011", "ST8-007"):
+        card = CardInstance.make(card_id, 1)
+        card.face_up = False
+        cookie.hp_cards.append(card)
+
+    game.state.events.clear()
+    game.deal_damage(cookie, 1, source_player=0, kind="attack")
+    kinds = [e["kind"] for e in game.state.events]
+    assert kinds == ["reveal", "heal", "damage"], kinds
+    reveal = game.state.events[0]
+    assert reveal["card_id"] == "ST8-007" and reveal["flip"] is True
 
 
-def test_flip_cards_are_flagged_for_the_animation():
-    before = snapshot_with(pile=[1], trash=[])
-    after = {"players": [
-        {"battle": [{"uid": 99, "card": card_stub(50), "hpPileCards": []}],
-         "trash": [card_stub(1, "FLIP")], "break": []},
-        {"battle": [], "trash": [], "break": []},
-    ]}
-    revealed = Match._reveal_events(before, after)[0]
-    assert revealed["flip"] is True and revealed["type"] == "reveal"
+def test_a_reveal_without_a_flip_is_not_flagged_as_one():
+    """"Place N cards from the top of that Cookie's HP into the trash" turns
+    cards face up but fires no FLIP, so it is not the big beat."""
+    from braverse import STARTER_DECKS, Game, HeuristicAgent, SeatedAgent
+    from braverse.effects import Ctx
+
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=5)
+    game.setup()
+    ctx = Ctx(game=game, state=game.state, db=db, me=game.state.players[0],
+              opp=game.state.players[1])
+    victim = game.state.players[1].battle[0]
+
+    game.state.events.clear()
+    ctx.trash_hp(victim, 2)
+    assert [e["kind"] for e in game.state.events] == ["reveal", "reveal"]
+    assert all(e["flip"] is False for e in game.state.events)
+
+
+def test_a_faint_waits_for_a_revealed_card_to_clear():
+    """The board must not change under a card someone is still reading."""
+    reveal_then_faint = scene_seconds([{"type": "reveal"}, {"type": "faint"}])
+    assert reveal_then_faint > scene_seconds([{"type": "reveal"}])
+    assert reveal_then_faint > scene_seconds([{"type": "faint"}])
 
 
 def test_bots_wait_for_the_whole_scene_not_a_fixed_beat():
