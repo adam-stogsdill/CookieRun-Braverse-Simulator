@@ -242,6 +242,21 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
   position: absolute; inset: 0; width: 44px; height: 61px;
   transform: translate(var(--ox, 0), var(--oy, 0));
 }
+/* Under a face-up top card, the pile's depth is the *edges* of the cards below
+   it — not their sleeves. Drawing them as backs made the right-hand sliver of a
+   trash or EXTRA pile look like a face-down card, which is the one thing those
+   zones are not. */
+.stack .stackart .card.edge {
+  background: var(--felt-edge, #2b3140);
+  border-color: rgba(255, 255, 255, .10);
+  box-shadow: none;
+}
+.stack .stackart .card.edge::after { content: none; }
+/* The layers are inert so the pointer always lands on `.stackart`, which owns
+   the hover for the whole pile: point anywhere at it, including the sliver of
+   card edge, and you get the top card. */
+.stack .stackart.faceup .card { pointer-events: none; }
+
 .stack .meta { min-width: 0; }
 .stack .zlabel2 { font-size: 8.5px; letter-spacing: 1.1px; text-transform: uppercase; color: var(--felt-label); }
 .stack .num { font-size: 15px; font-weight: 700; line-height: 1.1; }
@@ -295,6 +310,14 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
   content: ""; position: absolute; inset: 4px;
   border: 1px solid var(--sleeve-rim); border-radius: 5px;
 }
+/* The real card back, if it is there. `--card-back-art` is set on <body> by
+   app.js once it has confirmed `card_images/card_back.webp` loads; until then
+   it resolves to `none` and the drawn sleeve shows through, unchanged. */
+:root { --card-back-art: none; }
+body.has-cardback .card.back {
+  background: var(--card-back-art) center / cover no-repeat, var(--sleeve-bg);
+}
+body.has-cardback .card.back::after { content: none; }
 
 /* ------------------------------------------------------------ battle slots */
 .slot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
@@ -823,6 +846,13 @@ body.online #reveal-label { display: none; }
               0 26px 70px rgba(0, 0, 0, .8);
 }
 /* Your own trap reads as a save rather than a threat, so it comes up gold. */
+/* An item is your own play rather than something sprung at you, so it comes up
+   gold where a trap comes up red. */
+.trappop.item img {
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px rgba(240, 169, 43, .5),
+              0 26px 70px rgba(0, 0, 0, .8);
+}
+.trappop.item .trapname { color: #2a1a04; background: var(--accent); }
 .trappop.mine img {
   box-shadow: 0 0 0 3px var(--accent), 0 0 44px rgba(240, 169, 43, .5),
               0 26px 70px rgba(0, 0, 0, .8);
@@ -854,6 +884,45 @@ body.online #reveal-label { display: none; }
   22%  { transform: scale(1) rotate(0deg); opacity: 1; }
   78%  { transform: scale(1) rotate(0deg); opacity: 1; }
   100% { transform: scale(.92) translateY(-26px); opacity: 0; }
+}
+
+/* --------------------------------------------------------- a Cookie landing */
+/* Arriving on the board is a real moment — it is the only way anyone ever gets
+   a Cookie — so it lands rather than appears: the card drops with a squash, and
+   dust in the Cookie's own colour throws out from under it. */
+.cookiebox.landing { animation: landing 700ms cubic-bezier(.2,.9,.3,1); }
+@keyframes landing {
+  0%   { transform: translateY(-26px) scale(1.1); opacity: .25; }
+  38%  { transform: translateY(0) scale(1.04, .93); opacity: 1; }
+  56%  { transform: translateY(-4px) scale(.99, 1.03); }
+  100% { transform: translateY(0) scale(1); }
+}
+.cookiebox.landing .card {
+  animation: landing-glow 700ms ease-out;
+}
+@keyframes landing-glow {
+  0%   { filter: brightness(1.5) drop-shadow(0 0 18px var(--dust, #fff)); }
+  60%  { filter: brightness(1.1) drop-shadow(0 0 10px var(--dust, #fff)); }
+  100% { filter: none; }
+}
+.dust {
+  position: absolute; z-index: 33; pointer-events: none;
+  border-radius: 50%;
+  filter: brightness(1.25);
+  box-shadow: 0 0 8px 2px currentColor, 0 0 3px #fff inset;
+}
+/* The shockwave along the table, flattened into perspective. */
+.dustring {
+  position: absolute; z-index: 32; pointer-events: none;
+  transform: translate(-50%, -50%);
+  border: 2px solid; border-radius: 50%;
+  opacity: 0;
+  animation: dustring 900ms cubic-bezier(.1,.75,.3,1) forwards;
+}
+@keyframes dustring {
+  0%   { transform: translate(-50%, -50%) scale(.25); opacity: 0; }
+  18%  { opacity: .85; }
+  100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
 }
 
 /* ---------------------------------------------------------- the card picker */

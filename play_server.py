@@ -62,11 +62,13 @@ SIDE = (Path(sys.executable).resolve().parent
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
 EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
-                 "draw": 0.22, "damage": 0.25, "heal": 0.25, "trap": 1.0}
+                 "draw": 0.22, "damage": 0.25, "heal": 0.25,
+                 "trap": 1.0, "item": 1.0, "summon": 0.35}
 # What is still on screen after an event of its kind *starts*.
 # A revealed card is held face up to be read, and a broken Cookie falls apart.
 TAIL_SECONDS = {"attack": 0.9, "reveal": 2.4, "faint": 1.5, "skill": 1.5,
-                "draw": 0.7, "damage": 0.9, "heal": 0.9, "trap": 2.2}
+                "draw": 0.7, "damage": 0.9, "heal": 0.9, "trap": 2.2,
+                "item": 2.2, "summon": 1.0}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -849,6 +851,12 @@ class Match:
         Most of these have no visible consequence at all — a draw, a buff, a
         cost that could not be met — so without this the card just sat there
         and nothing happened on screen.
+
+        An ITEM gets the same spotlight a trap gets: it is played from hand,
+        does its thing and goes straight to the trash, so a small pop over an
+        empty patch of the board is the whole of it on screen. A STAGE stays
+        small — it is still sitting there afterwards — and so does a Cookie's
+        own 【Activate】, which pops over the Cookie that used it.
         """
         state = self.game.state
         uid = getattr(action, "source_uid", None) or getattr(action, "card_uid", None)
@@ -860,6 +868,14 @@ class Match:
             if located is None:
                 return
             owner, card = located[0].index, instance_json(self.db, located[2])
+        if card.get("type") == CardType.ITEM.value:
+            self._queued.append({
+                "type": "item",
+                "owner": owner,
+                "card": card,
+                "name": card.get("name", ""),
+            })
+            return
         self._queued.append({
             "type": "skill",
             "owner": owner,
@@ -969,6 +985,33 @@ class Match:
         return events
 
     @staticmethod
+    def _summon_events(prev: Optional[dict], snap: dict) -> list:
+        """Cookies that arrived in a battle area — the mirror of a faint.
+
+        Read off a diff for the same reason: a Cookie can arrive from hand, the
+        trash, the break area, the support area or the EXTRA deck, and every
+        one of those is worth the same beat on the board. An 【Awaken】 keeps
+        the host Cookie's uid, so restacking one is correctly not an arrival.
+        """
+        if not prev:
+            return []
+        events = []
+        for index, (was, now) in enumerate(zip(prev["players"], snap["players"])):
+            before = {c["uid"] for c in was["battle"]}
+            for cookie in now["battle"]:
+                if cookie["uid"] in before:
+                    continue
+                events.append({
+                    "type": "summon",
+                    "owner": index,
+                    "cookie": cookie["uid"],
+                    "card": cookie["card"],
+                    # The dust takes the Cookie's own colour.
+                    "color": cookie["card"].get("color", ""),
+                })
+        return events
+
+    @staticmethod
     def _faint_events(prev: Optional[dict], snap: dict) -> list:
         """Cookies that left the battle area — fainted, trashed or bounced."""
         if not prev:
@@ -1010,6 +1053,7 @@ class Match:
                               + self._trap_events(snap)
                               + self._engine_events()
                               + self._draw_events(self._prev, snap)
+                              + self._summon_events(self._prev, snap)
                               + self._faint_events(self._prev, snap))
             self._queued = []
             if snap["events"]:

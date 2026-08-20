@@ -255,6 +255,59 @@ def test_a_sprung_trap_is_its_own_event_not_a_skill_pop():
     assert match._trap_events({}) == []
 
 
+def test_an_item_gets_the_spotlight_and_a_stage_does_not():
+    """An ITEM is played from hand, does its thing and goes to the trash — the
+    same shape as a trap, and the same reason for playing it big in the middle
+    rather than as a small pop over an empty patch of board. A STAGE is still
+    sitting there afterwards, so it keeps the pop."""
+    from braverse import (STARTER_DECKS, Game, HeuristicAgent, SeatedAgent,
+                          actions as A)
+    from braverse.state import CardInstance
+
+    db = default_db()
+    config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
+                         pilots=["heuristic", "heuristic"], seed=1, delay=0.0)
+    match = Match(config, db)
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=1)
+    game.setup()
+    match.game = game
+
+    hand = game.state.players[0].hand
+    item = CardInstance.make("ST8-014", 0)      # Cape of the Vanquisher, ITEM
+    stage = CardInstance.make("ST8-020", 0)     # Dark Enchantress Laboratory
+    hand += [item, stage]
+
+    match._note_skill(A.PlaySupportCard(item.uid))
+    match._note_skill(A.PlaySupportCard(stage.uid))
+
+    kinds = [e["type"] for e in match._queued]
+    assert kinds == ["item", "skill"], kinds
+    assert match._queued[0]["name"] == "Cape of the Vanquisher"
+    # And it is long enough on screen that a bot does not move under it.
+    assert scene_seconds([match._queued[0]]) > scene_seconds([match._queued[1]])
+
+
+def test_a_cookie_arriving_is_its_own_event():
+    """Every zone a Cookie can arrive from means the same thing on the board,
+    so the arrival is read off a diff the way a faint is. An 【Awaken】 keeps
+    the host's uid, so restacking one is correctly not an arrival."""
+    was = {"players": [{"battle": [{"uid": 1, "card": card_stub(1)}]},
+                       {"battle": []}]}
+    now = {"players": [{"battle": [{"uid": 1, "card": card_stub(1)},
+                                   {"uid": 2, "card": card_stub(2)}]},
+                       {"battle": []}]}
+    events = Match._summon_events(was, now)
+    assert len(events) == 1
+    assert events[0]["type"] == "summon" and events[0]["cookie"] == 2
+    assert events[0]["owner"] == 0
+    # The dust takes the Cookie's colour, so the event has to carry it.
+    assert "color" in events[0]
+    assert Match._summon_events(was, was) == []
+    assert Match._summon_events(None, now) == []
+
+
 def test_bots_wait_for_the_whole_scene_not_a_fixed_beat():
     """The pause a bot takes scales with what the browser has to animate."""
     attack = scene_seconds([{"type": "attack"}])

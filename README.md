@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.7
+Current Version: 0.2.9
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -52,7 +52,9 @@ There are many things that are still needing to be updated and reworked, but I i
     - [The log says how much damage landed, and what dealt it](#the-log-says-how-much-damage-landed-and-what-dealt-it)
     - ["HP cannot reach 0" does not stop the damage](#hp-cannot-reach-0-does-not-stop-the-damage)
     - [The mulligan](#the-mulligan)
+    - [One card turned is one point of damage](#one-card-turned-is-one-point-of-damage)
     - [A sprung trap owns the middle of the table](#a-sprung-trap-owns-the-middle-of-the-table)
+    - [A Cookie lands rather than appears](#a-cookie-lands-rather-than-appears)
     - [Reveals are recorded as the card turns](#reveals-are-recorded-as-the-card-turns)
     - [Healing is cards, not a bigger Cookie](#healing-is-cards-not-a-bigger-cookie)
     - [A trap or a block, not both — and a block that costs a rest](#a-trap-or-a-block-not-both--and-a-block-that-costs-a-rest)
@@ -413,6 +415,26 @@ some people cannot tell two of them apart at any size. The substitution lives in
 version that covered only some of the places these tokens appear would be worse
 than none: the reader stops trusting which is which. The deck builder shares
 that function, so it came along for free.
+
+**The card back is yours to supply.** The CDN behind `fetch_images.py` serves
+card *fronts*, keyed on card id; it has nothing for the reverse, and neither
+does anywhere else this project can reasonably fetch from. So the viewer draws
+its own sleeve — that is what the Table tab is full of — and looks for
+`card_images/card_back.webp` on the way up. Put the real thing there and every
+face-down card on the board uses it, with the drawn sleeve as the fallback for
+anyone who has not. `python fetch_images.py --card-back <url-or-path>` will put
+it there from a URL or a local file. It is probed once rather than per card,
+and the image stays out of the repo the same way all the other card art does.
+
+**A face-up pile shows a face-up pile.** The trash, the break area and the
+EXTRA deck are public, so each draws its top card face up on a stack three deep.
+The two cards underneath were drawn as full card *backs*, offset up and to the
+right — so the right-hand sliver of a face-up pile was a face-down sleeve, and
+pointing at that edge showed nothing and looked like the pile was face down.
+Underneath a face-up top card they are paper edges now, with no sleeve on them,
+and the layers are inert: the pile itself owns the hover, so anywhere you point
+at it — including the sliver — previews the top card. The deck keeps its backs,
+because that one really is face down.
 
 **Questions about your hand are answered with your hand.** Discarding, opening
 with a Cookie, fielding a replacement when one faints — all the same gesture:
@@ -885,6 +907,27 @@ one — every number in this README would move, and the bots would not play any
 better for it. Same carve-out, and the same reasoning, as
 ["up to N"](#up-to-n-is-a-choice-of-which-and-of-how-many).
 
+### One card turned is one point of damage
+
+Worth writing down plainly, because it is easy to talk yourself into the other
+reading and I did. Damage turns HP cards one at a time, and **each card turned
+spends one point of the hit**. A FLIP that heals its host as it turns puts the
+HP straight back on, but the point is spent either way. So the hit ends when
+the damage is used up *or* the Cookie is at 0, whichever comes first:
+
+```
+T1 P0 FLIP! Blue Slushy Cookie
+T1 P0 [Blue Slushy Cookie] Red Panna Cotta Cookie gains +1 HP — 1 HP
+   ... four times over ...
+T1 P0 Red Panna Cotta Cookie takes 4 attack damage — 1 HP left
+```
+
+Four damage into a 1 HP Cookie, four cards turned, four heals paid for, and the
+Cookie is still standing on 1. The alternative reading — that the hit keeps
+going until the Cookie is at `start - damage`, so the heals only delay it — is
+a different game, and a worse one: it makes every healing FLIP in the pool
+worthless against the hit that reveals it.
+
 ### A sprung trap owns the middle of the table
 
 A trap is the only card that fires on someone else's turn, in the middle of
@@ -901,6 +944,23 @@ trap comes up gold and your opponent's red, so which way it cuts is readable
 before the name is. The veil is sized onto the visible part of the board rather
 than the window, so the log stays lit and a scrolled table still gets the card
 on screen.
+
+**An ITEM gets the same spotlight**, in gold, because it is the same shape of
+card: played from hand, does its thing, straight to the trash. A STAGE keeps
+the small pop — it is still sitting there afterwards to be looked at — and so
+does a Cookie's own 【Activate】, which pops over the Cookie that used it.
+
+### A Cookie lands rather than appears
+
+Fielding a Cookie is the only way anyone ever gets one, and it used to happen
+between two frames. It is an event of its own now — read off a diff, like a
+faint, because a Cookie can arrive from hand, the trash, the break area, the
+support area or the EXTRA deck and all of those mean the same thing from across
+the table. The card drops in with a squash, glows in its own colour, and throws
+a burst of dust and a flattened shockwave ring out from under it, coloured by
+the Cookie: red for {R}, blue for {B}, and so on down to a pale neutral for a
+colourless one. An 【Awaken】 keeps the host Cookie's uid, so restacking one is
+correctly not an arrival.
 
 ### Reveals are recorded as the card turns
 

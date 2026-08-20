@@ -598,9 +598,13 @@ def test_a_flip_that_names_its_host_still_means_the_host():
     host.hp_cards.append(parfait)
 
     hp_before = host.remaining_hp
+    game.state.events.clear()
     game.deal_damage(host, 1, source_player=1)
-    # One card off for the damage, one back on from the flip: net unchanged.
+    # One card off for the damage, one back on from the flip: net unchanged,
+    # and the heal names the host rather than the card that was revealed.
     assert host.remaining_hp == hp_before, "the host was not the one healed"
+    heals = [e for e in game.state.events if e["kind"] == "heal"]
+    assert [e["cookie"] for e in heals] == [host.uid], heals
     assert parfait in player.trash, "a healing flip stays in the trash"
 
 
@@ -841,17 +845,22 @@ def test_healing_refills_the_pile_without_raising_printed_hp():
                       "amount": 2, "left": printed + 1}]
 
 
-def test_damage_past_the_pile_keeps_going_when_a_flip_heals_the_host():
-    """A FLIP that hands its host a card back mid-hit does not end the hit: the
-    rest of the damage turns the cards the heal just paid for."""
+def test_one_card_turned_is_one_point_of_damage_spent():
+    """Four damage into a 1 HP Cookie whose pile keeps healing.
+
+    Each card turned spends one point of the hit. A FLIP that hands its host a
+    card back as it turns puts the HP straight back on — but the point is spent
+    either way — so the hit runs until the damage is used up *or* the Cookie is
+    at 0, whichever comes first. Heal on every card and a 4-damage swing turns
+    four cards and leaves the Cookie standing on the fourth.
+    """
     db = default_db()
     game = new_game(seed=5, db=db)
-    _plain_pile(game, db)
     player = game.state.players[1]
     cookie = player.battle[0]
 
     class SaysYes:
-        """Pays the FLIP's <Discard 1 card.> and discards from the front."""
+        """Pays every FLIP's <Discard 1 card.>"""
 
         def choose_action(self, state, options):
             return options[0]
@@ -860,26 +869,44 @@ def test_damage_past_the_pile_keeps_going_when_a_flip_heals_the_host():
             return options[0]
 
     game._controllers[1] = SaysYes()
+    # One HP, and a deck of nothing but healing FLIPs — so every card the hit
+    # turns hands one straight back.
     while cookie.hp_cards:
         player.trash.append(cookie.hp_cards.pop())
-    # Two plain cards under one healing FLIP, so the pile is 2 HP deep and the
-    # third point of damage only has a card to turn because the FLIP healed.
-    for card_id in ("ST8-011", "ST8-011", "ST8-007"):
-        card = CardInstance.make(card_id, 1)
-        card.face_up = False
-        cookie.hp_cards.append(card)
+    card = CardInstance.make("ST8-007", 1)
+    card.face_up = False
+    cookie.hp_cards.append(card)
+    player.deck = [CardInstance.make("ST8-007", 1) for _ in range(10)]
+    player.hand = [CardInstance.make("ST8-011", 1) for _ in range(10)]
     assert db["ST8-007"].is_flip
 
-    flip = cookie.hp_cards[-1]
-    game.deal_damage(cookie, 3, source_player=0, kind="attack")
-    assert flip in player.trash
-    # Three cards turned off a two-card pile: the healed card paid for the
-    # third point, and one of the originals is still down there holding it up.
-    assert "takes 3 attack damage" in game.state.log[-1]
-    assert "(of " not in game.state.log[-1]
-    assert cookie in player.battle, "the healed card should have absorbed the third"
+    game.state.events.clear()
+    game.deal_damage(cookie, 4, source_player=0, kind="attack")
+
+    turned = [e for e in game.state.events if e["kind"] == "reveal"]
+    heals = [e for e in game.state.events if e["kind"] == "heal"]
+    assert len(turned) == 4, "one card per point of damage"
+    assert len(heals) == 4, "every one of them healed"
+    assert cookie in player.battle, "it healed on the last card, so it is up"
     assert cookie.remaining_hp == 1
-    assert cookie.max_hp(db) == db[cookie.card.card_id].hp, "healing raised max HP"
+    assert "takes 4 attack damage" in game.state.log[-1], game.state.log[-1]
+
+
+def test_the_hit_stops_the_moment_the_cookie_is_out_of_cards():
+    """The other end of the same rule: an unhealed pile runs out and the rest
+    of the damage has nothing to land on."""
+    db = default_db()
+    game = new_game(seed=5, db=db)
+    _plain_pile(game, db)
+    player = game.state.players[1]
+    cookie = player.battle[0]
+    while len(cookie.hp_cards) > 2:
+        player.trash.append(cookie.hp_cards.pop())
+
+    game.deal_damage(cookie, 5, source_player=0, kind="attack")
+    assert cookie not in player.battle
+    line = next(l for l in game.state.log if "attack damage" in l)
+    assert "takes 2 attack damage (of 5)" in line, line
 
 
 # --- ST3-020 Divine Light Crystal -------------------------------------------

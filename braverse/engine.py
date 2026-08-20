@@ -31,6 +31,7 @@ from .state import CardInstance, Cookie, GameState, PlayerState
 _BLOCKER_COST_RE = None  # set lazily; see _blocker_cost
 
 
+
 class Game:
     def __init__(
         self,
@@ -772,13 +773,19 @@ class Game:
 
     def deal_damage(self, cookie: Cookie, amount: int, *, source_player: int,
                     kind: str = "effect") -> None:
-        """Reveal ``amount`` HP cards, one at a time, firing any FLIP as it turns.
+        """Take ``amount`` HP off this Cookie, one card at a time, firing any
+        FLIP as it turns.
 
-        The count logged is what was actually taken off the pile, which is not
-        always ``amount``: the pile can run dry, "HP cannot reach 0" stops one
-        short, and a FLIP can hand HP *back* mid-way, in which case the loop
-        keeps going and legitimately takes more cards than the Cookie started
-        with.
+        One card turned is one point of damage spent, and the hit runs until
+        **either** the damage is spent **or** the Cookie is at 0. Those come
+        apart because of healing: a FLIP that hands its host a card back as it
+        turns puts the HP straight back on — the card that turned is spent
+        either way, so a 4-damage hit into a 1 HP Cookie whose pile keeps
+        healing turns four cards and can leave the Cookie standing.
+
+        The count logged is what actually came off the pile, which is not
+        always ``amount``: the pile can run dry, or an effect can take the
+        target off the board mid-hit.
         """
         name = cookie.name(self.db)
         if cookie.damage_immune:
@@ -796,6 +803,8 @@ class Game:
             return
         dealt = 0
         for _ in range(amount):
+            # Out of cards is out of HP: the Cookie is down, and the rest of
+            # the damage has nothing to land on.
             if not cookie.hp_cards:
                 break
             card = cookie.hp_cards.pop()
@@ -829,20 +838,26 @@ class Game:
                        cookie: Cookie | None, kind: str = "effect",
                        target: Cookie | None = None) -> None:
         """`kind` separates a swing from everything else — a "Then, ..." rider,
-        a skill, a trap — so the log says which one hit you."""
+        a skill, a trap — so the log says which one hit you.
+
+        `dealt` is the cards that actually came off the pile, which is `asked`
+        unless the pile ran dry or the target left the board mid-hit.
+        """
+        landed = min(dealt, asked)
         if target is not None and dealt:
             self.state.events.append({
                 "kind": "damage",
                 "cookie": target.uid,
                 "owner": target.owner,
-                "amount": dealt,
+                "amount": landed,
+                "turned": dealt,
                 "source": kind,
                 "left": target.remaining_hp if cookie is not None else 0,
             })
         if dealt == 0:
             self.state.record(f"{name} takes no {kind} damage")
             return
-        line = f"{name} takes {dealt} {kind} damage"
+        line = f"{name} takes {landed} {kind} damage"
         if dealt < asked:
             line += f" (of {asked})"
         if cookie is not None:

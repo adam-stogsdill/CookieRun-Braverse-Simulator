@@ -264,6 +264,26 @@ function movePreview(event) {
 function hidePreview() { preview.classList.add("hidden"); }
 window.addEventListener("mousemove", (e) => { if (preview.dataset.follow) movePreview(e); });
 
+/* ------------------------------------------------------------- the card back */
+/* The real Braverse card back is not among the assets this project can fetch —
+ * the CDN behind `fetch_images.py` serves card *fronts*, keyed on card id, and
+ * has nothing for the reverse. So: drop the image in as
+ * `card_images/card_back.webp` and every face-down card in the viewer uses it,
+ * with the drawn sleeve underneath as the fallback for anyone who has not. It
+ * is probed once, not per card, and a miss costs one 404 for the session.
+ */
+const CARD_BACK_ART = "/card_images/card_back.webp";
+
+function findCardBack() {
+  const probe = new Image();
+  probe.onload = () => {
+    document.body.style.setProperty("--card-back-art", `url("${CARD_BACK_ART}")`);
+    document.body.classList.add("has-cardback");
+  };
+  probe.src = CARD_BACK_ART;
+}
+findCardBack();
+
 /* ------------------------------------------------------------ card markup */
 function faceDown(size) {
   const node = h("div", "card back" + (size ? " " + size : ""));
@@ -369,15 +389,37 @@ function zone(cls, label) {
 
 function stack(label, count, opts = {}) {
   const node = h("div", "stack" + (opts.onClick ? " clickable" : "") + (opts.danger ? " danger" : ""));
-  const art = h("div", "stackart");
+  /* A pile is drawn three cards deep so it reads as a pile. On a face-up one —
+   * trash, break area, the EXTRA deck — the two underneath used to be drawn as
+   * full card *backs*, offset up and to the right of the top card, so the right
+   * edge of a face-up pile was a face-down sleeve: point at that edge and the
+   * pile looked face down. Underneath a face-up top card they are paper edges
+   * now, with no sleeve on them, and the whole pile previews the top card
+   * wherever you point at it rather than only over the card itself. */
+  const showsFront = Boolean(opts.faceUp && opts.top);
+  const art = h("div", "stackart" + (showsFront ? " faceup" : ""));
   if (count > 0) {
     for (let i = Math.min(count, 3) - 1; i >= 0; i--) {
-      const back = opts.faceUp && i === 0 && opts.top ? cardNode(opts.top, { small: true }) : faceDown();
+      const layer = !showsFront ? faceDown()
+        : i === 0 ? cardNode(opts.top, { small: true })
+        : h("div", "card edge");
       // Offsets go through custom properties, not `transform`, so the stylesheet
       // can still turn the card around on a flipped opponent mat.
-      back.style.setProperty("--ox", i * 2 + "px");
-      back.style.setProperty("--oy", -i * 2 + "px");
-      art.appendChild(back);
+      layer.style.setProperty("--ox", i * 2 + "px");
+      layer.style.setProperty("--oy", -i * 2 + "px");
+      art.appendChild(layer);
+    }
+    if (showsFront) {
+      // The layers are inert (see the stylesheet), so this is the one thing
+      // the pointer can land on and it always means the top card.
+      art.addEventListener("mouseenter", (event) => {
+        preview.dataset.follow = "1";
+        showPreview(opts.top, event);
+      });
+      art.addEventListener("mouseleave", () => {
+        delete preview.dataset.follow;
+        hidePreview();
+      });
     }
   } else {
     const ghost = h("div", "card back");
@@ -609,8 +651,10 @@ const DAMAGE_HOLD = 1000; // how long the number floats
 const SKILL_MS = 400;     // between one skill popping up and the next
 const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
-const TRAP_MS = 1000;     // before whatever the trap did starts happening
-const TRAP_HOLD = 2200;   // how long the sprung trap owns the middle of the table
+const TRAP_MS = 1000;     // before whatever the card did starts happening
+const TRAP_HOLD = 2200;   // how long a sprung trap or item owns the middle
+const SUMMON_MS = 350;    // between one Cookie landing on the board and the next
+const SUMMON_HOLD = 1000; // how long the dust hangs in the air
 
 const MAX_REVEALS = 6;    // the most cards one scene turns over on screen
 
@@ -649,11 +693,17 @@ function playEvents(events) {
         clock += SKILL_MS;
         break;
       case "trap":
-        playTrap(event, clock);
+      case "item":
+        playSpotlight(event, clock);
         holds(clock, TRAP_HOLD);
-        // Everything the trap does waits for it to land, so the card is on
-        // screen before the damage or the debuff it caused.
+        // Everything the card does waits for it to land, so it is on screen
+        // before the damage or the debuff it caused.
         clock += TRAP_MS;
+        break;
+      case "summon":
+        playSummon(event, clock);
+        holds(clock, SUMMON_HOLD);
+        clock += SUMMON_MS;
         break;
       case "attack":
         playAttack(event, clock);
@@ -837,6 +887,75 @@ function playHeal(event, delay = 0) {
   }, delay);
 }
 
+/* A Cookie arriving on the board. It lands rather than appears: the card drops
+ * in with a squash, the slot flashes in the Cookie's own colour, and a burst of
+ * dust in that colour throws out from under it. Every zone a Cookie can arrive
+ * from — hand, trash, break area, support, the EXTRA deck — gets the same beat,
+ * because from the other side of the table they all mean the same thing. */
+const DUST = {
+  RED: "#ef5b52", BLUE: "#4aa8ff", GREEN: "#4fc275", YELLOW: "#f0c33c",
+  PURPLE: "#b07bff", BLACK: "#8a90a3", PURE: "#e8eefc", "": "#cdd5e3",
+};
+
+function playSummon(event, delay = 0) {
+  setTimeout(() => {
+    const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
+    Sfx.play("place");
+    const anchor = host || document.querySelector(`#side-${event.owner} .zone.battle`);
+    if (!anchor) return;
+    const colour = DUST[(event.color || "").toUpperCase()] || DUST[""];
+    if (host) {
+      host.style.setProperty("--dust", colour);
+      host.classList.add("landing");
+      setTimeout(() => host.classList.remove("landing"), 700);
+    }
+
+    const bounds = el("#table").getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
+    const cx = at.left + at.width / 2 - bounds.left;
+    const cy = at.top + at.height / 2 - bounds.top;
+
+    // Dust from under the card: thrown out and slightly up, then dragged down.
+    // Sizes and angles are jittered because a ring of identical dots reads as a
+    // loading spinner rather than as something hitting a table.
+    // A ring of light thrown out along the table, under the dust.
+    const ring = h("div", "dustring");
+    ring.style.left = cx + "px";
+    ring.style.top = cy + at.height * 0.36 + "px";
+    ring.style.width = at.width * 1.5 + "px";
+    ring.style.height = at.width * 0.5 + "px";
+    ring.style.borderColor = colour;
+    ring.dataset.born = performance.now();
+    el("#fx").appendChild(ring);
+    setTimeout(() => ring.remove(), 900);
+
+    for (let i = 0; i < 26; i++) {
+      const bit = h("div", "dust");
+      const size = 4 + Math.random() * 7;
+      const angle = Math.PI * (0.08 + Math.random() * 0.84);   // outward, mostly sideways
+      const reach = at.width * (0.55 + Math.random() * 1.05);
+      const dx = Math.cos(angle) * reach * (Math.random() < 0.5 ? -1 : 1);
+      const dy = -Math.sin(angle) * reach * 0.42;
+      bit.style.width = size + "px";
+      bit.style.height = size + "px";
+      bit.style.left = cx + "px";
+      bit.style.top = cy + at.height * 0.34 + "px";
+      bit.style.background = colour;
+      bit.dataset.born = performance.now();
+      el("#fx").appendChild(bit);
+      bit.animate([
+        { transform: "translate(-50%, -50%) scale(.6)", opacity: 0 },
+        { transform: `translate(calc(-50% + ${dx * 0.55}px), calc(-50% + ${dy}px)) scale(1)`,
+          opacity: 1, offset: 0.28 },
+        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${-dy * 0.5 + at.height * 0.3}px)) scale(.35)`,
+          opacity: 0 },
+      ], { duration: 620 + Math.random() * 340, easing: "cubic-bezier(.15,.7,.35,1)" })
+        .finished.then(() => bit.remove()).catch(() => bit.remove());
+      setTimeout(() => bit.remove(), 1100);
+    }
+  }, delay);
+}
+
 /* A drawn card, travelling from the deck to the hand. It stays face down the
  * whole way — a draw is secret, and the event carries only a count, so there is
  * no face to show even for your own cards until the hand redraws underneath. */
@@ -903,13 +1022,15 @@ function playSkill(event, delay = 0) {
   }, delay);
 }
 
-/* A trap going off. The one card that fires on someone else's turn, in the
- * middle of their attack, so it does not get the small pop a skill gets: the
+/* A trap or an item going off. Both are played from hand, do their thing and
+ * go straight to the trash, so neither gets the small pop a skill gets: the
  * table dims, the card slams down twice the size in the middle of the board,
- * and the swing it interrupted carries on underneath it. */
-function playTrap(event, delay = 0) {
+ * and whatever it did plays out underneath it. A trap is red and an item gold,
+ * because a trap is the one that fires on someone else's turn. */
+function playSpotlight(event, delay = 0) {
+  const isTrap = event.type === "trap";
   setTimeout(() => {
-    Sfx.play("trap");
+    Sfx.play(isTrap ? "trap" : "skill");
     const table = el("#table");
     if (!table) return;
 
@@ -930,7 +1051,8 @@ function playTrap(event, delay = 0) {
     el("#fx").appendChild(veil);
     setTimeout(() => veil.remove(), TRAP_HOLD);
 
-    const node = h("div", "trappop" + (event.owner === state.mySeat ? " mine" : ""));
+    const node = h("div", "trappop " + (isTrap ? "trap" : "item")
+                   + (event.owner === state.mySeat ? " mine" : ""));
     node.style.left = box.left + box.width / 2 + "px";
     node.style.top = (top + bottom) / 2 + "px";
     const img = h("img");
@@ -940,7 +1062,7 @@ function playTrap(event, delay = 0) {
       node.appendChild(h("div", "fallback", event.card.name));
     };
     node.appendChild(img);
-    node.appendChild(h("div", "trapname", "TRAP"));
+    node.appendChild(h("div", "trapname", isTrap ? "TRAP" : "ITEM"));
     node.appendChild(h("div", "tagline", event.name || event.card.name));
     node.dataset.born = performance.now();
     el("#fx").appendChild(node);

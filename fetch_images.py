@@ -4,6 +4,7 @@
     python fetch_images.py                    # every card -> card_images/
     python fetch_images.py --sets ST8 ST9     # just those sets
     python fetch_images.py --no-alt-art       # skip @1/@2 reprints
+    python fetch_images.py --card-back URL    # the reverse -> card_back.webp
 
 Images come from the same CDN the cookierun.gg card browser uses:
 ``https://static.dotgg.gg/cookierun/cards/<card id>.webp``. The URL is keyed on
@@ -11,6 +12,12 @@ the exact card id, alt arts included, so `BS8-104@1` resolves on its own.
 
 Downloads are skipped when the file already exists, so re-running only fetches
 what is missing — interrupt it freely.
+
+The one thing that CDN does not serve is the card *back*: it is keyed on card
+id and every id is a front. `--card-back` takes a URL (or a local path) and
+saves it as `card_images/card_back.webp`, which the viewer picks up on its own
+and uses for every face-down card. Without it the viewer draws its own sleeve,
+which is what it has always done.
 """
 
 from __future__ import annotations
@@ -72,6 +79,24 @@ def download(card_id: str, out_dir: Path, retries: int = 3) -> tuple[str, str]:
     return card_id, "error"
 
 
+def fetch_card_back(source: str, out_dir: Path) -> str:
+    """Save the card back as `card_back.webp`, from a URL or a local file."""
+    target = out_dir / "card_back.webp"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if "://" not in source:
+        data = Path(source).expanduser().read_bytes()
+    else:
+        request = urllib.request.Request(source, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if "image" not in response.headers.get("Content-Type", ""):
+                return f"not an image: {response.headers.get('Content-Type')}"
+            data = response.read()
+    if not data:
+        return "empty"
+    target.write_bytes(data)
+    return f"ok -> {target} ({len(data) // 1024} KB)"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
@@ -81,7 +106,14 @@ def main() -> None:
                         help="skip @1/@2 alternate printings")
     parser.add_argument("--workers", type=int, default=8,
                         help="parallel downloads; keep this modest")
+    parser.add_argument("--card-back", metavar="URL_OR_PATH",
+                        help="the reverse of a card, saved as card_back.webp; "
+                             "the viewer uses it for every face-down card")
     args = parser.parse_args()
+
+    if args.card_back:
+        print("card back:", fetch_card_back(args.card_back, args.out))
+        return
 
     ids = card_ids(args.csv, set(args.sets) if args.sets else None,
                    alt_art=not args.no_alt_art)
