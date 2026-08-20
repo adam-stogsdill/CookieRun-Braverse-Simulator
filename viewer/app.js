@@ -539,6 +539,8 @@ const DAMAGE_HOLD = 1000; // how long the number floats
 const SKILL_MS = 400;     // between one skill popping up and the next
 const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
+const TRAP_MS = 1000;     // before whatever the trap did starts happening
+const TRAP_HOLD = 2200;   // how long the sprung trap owns the middle of the table
 
 const MAX_REVEALS = 6;    // the most cards one scene turns over on screen
 
@@ -575,6 +577,13 @@ function playEvents(events) {
         playSkill(event, clock);
         holds(clock, SKILL_HOLD);
         clock += SKILL_MS;
+        break;
+      case "trap":
+        playTrap(event, clock);
+        holds(clock, TRAP_HOLD);
+        // Everything the trap does waits for it to land, so the card is on
+        // screen before the damage or the debuff it caused.
+        clock += TRAP_MS;
         break;
       case "attack":
         playAttack(event, clock);
@@ -821,6 +830,51 @@ function playSkill(event, delay = 0) {
     node.dataset.born = performance.now();
     el("#fx").appendChild(node);
     setTimeout(() => node.remove(), SKILL_HOLD);
+  }, delay);
+}
+
+/* A trap going off. The one card that fires on someone else's turn, in the
+ * middle of their attack, so it does not get the small pop a skill gets: the
+ * table dims, the card slams down twice the size in the middle of the board,
+ * and the swing it interrupted carries on underneath it. */
+function playTrap(event, delay = 0) {
+  setTimeout(() => {
+    Sfx.play("trap");
+    const table = el("#table");
+    if (!table) return;
+
+    // The part of the table that is actually on screen. Centring on the window
+    // would put the card behind the side panel on a wide layout; centring on
+    // the table element would put it off-screen on a scrolled one.
+    const box = table.getBoundingClientRect();
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, window.innerHeight);
+
+    // The board dims, not the whole window — the log stays readable.
+    const veil = h("div", "trapveil");
+    veil.style.left = box.left + "px";
+    veil.style.top = top + "px";
+    veil.style.width = box.width + "px";
+    veil.style.height = (bottom - top) + "px";
+    veil.dataset.born = performance.now();
+    el("#fx").appendChild(veil);
+    setTimeout(() => veil.remove(), TRAP_HOLD);
+
+    const node = h("div", "trappop" + (event.owner === state.mySeat ? " mine" : ""));
+    node.style.left = box.left + box.width / 2 + "px";
+    node.style.top = (top + bottom) / 2 + "px";
+    const img = h("img");
+    img.src = event.card.img;
+    img.onerror = () => {
+      img.remove();
+      node.appendChild(h("div", "fallback", event.card.name));
+    };
+    node.appendChild(img);
+    node.appendChild(h("div", "trapname", "TRAP"));
+    node.appendChild(h("div", "tagline", event.name || event.card.name));
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+    setTimeout(() => node.remove(), TRAP_HOLD);
   }, delay);
 }
 

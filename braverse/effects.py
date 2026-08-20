@@ -590,6 +590,9 @@ class Ctx:
             # Face up on the table, so the board shows it — but not as a FLIP,
             # because no FLIP fires on this path.
             self.game.record_reveal(cookie, card)
+            # Emptying a pile this way is still the pile reaching 0, so the
+            # floor holds here exactly as it does against damage.
+            self.game.hold_the_floor(cookie)
         if not cookie.hp_cards:
             self.game.faint(cookie)
 

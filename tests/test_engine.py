@@ -883,34 +883,110 @@ def test_damage_past_the_pile_keeps_going_when_a_flip_heals_the_host():
 
 
 # --- ST3-020 Divine Light Crystal -------------------------------------------
-def test_divine_light_crystal_keeps_its_cookie_alive_through_the_damage():
-    from braverse.cost import Cost
-    from braverse.effects import Ctx, Trigger, get_effect
+def test_divine_light_crystal_survives_a_lethal_swing():
+    """Played the way a player plays it: sprung in the response window, with
+    exactly the support its printed cost needs and not a card more.
+
+    The first version of this test called the effect function directly, which
+    skipped the engine's own payment of the trap's play cost — so it passed
+    while the card did nothing in a real game. The body was paying `<{G}{G}>` a
+    second time, and silently doing nothing when it could not.
+    """
+    db = default_db()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0), _SpringsTheTrap()],
+                db=db, seed=4)
+    game.setup()
+    _plain_pile(game, db)
+
+    defender = game.state.players[1]
+    defender.hand = [CardInstance.make("ST3-020", 1)]
+    defender.support = [CardInstance.make("ST3-012", 1) for _ in range(2)]
+    for card in defender.support:
+        card.rested = False
+    assert db["ST3-012"].color is Color.GREEN
+    assert str(db["ST3-020"].play_cost) == "{G}{G}", "exactly enough, no spare"
+
+    victim = defender.battle[0]
+    while len(victim.hp_cards) > 1:
+        defender.trash.append(victim.hp_cards.pop())
+
+    attacker_side = game.state.players[0]
+    attacker = attacker_side.battle[0]
+    attacker_side.support = [CardInstance.make("ST8-011", 0) for _ in range(5)]
+    for card in attacker_side.support:
+        card.rested = False
+
+    game._do_attack(A.Attack(attacker.uid, victim.uid))
+
+    assert victim in defender.battle, "Divine Light Crystal let it faint"
+    assert victim.remaining_hp >= 1
+    assert not defender.break_area
+    assert any("HP cannot reach 0" in line for line in game.state.log), \
+        game.state.log[-5:]
+
+
+def test_the_floor_also_holds_against_hp_placed_into_the_trash():
+    """"Place N cards from the top of that Cookie's HP into the trash" empties
+    a pile just as surely as damage does, and the card says HP cannot reach 0
+    — not "cannot reach 0 from damage"."""
+    from braverse.effects import Ctx
 
     db = default_db()
-    game = new_game(seed=8, db=db)
-    _plain_pile(game, db)
-    player = game.state.players[0]
-    cookie = player.battle[0]
-    player.support = [CardInstance.make("ST3-004", 0) for _ in range(2)]
-    for card in player.support:
-        card.rested = False
-    assert db["ST3-004"].color is Color.GREEN, "the trap is paid in {G}{G}"
+    game = new_game(seed=9, db=db)
+    them = game.state.players[1]
+    victim = them.battle[0]
+    victim.hp_cannot_reach_zero = True
+    ctx = Ctx(game=game, state=game.state, db=db, me=game.state.players[0], opp=them)
 
-    fn = get_effect("ST3-020", Trigger.ITEM)
-    assert fn is not None, "the trap has to be implemented to do anything"
-    fn(Ctx(game=game, state=game.state, db=db, me=player,
-           opp=game.state.players[1], trigger=Trigger.ITEM.value))
-    assert cookie.hp_cannot_reach_zero
-    assert all(c.rested for c in player.support), "the {G}{G} was not paid"
+    ctx.trash_hp(victim, victim.remaining_hp + 2)
+    assert victim in them.battle, "the pile was stripped to nothing"
+    assert victim.remaining_hp >= 1
 
-    swing = cookie.remaining_hp + 2
-    game.deal_damage(cookie, swing, source_player=1, kind="attack")
-    assert cookie in player.battle, "Divine Light Crystal let it faint"
-    assert cookie.remaining_hp >= 1
-    # Every point still turned a card — the floor replaces the cards as they
-    # are spent, it does not swallow the damage. `(of N)` would say otherwise.
-    assert f"takes {swing} attack damage" in game.state.log[-1]
+
+def test_no_hand_written_item_pays_its_own_play_cost_twice():
+    """The `<...>` at the *front* of an ITEM or TRAP is the card's play cost.
+
+    The engine rests support for it before the body ever runs, so a body that
+    also calls `ctx.pay` for the same cost charges twice — and, because a
+    failed payment just returns, the card silently does nothing. Two cards had
+    that bug. This is the check that keeps a third from arriving.
+    """
+    import inspect
+    import re
+
+    from braverse.cards import default_db as _db
+    from braverse.effects import _REGISTRY, Trigger
+
+    db = _db()
+    offenders = []
+    for (card_id, trigger), fn in _REGISTRY.items():
+        if trigger is not Trigger.ITEM or not hasattr(fn, "__code__"):
+            continue        # a compiled Program has no source to read
+        defn = db[card_id]
+        cost = str(defn.play_cost)
+        if not cost:
+            continue
+        source = inspect.getsource(fn)
+        paid = re.findall(r'Cost\.parse\("([^"]+)"\)', source)
+        # A card may legitimately pay the same symbol again for a *later*
+        # bracket — "Then, <{Y}> You can 【Equip】 ..." — so only a card whose
+        # printed text has one bracketed cost is an offender.
+        brackets = re.findall(r"<([^>]*)>", defn.description or "")
+        if cost in paid and len(brackets) == 1:
+            offenders.append((card_id, defn.name, cost))
+    assert not offenders, f"these pay their own play cost twice: {offenders}"
+
+
+class _SpringsTheTrap:
+    """A defender that always springs, and always picks the first option."""
+
+    def choose_action(self, state, options):
+        trap = next((o for o in options if isinstance(o, A.PlayTrap)), None)
+        return trap or next((o for o in options if isinstance(o, A.Pass)), options[0])
+
+    def choose(self, state, prompt, options, *, optional):
+        return options[0]
 
 
 # --- the mulligan -----------------------------------------------------------
@@ -1125,6 +1201,40 @@ def test_a_trap_and_a_block_are_alternatives_not_a_combination():
     game._responded = "trap"
     assert [type(o) for o in game._response_actions(defender)] == [A.Pass], \
         "a block was still on offer after springing a trap"
+
+
+def test_a_blocker_attacked_head_on_can_still_spring_a_trap():
+    """Only *activating* 【Blocker】 spends the defender's answer to an attack.
+
+    A Cookie that merely has 【Blocker】 printed on it and is attacked directly —
+    the opponent going for the blocker rather than around it — has not
+    activated anything, so the trap is still there to be sprung. It is the
+    other side of the same rule as
+    `test_a_trap_and_a_block_are_alternatives_not_a_combination`, and worth
+    pinning separately: the two read almost the same in the code and a change
+    to one is very easy to make in the other by accident.
+    """
+    db = default_db()
+    game, defender = _attack_setup(db)
+    attacker = game.state.players[0].battle[0]
+    blocker = defender.battle[1]
+    assert blocker.has_marker(db, Marker.BLOCKER)
+
+    # The attack is aimed at the Blocker itself.
+    game._pending_attack = (attacker, blocker)
+    game._response_player = 1
+    game._trap_used = 0
+    game._responded = None
+
+    kinds = {type(o).__name__ for o in game._response_actions(defender)}
+    assert "PlayTrap" in kinds, "the trap was taken away for nothing"
+    # And it cannot block with *itself* — that is not what a Blocker does.
+    assert "Block" not in kinds
+
+    # Springing it still closes off blocking with some other Cookie, which is
+    # the half of the rule that does hold.
+    game._responded = "trap"
+    assert {type(o).__name__ for o in game._response_actions(defender)} == {"Pass"}
 
 
 def test_the_log_says_when_a_swing_was_shaved():

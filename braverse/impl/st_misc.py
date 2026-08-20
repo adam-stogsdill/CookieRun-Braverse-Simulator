@@ -196,18 +196,22 @@ def space_doughnut_trashed(ctx: Ctx) -> None:
 
 # --- ST3-020 Divine Light Crystal (TRAP) ------------------------------------
 @effect("ST3-020", Trigger.ITEM)
-@playable_if(lambda ctx: bool(ctx.own_cookies())
-             and ctx.can_pay(Cost.parse("{G}{G}")))
+@playable_if(lambda ctx: bool(ctx.own_cookies()))
 def divine_light_crystal(ctx: Ctx) -> None:
     """<{G}{G}> Select up to 1 of your Cookies. That Cookie's HP cannot reach 0
     during this battle.
+
+    The leading `<{G}{G}>` is the card's *play* cost, which the engine has
+    already rested support for by the time this body runs — paying it again
+    here made the trap do nothing at all unless its controller happened to have
+    four green support up, and fail silently when they did not.
 
     The Cookie keeps taking the damage — every card the hit would turn is still
     turned, FLIPs and all — it just cannot be the last one: `deal_damage` pulls
     a replacement off the deck whenever the pile would empty.
     """
     target = ctx.select_own(prompt="Divine Light Crystal: protect one of your Cookies")
-    if target is None or not ctx.pay(Cost.parse("{G}{G}")):
+    if target is None:
         return
     target.hp_cannot_reach_zero = True
     ctx.note(f"{target.name(ctx.db)}'s HP cannot reach 0 during this battle")

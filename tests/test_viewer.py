@@ -227,6 +227,34 @@ def test_a_faint_waits_for_a_revealed_card_to_clear():
     assert reveal_then_faint > scene_seconds([{"type": "faint"}])
 
 
+def test_a_sprung_trap_is_its_own_event_not_a_skill_pop():
+    """A trap is the one card that fires on someone else's turn, in the middle
+    of their attack, so the board plays it big and in the middle. That needs an
+    event type of its own — as a `skill` it was a small pop over on its owner's
+    half of the board, which is where it is *least* worth looking."""
+    import types
+
+    config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
+                         pilots=["heuristic", "heuristic"], seed=5, delay=0.0)
+    match = Match(config, default_db())
+    match.game = types.SimpleNamespace(state=types.SimpleNamespace(log=[
+        "T4 P0 Sea Fairy Cookie attacks Leek Cookie for 3",
+        "T4 P1 springs trap Divine Light Crystal",
+    ]))
+
+    events = match._trap_events({})
+    assert len(events) == 1
+    assert events[0]["type"] == "trap"
+    assert events[0]["owner"] == 1
+    assert events[0]["name"] == "Divine Light Crystal"
+    assert events[0]["card"]["id"] == "ST3-020"
+
+    # And the scene is long enough that the card is read before the bot moves.
+    assert scene_seconds(events) > scene_seconds([{"type": "skill"}])
+    # Read once: the same line does not fire the animation on every poll.
+    assert match._trap_events({}) == []
+
+
 def test_bots_wait_for_the_whole_scene_not_a_fixed_beat():
     """The pause a bot takes scales with what the browser has to animate."""
     attack = scene_seconds([{"type": "attack"}])

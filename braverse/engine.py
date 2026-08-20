@@ -819,12 +819,7 @@ class Game:
             # replaced off the deck rather than the hit being stopped one
             # short. The damage keeps turning cards — every FLIP in the pile
             # still fires — and the Cookie is still standing at the end of it.
-            if cookie.hp_cannot_reach_zero and not cookie.hp_cards:
-                before = len(cookie.hp_cards)
-                self._fill_hp(owner, cookie, 1)
-                if len(cookie.hp_cards) > before:
-                    self.state.record(f"{name}'s HP cannot reach 0 — 1 HP restored")
-                    self._record_heal(cookie, len(cookie.hp_cards) - before)
+            self.hold_the_floor(cookie)
         self._record_damage(name, dealt, amount, cookie, kind, cookie)
         if not cookie.hp_cards:
             self._faint(cookie)
@@ -852,6 +847,26 @@ class Game:
         if cookie is not None:
             line += f" — {cookie.remaining_hp} HP left"
         self.state.record(line)
+
+    def hold_the_floor(self, cookie: Cookie) -> bool:
+        """"That Cookie's HP cannot reach 0" — top the pile back up if it just
+        emptied.
+
+        Every path that can take a Cookie's last HP card calls this: damage,
+        and "place N cards from the top of that Cookie's HP into the trash",
+        which empties a pile just as surely without being damage. Returns True
+        if a card was put back.
+        """
+        if not cookie.hp_cannot_reach_zero or cookie.hp_cards:
+            return False
+        owner = self.state.players[cookie.owner]
+        self._fill_hp(owner, cookie, 1)
+        if not cookie.hp_cards:
+            return False            # the deck could not supply one
+        self.state.record(f"{cookie.name(self.db)}'s HP cannot reach 0"
+                          f" — 1 HP restored")
+        self._record_heal(cookie, len(cookie.hp_cards))
+        return True
 
     def record_reveal(self, cookie: Cookie, card: CardInstance, *,
                       flip: bool = False) -> None:

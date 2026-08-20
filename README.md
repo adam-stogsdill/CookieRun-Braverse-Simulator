@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.3
+Current Version: 0.2.5
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -52,6 +52,7 @@ There are many things that are still needing to be updated and reworked, but I i
     - [The log says how much damage landed, and what dealt it](#the-log-says-how-much-damage-landed-and-what-dealt-it)
     - ["HP cannot reach 0" does not stop the damage](#hp-cannot-reach-0-does-not-stop-the-damage)
     - [The mulligan](#the-mulligan)
+    - [A sprung trap owns the middle of the table](#a-sprung-trap-owns-the-middle-of-the-table)
     - [Reveals are recorded as the card turns](#reveals-are-recorded-as-the-card-turns)
     - [Healing is cards, not a bigger Cookie](#healing-is-cards-not-a-bigger-cookie)
     - [A trap or a block, not both — and a block that costs a rest](#a-trap-or-a-block-not-both--and-a-block-that-costs-a-rest)
@@ -812,9 +813,32 @@ standing at the end of it, every FLIP in the pile still fired, and `(of N)` no
 longer has a reason to be short. The cards it replaces come off the deck, which
 is a real cost — a big hit into the floor mills the protected player.
 
+The floor holds on every path that can empty a pile, not just damage: "place N
+cards from the top of that Cookie's HP into the trash" takes HP to 0 just as
+surely, so `Game.hold_the_floor` is called from `Ctx.trash_hp` too. The card
+says HP cannot reach 0, not "cannot reach 0 from damage".
+
 Divine Light Crystal itself was on `KNOWN_UNCODED` and did nothing at all: the
 trap was played, the `{G}{G}` was paid, and the Cookie fainted anyway. It is
 hand-written in `impl/st_misc.py` now.
+
+**And then it still did nothing**, for a different reason worth writing down.
+The `<{G}{G}>` printed at the front of an ITEM or a TRAP *is* that card's play
+cost — `CardDef.play_cost` — and the engine rests support for it before the
+effect body is ever called. The body paid it a second time. So the trap worked
+only for a player holding four green support, and when it did not work it
+failed the way a `<...>` cost always fails: silently, doing nothing. Two cards
+had that bug (ST3-020 and BS9-043) and `tests/test_engine.py` now has a
+structural check that no hand-written ITEM or TRAP body pays a cost equal to
+its own `play_cost` when the printed text has only one bracket.
+
+The test that was supposed to cover this card is the other half of the lesson.
+It called the effect function directly with support already on the board, which
+skipped the engine's payment entirely — and then *asserted the double charge*
+("the {G}{G} was not paid"). It passed for exactly as long as the card was
+broken. It goes through `_response_window` now, with exactly the two green
+support the printed cost needs and not a card more, which is the only version
+that fails when the card does.
 
 ### The mulligan
 
@@ -831,6 +855,23 @@ for it would replace every opening hand in every self-play game with a random
 one — every number in this README would move, and the bots would not play any
 better for it. Same carve-out, and the same reasoning, as
 ["up to N"](#up-to-n-is-a-choice-of-which-and-of-how-many).
+
+### A sprung trap owns the middle of the table
+
+A trap is the only card that fires on someone else's turn, in the middle of
+their attack, and half the time it is the thing that decides the attack. It was
+animated as a `skill` — the small pop that appears over the card that used it,
+on its owner's half of the board, which is where you are *least* likely to be
+looking while your own attack resolves.
+
+It has its own event type now. The board dims, the card slams down in the
+middle at twice its normal size with a `TRAP` banner and its name, and only
+then does the damage or the debuff it caused play out underneath — the trap
+takes a full second of the timeline before anything it did starts. Your own
+trap comes up gold and your opponent's red, so which way it cuts is readable
+before the name is. The veil is sized onto the visible part of the board rather
+than the window, so the log stays lit and a scrolled table still gets the card
+on screen.
 
 ### Reveals are recorded as the card turns
 

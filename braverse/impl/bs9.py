@@ -262,8 +262,7 @@ def heart_stained_with_lies(ctx: Ctx) -> None:
     Cookie's HP."""
     if ctx.me.break_level_total(ctx.db) < 4:
         return
-    if not ctx.pay(Cost.parse("{Y}")):
-        return
+    # The leading `<{Y}>` is this card's play cost, already paid to get here.
     holders = [c for c in ctx.opp.battle if c.equipment]
     if not holders:
         return

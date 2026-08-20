@@ -125,6 +125,12 @@ const Sfx = (() => {
       tone({ duration: 0.3, from: 520, to: 880, gain: 0.16, type: "sine" });
       tone({ at: 0.08, duration: 0.3, from: 780, to: 1180, gain: 0.1, type: "sine" });
     },
+    // a trap springing: a snap, then a low menacing swell under it
+    trap() {
+      burst({ duration: 0.06, from: 5200, to: 1800, q: 3.6, gain: 0.3 });
+      tone({ duration: 0.5, from: 300, to: 70, gain: 0.26, type: "sawtooth" });
+      tone({ at: 0.05, duration: 0.45, from: 180, to: 60, gain: 0.18, type: "triangle" });
+    },
     // a skill going off: two quick rising blips
     skill() {
       burst({ duration: 0.07, from: 1800, to: 3200, q: 1.4, gain: 0.2 });

@@ -758,6 +758,78 @@ body.online #reveal-label { display: none; }
   100% { transform: scale(1.1) translateY(-14px); opacity: 0; }
 }
 
+/* ------------------------------------------------------------ a sprung trap */
+/* A trap is the only card that fires on someone else's turn, in the middle of
+   their attack — and half the time it is the thing that decides the attack. So
+   it does not get the small pop a skill gets over on its owner's half: the
+   table dims, and the card slams down in the middle at twice the size. */
+/* Fixed, not absolute: the table scrolls on a short window, and a trap that
+   lands off-screen is worse than no animation at all. */
+.trapveil {
+  /* Sized onto the visible part of the board in JS, so the side panel and the
+     toolbar stay lit while the board goes dark. */
+  position: fixed; z-index: 72; pointer-events: none; border-radius: 10px;
+  background: radial-gradient(ellipse at center,
+              rgba(120, 20, 40, .30) 0%, rgba(4, 6, 10, .62) 62%);
+  animation: trapveil 2200ms ease-out forwards;
+}
+@keyframes trapveil {
+  0%   { opacity: 0; }
+  10%  { opacity: 1; }
+  74%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* `left`/`top` are set from the table's box in JS — centring on the window
+   would put it behind the side panel on a wide layout, and centring on the
+   table element would put it off-screen on a scrolled one. */
+.trappop {
+  position: fixed; z-index: 73; pointer-events: none;
+  width: calc(var(--battle-card-w) * 2);
+  height: calc(var(--battle-card-h) * 2);
+  margin-left: calc(var(--battle-card-w) * -1);
+  margin-top: calc(var(--battle-card-h) * -1);
+  animation: trappop 2200ms cubic-bezier(.16,.9,.28,1) forwards;
+}
+.trappop img {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 12px; display: block;
+  box-shadow: 0 0 0 3px #ff6b6b, 0 0 44px rgba(255, 90, 90, .55),
+              0 26px 70px rgba(0, 0, 0, .8);
+}
+/* Your own trap reads as a save rather than a threat, so it comes up gold. */
+.trappop.mine img {
+  box-shadow: 0 0 0 3px var(--accent), 0 0 44px rgba(240, 169, 43, .5),
+              0 26px 70px rgba(0, 0, 0, .8);
+}
+.trappop .fallback {
+  width: 100%; height: 100%; border-radius: 12px; display: grid; place-items: center;
+  text-align: center; padding: 10px; background: var(--panel);
+  box-shadow: 0 0 0 3px #ff6b6b, 0 26px 70px rgba(0, 0, 0, .8);
+}
+.trappop .trapname {
+  position: absolute; left: 50%; top: -18px; transform: translateX(-50%);
+  font-size: 15px; font-weight: 900; letter-spacing: 3px;
+  color: #2a0508; background: #ff6b6b;
+  padding: 3px 16px; border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .6);
+}
+.trappop.mine .trapname { color: #2a1a04; background: var(--accent); }
+.trappop .tagline {
+  position: absolute; left: 50%; bottom: -30px; transform: translateX(-50%);
+  font-size: 14px; font-weight: 700; white-space: nowrap; color: #fff;
+  background: rgba(10, 14, 20, .9); padding: 4px 14px; border-radius: 999px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .6);
+}
+/* Upright whichever mat it was sprung from — it exists to be read. */
+@keyframes trappop {
+  0%   { transform: scale(.35) rotate(-9deg); opacity: 0; }
+  9%   { transform: scale(1.18) rotate(2deg); opacity: 1; }
+  16%  { transform: scale(.97) rotate(-1deg); opacity: 1; }
+  22%  { transform: scale(1) rotate(0deg); opacity: 1; }
+  78%  { transform: scale(1) rotate(0deg); opacity: 1; }
+  100% { transform: scale(.92) translateY(-26px); opacity: 0; }
+}
+
 /* ---------------------------------------------------------- the card picker */
 /* Choosing cards to discard: the hand is the control, not a list on the far
    side of the screen. Toggle up to the number asked for, then confirm. */

@@ -62,11 +62,11 @@ SIDE = (Path(sys.executable).resolve().parent
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
 EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
-                 "draw": 0.22, "damage": 0.25, "heal": 0.25}
+                 "draw": 0.22, "damage": 0.25, "heal": 0.25, "trap": 1.0}
 # What is still on screen after an event of its kind *starts*.
 # A revealed card is held face up to be read, and a broken Cookie falls apart.
 TAIL_SECONDS = {"attack": 0.9, "reveal": 2.4, "faint": 1.5, "skill": 1.5,
-                "draw": 0.7, "damage": 0.9, "heal": 0.9}
+                "draw": 0.7, "damage": 0.9, "heal": 0.9, "trap": 2.2}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -914,6 +914,10 @@ class Match:
 
         Those never pass through the match loop — the engine asks the defender
         mid-attack — so they are read off the one thing that does record them.
+        They get their own event type rather than riding on `skill`: a trap is
+        the one card that fires on someone else's turn, in the middle of their
+        attack, so the board plays it big and in the middle rather than as a
+        small pop over on its owner's half.
         """
         import re
         if self._TRAP_LINE is None:
@@ -929,11 +933,10 @@ class Match:
             if not matches:
                 continue
             events.append({
-                "type": "skill",
+                "type": "trap",
                 "owner": int(match.group(1)),
-                "uid": None,
                 "card": card_json(self.db, matches[0].id),
-                "name": "Trap",
+                "name": matches[0].name,
             })
         self._log_mark = len(log)
         return events
