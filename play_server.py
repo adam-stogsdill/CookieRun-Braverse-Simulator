@@ -586,6 +586,11 @@ def centre_style(options: Sequence) -> Optional[str]:
     making someone track to the far right to throw rock is a silly way to start
     a game.
     """
+    # A yes/no — `Ctx.confirm`, and every optional `<...>` cost — is one button
+    # and a decline. It used to render as a one-item list in the far corner
+    # while the thing it was asking about was in the middle of the board.
+    if options and all(isinstance(o, bool) for o in options):
+        return "yesno"
     labels = [o for o in options if isinstance(o, str)]
     if len(labels) != len(options):
         return None

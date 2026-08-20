@@ -90,7 +90,71 @@ function seatPerspective(seat) {
 function h(tag, cls, text) {
   const node = document.createElement(tag);
   if (cls) node.className = cls;
-  if (text !== undefined) node.textContent = text;
+  if (text !== undefined) setText(node, text);
+  return node;
+}
+
+/* ------------------------------------------------------------- energy pips */
+/* Rules text writes energy as `{G}`, and so does every prompt and option label
+ * built out of it. Six braces in a row is not a cost anyone can read at a
+ * glance, so every one of them is drawn as the coloured gem the card prints.
+ *
+ * It goes in `h` rather than at each call site: the tokens turn up in card
+ * text, attack costs, action labels, the card menu, the deck builder and the
+ * prompt line, and a substitution that covers only some of those is worse than
+ * none — the reader stops trusting which is which. */
+const ENERGY_NAMES = {
+  R: "red", B: "blue", G: "green", Y: "yellow",
+  P: "purple", K: "black", N: "any colour",
+};
+// Split rather than exec: `energyPip` builds nodes through `h`, which comes
+// back through `setText`, and a shared /g/ regex has a `lastIndex` that the
+// nested call resets — which sends the outer loop back to the start of the
+// string, forever. A split has no state to trample.
+const ENERGY_TOKEN = /(\{[RBGYPKN]\})/;
+
+function energyPip(symbol) {
+  const pip = document.createElement("span");
+  pip.className = "energy e-" + symbol;
+  pip.title = `{${symbol}} — ${ENERGY_NAMES[symbol]} energy`;
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 20 20");
+  svg.setAttribute("aria-hidden", "true");
+  const gem = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  gem.setAttribute("points", "10,0.8 18.9,5.9 18.9,14.1 10,19.2 1.1,14.1 1.1,5.9");
+  svg.appendChild(gem);
+  const shine = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+  shine.setAttribute("class", "shine");
+  shine.setAttribute("points", "10,3.4 16.3,7 10,10.6 3.7,7");
+  svg.appendChild(shine);
+  pip.appendChild(svg);
+  // The letter as well as the colour: six shades of gem is a lot to tell apart
+  // at 14px, and some of the people reading this cannot tell two of them apart
+  // at any size.
+  const letter = document.createElement("b");
+  letter.textContent = symbol;
+  pip.appendChild(letter);
+  return pip;
+}
+
+/** Put `text` into `node`, drawing any `{X}` energy tokens as pips. */
+function setText(node, text) {
+  const value = text === null || text === undefined ? "" : String(text);
+  if (!ENERGY_TOKEN.test(value)) {
+    node.textContent = value;
+    return node;
+  }
+  node.textContent = "";
+  // The capture group keeps the separators, so the pieces alternate text,
+  // token, text, token, …
+  value.split(new RegExp(ENERGY_TOKEN.source, "g")).forEach((piece) => {
+    if (!piece) return;
+    if (ENERGY_TOKEN.test(piece) && piece.length === 3) {
+      node.appendChild(energyPip(piece[1]));
+    } else {
+      node.appendChild(document.createTextNode(piece));
+    }
+  });
   return node;
 }
 
@@ -230,6 +294,12 @@ function cardNode(card, opts = {}) {
   if (opts.uid !== undefined && opts.uid !== null) {
     if (opts.seat === state.mySeat) {
       makeDraggable(node, opts.uid, opts.seat);
+      // Your own cards are dragged to play them, which is why they had no
+      // click handler at all — but a question that names one of your Cookies
+      // ("Select one of your Cookies") is answered by pointing at it, exactly
+      // as it is on your opponent's side. Without this the only way to answer
+      // was the list in the far corner, while the Cookie sat right there.
+      node.addEventListener("click", () => answerByPointing(opts.uid));
     } else {
       node.addEventListener("click", () => toggleFilter(opts.uid));
     }
@@ -509,7 +579,7 @@ function renderBanner(snap) {
   }
   if (snap.pending) {
     banner.classList.add("on");
-    banner.textContent = `${seatLabel(snap.pending.seat, snap)}: ${snap.pending.prompt}`;
+    setText(banner, `${seatLabel(snap.pending.seat, snap)}: ${snap.pending.prompt}`);
     return;
   }
   banner.textContent = snap.paused ? "paused" : "…";
@@ -1194,13 +1264,22 @@ function renderCentre(snap) {
   bar.appendChild(h("div", "centre-prompt", pending.prompt));
   const row = h("div", "centre-row" + (style === "throw" ? " throws" : " choices"));
   pending.options.forEach((opt) => {
-    const btn = h("button", "centre-btn");
+    const btn = h("button", "centre-btn" + (style === "yesno" ? " yes" : ""));
     const icon = THROW_ICONS[opt.label];
     if (icon) btn.appendChild(h("span", "big", icon));
     btn.appendChild(h("span", "label", opt.label));
     btn.onclick = () => answer(opt.index);
     row.appendChild(btn);
   });
+  /* A yes/no is only half a question without the no. Declining lives on the
+   * option list for everything else, but this question has left that list, so
+   * the answer has to come with it. */
+  if (style === "yesno" && pending.optional) {
+    const no = h("button", "centre-btn no");
+    no.appendChild(h("span", "label", "No"));
+    no.onclick = () => answer(null);
+    row.appendChild(no);
+  }
   bar.appendChild(row);
   return true;
 }
@@ -1211,7 +1290,7 @@ function renderOptions(snap) {
   box.scrollTop = 0;
   const pending = snap.pending;
   const lastLine = (snap.log || []).slice(-1)[0] || "";
-  el("#prompt").textContent = pending ? pending.prompt : (snap.over ? "Game over" : "Bots playing…");
+  setText(el("#prompt"), pending ? pending.prompt : (snap.over ? "Game over" : "Bots playing…"));
   el("#prompt-who").textContent = pending ? seatLabel(pending.seat, snap) : lastLine;
 
   if (!pending) { state.filterUid = null; return; }
@@ -1293,13 +1372,35 @@ function highlight(opt) {
   });
 }
 
+/* A click on one of your own cards, which is also the gesture that starts a
+ * drag. It answers only a question that actually names that card; anything
+ * else is left to the drag, so playing cards is unchanged. */
+function answerByPointing(uid) {
+  // A drag that ends on top of its own card fires a click too. That was a
+  // drag, and it has already been answered or cancelled.
+  if (Date.now() - lastDragEnd < 250) return;
+  const direct = directOption(uid);
+  if (direct) answer(direct.index);
+}
+
+/** The pending option that names this card, if the question is ours to answer. */
+function directOption(uid) {
+  const pending = state.snap && state.snap.pending;
+  if (!pending || state.animating || pending.waiting) return null;
+  // A "pick N of these" question is answered as a batch on the picker bar. One
+  // index sent to a question expecting a list is padded out by the engine with
+  // cards nobody chose, so pointing at a single card must not answer it.
+  if ((pending.count || 1) > 1 || pending.upTo) return null;
+  return (pending.options || []).find(
+    (o) => (o.kind === "cookie" || o.kind === "card") && o.subject === uid) || null;
+}
+
 function toggleFilter(uid) {
   const snap = state.snap;
   if (!snap || !snap.pending || state.animating) return;
   // Mid-effect questions ("Damage which Cookie?") name a card, so clicking that
   // card on the board *is* the answer rather than a filter.
-  const direct = snap.pending.options.find(
-    (o) => (o.kind === "cookie" || o.kind === "card") && o.subject === uid);
+  const direct = directOption(uid);
   if (direct) { answer(direct.index); return; }
   const node = document.querySelector(`.card[data-uid="${uid}"]`);
   if (node && movesFor(uid).length) { openCardMenu(uid, node); return; }
@@ -1429,6 +1530,9 @@ function dropTargetsFor(uid) {
 }
 
 let dragging = null;
+// When the last drag finished. A drag that ends over its own card fires a
+// click as well, and that click must not be read as pointing at the card.
+let lastDragEnd = 0;
 
 function startDrag(event, uid, node) {
   const targets = dropTargetsFor(uid);
@@ -1494,6 +1598,7 @@ function endDrag(event) {
     .forEach((n) => n.classList.remove("droppable", "dropactive"));
   const uid = dragging.uid;
   dragging = null;
+  lastDragEnd = Date.now();
   if (drop) {
     Sfx.play("place");
     answer(drop.opt.index);

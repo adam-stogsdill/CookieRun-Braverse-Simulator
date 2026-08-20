@@ -88,8 +88,9 @@ def schwarzwalder_red_static(ctx: Ctx) -> None:
 # --- BS3-025 Golden Cheese Cookie -------------------------------------------
 @effect("BS3-025", Trigger.END_TURN)
 def golden_cheese_revive(ctx: Ctx) -> None:
-    """This skill can only be used once per game. If this Cookie is in your
-    break area, play this Cookie in your battle area with 1 HP.
+    """【Your Turn】 This skill can only be used once per game. If this Cookie is
+    in your break area, <can be used as {Y}.> Play this Cookie in your battle
+    area with 1 HP.
 
     Resurrection from the break area, which also un-does the Level the
     opponent had banked for it.
@@ -99,6 +100,9 @@ def golden_cheese_revive(ctx: Ctx) -> None:
     if card is None or card.uid in ctx.me.used_once_per_game:
         return
     if len(ctx.me.battle) >= ctx.game.rules.max_battle_cookies:
+        return
+    # `<can be used as {Y}.>` is the price of the revival, not a note about it.
+    if not ctx.pay(Cost.parse("{Y}")):
         return
     ctx.me.used_once_per_game.add(card.uid)
     ctx.me.break_area.remove(card)

@@ -786,7 +786,8 @@ class Game:
             return
         from .effects import shields_from_opponent
         owner = self.state.players[cookie.owner]
-        if source_player != cookie.owner and shields_from_opponent(self.db, owner):
+        if (source_player != cookie.owner
+                and shields_from_opponent(self.db, owner, self.state)):
             self.state.record(f"{name} takes no {kind} damage (shielded)")
             return
         amount -= cookie.all_damage_reduction

@@ -66,11 +66,19 @@ ATTACK_PROHIBITIONS: list = []
 # "your Cookies take no damage from your opponent" — blanket protection while a
 # card is on the field. Each entry takes (db, owner) and returns True to shield
 # that player's Cookies from all opposing damage.
+# "your Cookies take no damage from your opponent" abilities. Each entry takes
+# (db, owner, state) and returns True while that player's board is shielded.
 OPPONENT_DAMAGE_SHIELDS: list = []
 
 
-def shields_from_opponent(db, owner) -> bool:
-    return any(rule(db, owner) for rule in OPPONENT_DAMAGE_SHIELDS)
+def shields_from_opponent(db, owner, state) -> bool:
+    """Is this player's board immune to their opponent's damage right now?
+
+    The state comes in because these are printed abilities with printed
+    conditions, and 【Your Turn】 is one of them — a shield that reads "your
+    Cookies take no damage from your opponent" is worth knowing the turn for.
+    """
+    return any(rule(db, owner, state) for rule in OPPONENT_DAMAGE_SHIELDS)
 
 # 【EXTRA】 "Can be played if ..." gates. Each entry takes
 # (db, player, opponent, card_def) and returns False to forbid playing that

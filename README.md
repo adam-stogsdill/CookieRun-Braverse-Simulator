@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.5
+Current Version: 0.2.7
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -61,6 +61,7 @@ There are many things that are still needing to be updated and reworked, but I i
     - [Who goes first](#who-goes-first)
     - [Costs in angle brackets are a decision](#costs-in-angle-brackets-are-a-decision)
     - ["Up to N" is a choice of which, and of how many](#up-to-n-is-a-choice-of-which-and-of-how-many)
+    - [【Your Turn】 is a condition, and a static ability can drop it](#your-turn-is-a-condition-and-a-static-ability-can-drop-it)
     - [A card filter cannot describe a card's state](#a-card-filter-cannot-describe-a-cards-state)
     - [The EXTRA deck](#the-extra-deck)
   - [Rules fidelity](#rules-fidelity)
@@ -384,6 +385,34 @@ and you click the one you mean — no trip to the list on the right. The same go
 for a card in your support area. Cards you *cannot* reach on the table — in your
 hand, trash, break area or deck — come up as a strip instead, which is decided
 structurally rather than by prompt text.
+
+That worked on your opponent's half and, for a long time, nowhere else. Your own
+cards are *dragged* to play them, so they carried a pointerdown handler and no
+click handler at all — and "select up to 1 of your Cookies", one of the most
+common clauses in the pool, could only be answered from the list in the far
+corner while the Cookie sat right there on the board. They take a click now:
+one that names a card answers with it, and anything else falls through to the
+drag, so playing cards is unchanged. A drag that ends over its own card fires a
+click too, which is ignored for a quarter-second afterwards. A "pick N of these"
+question is never answered this way — that one is a batch, and a single index
+sent to it gets padded out by the engine with cards nobody chose.
+
+**A yes/no is asked in the middle of the table.** `Ctx.confirm` and every
+optional `<...>` cost are one button and a decline, and they were rendering as a
+one-item list in the far corner while the thing being asked about was in the
+middle of the board. `centre_style` returns `yesno` for a question whose options
+are all booleans, and the decline travels with it — a yes/no is only half a
+question without the no.
+
+**Energy is drawn, not spelled.** Rules text writes it as `{G}`, and so does
+every prompt, option label and attack line built out of that text; `<{G}{G}>`
+is not a cost anyone reads at a glance. Each token is now the coloured gem the
+card prints, letter included — six shades are a lot to tell apart at 11px, and
+some people cannot tell two of them apart at any size. The substitution lives in
+`h`, the one function every piece of text in the viewer is built with, because a
+version that covered only some of the places these tokens appear would be worse
+than none: the reader stops trusting which is which. The deck builder shares
+that function, so it came along for free.
 
 **Questions about your hand are answered with your hand.** Discarding, opening
 with a Cookie, fielding a replacement when one faints — all the same gesture:
@@ -1047,6 +1076,37 @@ Scripted agents are deliberately left out of it: they have no opinion worth
 asking for, and giving them one would move the self-play numbers for no gain. A
 controller that implements `choose_many` — which in practice means a human — is
 asked; everyone else still rests the first N.
+
+### 【Your Turn】 is a condition, and a static ability can drop it
+
+Hero Cookie BS9-018 prints "**【Your Turn】** If this Cookie is in your battle
+area, your Cookies take no damage from your opponent." It has no trigger to
+hang off — it is true for as long as the Cookie is on the board — so it is
+registered in `OPPONENT_DAMAGE_SHIELDS` and read inside the damage path. The
+implementation checked that the Cookie was in the battle area and stopped
+there.
+
+The marker is half the card. Nearly all the damage in this game is dealt on the
+*opponent's* turn, so a shield that ignores 【Your Turn】 is not a narrow
+defensive ability, it is blanket immunity for as long as one Cookie stays alive.
+The registry entries take the state now and the shield reads the turn. On its
+own turn it still does real work — a trap, a 【Blocker】, a FLIP and a "when
+your opponent's Cookie attacks" reaction all deal damage to you while it is
+your turn.
+
+Worth saying what this is *not*: BS5-063, the other Hero Cookie and the one in
+the starter-adjacent green decks, was already correct. 212 end-of-turn triggers
+across four deck pairings drew two cards when its controller had two active
+support cards and nothing when they did not. Finding that out first is what
+pointed at the card that was actually broken.
+
+Two more 【Your Turn】 cards are wired to triggers that can fire on the other
+player's turn — nine of them, in fact: seven "【Your Turn】 When this Cookie
+faints" recursion payoffs, Grapefruit Cookie's `WHEN_ATTACKED`, and Blueberry
+Pie Cookie's `TRASHED`. Same bug, same shape. They are left alone deliberately:
+gating those is a nine-card rules change rather than a fix to a reported one,
+and it belongs to whoever decides it is right rather than to the commit that
+fixed Hero Cookie.
 
 ### A card filter cannot describe a card's state
 

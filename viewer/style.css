@@ -758,6 +758,32 @@ body.online #reveal-label { display: none; }
   100% { transform: scale(1.1) translateY(-14px); opacity: 0; }
 }
 
+/* ----------------------------------------------------------------- energy */
+/* `{G}` in rules text, drawn as the gem the card prints. Sized in `em` so it
+   rides whatever text it sits in — a 40px prompt and an 11px card menu both
+   get a pip that matches their line. */
+.energy {
+  position: relative; display: inline-block; vertical-align: -0.16em;
+  width: 1.15em; height: 1.15em; margin: 0 .06em;
+}
+.energy svg { width: 100%; height: 100%; display: block; }
+.energy svg polygon { fill: currentColor; }
+.energy svg .shine { fill: rgba(255, 255, 255, .34); }
+.energy b {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: .62em; font-weight: 900; line-height: 1;
+  color: rgba(6, 9, 14, .85); text-shadow: 0 .05em .05em rgba(255, 255, 255, .25);
+}
+.e-R { color: #ef5b52; }
+.e-B { color: #4aa8ff; }
+.e-G { color: #4fc275; }
+.e-Y { color: #f0c33c; }
+.e-P { color: #b07bff; }
+.e-K { color: #8a90a3; }
+.e-N { color: #cdd5e3; }
+/* Black energy is dark enough that a dark letter on it disappears. */
+.e-K b, .e-P b { color: rgba(250, 252, 255, .92); text-shadow: 0 .05em .06em rgba(0,0,0,.5); }
+
 /* ------------------------------------------------------------ a sprung trap */
 /* A trap is the only card that fires on someone else's turn, in the middle of
    their attack — and half the time it is the thing that decides the attack. So
@@ -880,6 +906,10 @@ body.online #reveal-label { display: none; }
 .centre-btn .big { font-size: 34px; line-height: 1; }
 .centre-row.throws .label { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; }
 .centre-row.choices .centre-btn { min-width: 150px; padding: 14px 18px; }
+/* A yes/no: the yes carries the accent, the no is plainly a way out. */
+.centre-btn.yes { min-width: 130px; border-color: var(--accent); background: #2c2a20; }
+.centre-btn.yes:hover { background: #3a3524; }
+.centre-btn.no { min-width: 130px; color: var(--dim); }
 .centre-row.choices .label { font-size: 12.5px; }
 
 /* a card travelling from the deck to the hand */

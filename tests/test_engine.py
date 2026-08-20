@@ -1256,3 +1256,41 @@ def test_the_log_says_when_a_swing_was_shaved():
     assert any("attacks" in line for line in game.state.log), "no attack happened"
     assert any("attack is reduced to 1" in line for line in game.state.log), \
         game.state.log[-4:]
+
+
+# --- BS9-018 Hero Cookie ----------------------------------------------------
+def test_hero_cookies_shield_only_stands_on_its_own_turn():
+    """"【Your Turn】 ... your Cookies take no damage from your opponent."
+
+    The marker was being dropped, and it is half the card: without it the
+    shield stood on the opponent's turn too — which is when nearly all the
+    damage in this game is dealt — so one Cookie on the board made its
+    controller immune to everything for the rest of the game.
+    """
+    db = default_db()
+    game = new_game(seed=15, db=db)
+    _plain_pile(game, db)
+    defender = game.state.players[1]
+    defender.battle.clear()
+    for card_id in ("BS9-018", "ST8-003"):
+        game._deploy_cookie(defender, CardInstance.make(card_id, 1), run_on_play=False)
+    hero, ally = defender.battle
+    assert db[hero.card.card_id].name == "Hero Cookie"
+
+    # Their opponent's turn — the shield is down, so the damage lands.
+    game.state.turn_player = 0
+    before = ally.remaining_hp
+    game.deal_damage(ally, 1, source_player=0, kind="attack")
+    assert ally.remaining_hp == before - 1, "the shield stood on the wrong turn"
+
+    # Their own turn — a trap, a Blocker or a FLIP can still hit them, and now
+    # the shield is what the card says it is.
+    game.state.turn_player = 1
+    held = ally.remaining_hp
+    game.deal_damage(ally, 1, source_player=0, kind="effect")
+    assert ally.remaining_hp == held, "the shield did not hold on its own turn"
+    assert "shielded" in game.state.log[-1]
+
+    # It never blocked its controller's own damage either way.
+    game.deal_damage(ally, 1, source_player=1, kind="effect")
+    assert ally.remaining_hp == held - 1

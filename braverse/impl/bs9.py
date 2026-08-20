@@ -91,13 +91,22 @@ def hollyberry_bs9_attack(ctx: Ctx) -> None:
 
 
 # --- BS9-018 Hero Cookie ----------------------------------------------------
-def _hero_shield(db, owner) -> bool:
-    """"If this Cookie is in your battle area, your Cookies take no damage from
-    your opponent."
+def _hero_shield(db, owner, state) -> bool:
+    """"【Your Turn】 If this Cookie is in your battle area, your Cookies take no
+    damage from your opponent."
 
-    A blanket shield while it is on the field, so it is consulted in the damage
-    path rather than fired as a trigger.
+    A shield while it is on the field, so it is consulted in the damage path
+    rather than fired as a trigger — but 【Your Turn】 is half the card, and it
+    was being dropped. Without it the shield stood on the opponent's turn too,
+    which is when almost all of the damage in this game is dealt: one Cookie on
+    the board and nothing your opponent did could ever hurt you.
+
+    On your own turn it still does real work — a trap, a 【Blocker】, a FLIP and
+    a "when your opponent's Cookie attacks" reaction all deal damage to you
+    while it is your turn.
     """
+    if state.turn_player != owner.index:
+        return False
     return any(c.defn(db).base_id == "BS9-018" for c in owner.battle)
 
 
