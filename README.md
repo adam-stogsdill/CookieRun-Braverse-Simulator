@@ -4,12 +4,8 @@ Current Version: 0.2.19
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
-Example Images:
-Human vs Bot
-![alt text](image.png)
-
-Bot vs Bot
-![alt text](image-1.png)
+Example Image(s):
+![alt text](image-2.png)
 
 A rules engine for CookieRun: Braverse plus a practice bot to play against. This is an **unofficial** project and much of the code was generated using Claude (I feel like this should be explicityly disclosed). However, this was initially to create an simulator for deck building and agent training.
 
