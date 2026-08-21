@@ -23,6 +23,7 @@ blocks), so nothing ever reads a half-mutated GameState.
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import mimetypes
 import os
@@ -43,6 +44,7 @@ from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, default_db,
                       implemented_pool, validate)
 from braverse import actions as A
+from braverse.engine import BankedUntap, OPENING_COOKIE_PROMPT
 from braverse.enums import CardType, Marker
 from braverse.rps import CHOICES, THROWS, decide_first_player
 from braverse.state import CardInstance, Cookie, GameState
@@ -306,6 +308,40 @@ def card_json(db: CardDB, card_id: str) -> dict:
     }
 
 
+@functools.lru_cache(maxsize=1)
+def card_name_index(db_id: int) -> list:
+    """Every distinct card *name*, with the card behind it.
+
+    The log is prose — "Wind Archer Cookie takes 3 attack damage from Gold
+    Citrine Cookie's Shining Sea Jewel" — and the only handle it gives on a
+    card is its name. This is what lets the viewer turn those names back into
+    something you can hover: one entry per name, longest first so a name that
+    contains a shorter one still wins the match.
+
+    Sent whole rather than looked up per hover. It is 813 names and about
+    350 KB, it never changes while the server is up, and a card the log names
+    is very often one that is not on the board — in a trash, in a deck, or
+    already gone — so there is no smaller set that would be correct. `db_id` is
+    only there to key the cache on the database identity.
+    """
+    db = _DB_BY_ID[db_id]
+    first: dict[str, str] = {}
+    for card in db.cards.values():
+        first.setdefault(card.name, card.id)
+    names = sorted(first, key=len, reverse=True)
+    return [card_json(db, first[name]) for name in names]
+
+
+# `functools.lru_cache` cannot hold the CardDB itself (it is unhashable), so the
+# cache is keyed on `id()` and the object is pinned here to keep that id valid.
+_DB_BY_ID: dict[int, CardDB] = {}
+
+
+def card_names(db: CardDB) -> list:
+    _DB_BY_ID[id(db)] = db
+    return card_name_index(id(db))
+
+
 # ---------------------------------------------------------------------------
 # the card pool, for the deck builder
 # ---------------------------------------------------------------------------
@@ -561,6 +597,13 @@ def option_json(db: CardDB, index: int, option: Any) -> dict:
         return {"index": index, "kind": "card", "uid": option.uid,
                 "label": defn.name,
                 "img": f"/card_images/{defn.id}.webp", "subject": option.uid}
+    if isinstance(option, BankedUntap):
+        # A banked "when your turn ends, ..." rider. It has no card on the
+        # table to point at, so it is offered as the card that banked it.
+        out = {"index": index, "kind": "other", "label": str(option)}
+        if option.card_id:
+            out["img"] = f"/card_images/{option.card_id}.webp"
+        return out
     if isinstance(option, bool):
         return {"index": index, "kind": "bool", "label": "Yes" if option else "No"}
     return {"index": index, "kind": "other", "label": str(option)}
@@ -578,7 +621,12 @@ class MatchAborted(Exception):
 # screen behind it, not one item in a list of moves.
 MULLIGAN_CHOICES = ("Mulligan", "Keep this hand")
 MULLIGAN_PROMPT = ("Mulligan? Your whole hand goes back into the deck and you "
-                   "draw 6 new cards.")
+                   "draw 6 new cards. This one is free.")
+# The repeat offer, open only to a hand with no Cookie in it. It is a different
+# question — it has a price — so it says so and gets its own labels.
+REDRAW_CHOICES = ("Redraw", "Keep this hand")
+REDRAW_PROMPT = ("No Cookie in hand. Redraw all 6? You can keep going until "
+                 "you find one, but your opponent draws 1 card each time.")
 
 
 def centre_style(options: Sequence) -> Optional[str]:
@@ -600,7 +648,7 @@ def centre_style(options: Sequence) -> Optional[str]:
         return "throw"
     if set(labels) == set(CHOICES):
         return "choice"
-    if set(labels) == set(MULLIGAN_CHOICES):
+    if set(labels) == set(MULLIGAN_CHOICES) or set(labels) == set(REDRAW_CHOICES):
         return "choice"
     return None
 
@@ -616,6 +664,12 @@ def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
     the verb on the confirm button reads from the prompt.
     """
     if not options or not all(isinstance(o, CardInstance) for o in options):
+        return None
+    # The Cookie you open with is answered on the table, not on a strip: the
+    # viewer stands the eligible Cookies up out of your hand the way it does an
+    # armed trap, and a click on one is the answer. Listing them twice — raised
+    # in the hand *and* laid out in a picker — is the duplication this avoids.
+    if prompt == OPENING_COOKIE_PROMPT:
         return None
     on_the_table = {c.uid for c in player.support} | {c.uid for c in player.stage}
     if any(o.uid in on_the_table for o in options):
@@ -666,15 +720,28 @@ class HumanController:
                                pick=pick, centre=centre_style(options))
         return options[index] if index is not None else None
 
-    def wants_mulligan(self, state: GameState, hand: Sequence) -> bool:
-        """The one optional redraw of the opening hand.
+    def order_effects(self, state: GameState, prompt: str, options: Sequence):
+        """Which of several simultaneous effects resolves first.
+
+        Not optional: one of them is going next either way, so there is nothing
+        to decline. Asked once per effect until only one is left.
+        """
+        return self.choose(state, prompt, options, optional=False)
+
+    def wants_mulligan(self, state: GameState, hand: Sequence, *,
+                       free: bool = True) -> bool:
+        """The opening redraw, free the first time and priced after that.
 
         Asked with the hand already on screen — the browser polls the same
-        state — so the question is just the two buttons.
+        state — so the question is just the two buttons. ``free`` is the engine
+        telling us which of the two questions this is: the one-off shop-around,
+        or the repeat offer a Cookie-less hand gets at the cost of a card to
+        the opponent.
         """
-        payload = [option_json(self.match.db, i, o)
-                   for i, o in enumerate(MULLIGAN_CHOICES)]
-        index = self.match.ask(self.seat, MULLIGAN_PROMPT, payload,
+        choices = MULLIGAN_CHOICES if free else REDRAW_CHOICES
+        prompt = MULLIGAN_PROMPT if free else REDRAW_PROMPT
+        payload = [option_json(self.match.db, i, o) for i, o in enumerate(choices)]
+        index = self.match.ask(self.seat, prompt, payload,
                                optional=False, centre="choice")
         return index == 0
 
@@ -1586,7 +1653,8 @@ class Handler(BaseHTTPRequestHandler):
             self._file(VIEWER / "index.html")
         elif path in ("/app.js", "/sfx.js", "/style.css",
                       "/builder.js", "/builder.css",
-                      "/table.js", "/table.css"):
+                      "/table.js", "/table.css",
+                      "/showcase.js", "/showcase.css"):
             self._file(VIEWER / path.lstrip("/"))
         elif path.startswith("/card_images/"):
             name = Path(path).name
@@ -1626,6 +1694,8 @@ class Handler(BaseHTTPRequestHandler):
             payload["list"] = deck
             payload["extraList"] = extra
             self._json(payload)
+        elif path == "/api/cardnames":
+            self._json({"cards": card_names(self.app.db)})
         elif path == "/api/pool":
             self._json({**pool_meta(self.app.db),
                         **search_pool(self.app.db, self._query())})

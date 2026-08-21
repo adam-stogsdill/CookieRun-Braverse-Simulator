@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/builder.css">
 <link rel="stylesheet" href="/table.css">
+<link rel="stylesheet" href="/showcase.css">
 </head>
 <body>
 
@@ -60,8 +61,9 @@
     <h2 id="prompt">…</h2>
     <div class="who" id="prompt-who"></div>
   </div>
-  <div id="reveals" class="reveals hidden"></div>
+  <div id="preview-dock" class="preview-dock empty"></div>
   <div id="options" class="options"></div>
+  <div id="reveals" class="reveals hidden"></div>
   <div class="log-head">
     <h3>Log</h3>
     <button id="btn-copy-log" class="ghost tiny">copy</button>
@@ -98,6 +100,8 @@
       <select id="deck-load"><option value="">load a deck…</option></select>
       <button id="deck-new" class="ghost tiny">New</button>
       <button id="deck-copy" class="ghost tiny" title="Copy the decklist to the clipboard">Copy</button>
+      <button id="deck-export" class="ghost tiny" title="Download the decklist as a text file, grouped by card type">Export</button>
+      <button id="deck-view" class="ghost tiny" title="Show the whole deck full screen, grouped by card type — for screenshots">View</button>
       <button id="deck-delete" class="ghost tiny">Delete</button>
     </div>
     <div class="deck-meter"><div id="deck-fill"></div></div>
@@ -125,6 +129,26 @@
 <div id="centre" class="centre hidden"></div>
 
 <div id="picker" class="picker hidden"></div>
+
+<div id="showcase" class="showcase hidden">
+  <div class="sc-head">
+    <div class="sc-title">
+      <h2 id="sc-name">Deck</h2>
+      <div class="sc-sub" id="sc-sub"></div>
+    </div>
+    <div class="sc-colors" id="sc-colors"></div>
+    <div class="sc-tools">
+      <label title="How big the cards are drawn — shrink to fit the whole deck in one shot">
+        size <input id="sc-size" type="range" min="72" max="200" step="2" value="118">
+      </label>
+      <label class="check" title="Show each card's name, Level and ID under the art">
+        <input id="sc-names" type="checkbox" checked> names
+      </label>
+      <button id="sc-close" class="ghost">Close</button>
+    </div>
+  </div>
+  <div class="sc-body" id="sc-body"></div>
+</div>
 
 <div id="preview" class="preview hidden"></div>
 
@@ -214,6 +238,7 @@
 <script src="/sfx.js"></script>
 <script src="/app.js"></script>
 <script src="/builder.js"></script>
+<script src="/showcase.js"></script>
 <script src="/table.js"></script>
 </body>
 </html>

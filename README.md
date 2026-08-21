@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.9
+Current Version: 0.2.19
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -360,13 +360,45 @@ both hands. Pick a pilot and a deck for each seat — `human`, `heuristic`,
 `evolve_deck.py` has written. Two bots means spectating, with pause,
 single-step, and a speed slider; a `human` seat means you play that side.
 
-**Click a card and it tells you what it can do.** The menu lists that card's
-legal moves by the name the card prints for them — "Bike Blast", "Tracker's
-Arrow" — because 980 of the Cookies name their attack. The 220 that use the
-older `<{P}{P}> Deals 2 damage.` printing have no name to show, and no
-【Activate】 skill in the whole pool is named, so those fall back to the marker
-itself: "Attack" and "Activate". The move list on the right tags the same
-names.
+**Click a card and it tells you what it can do — and that is the whole move
+list.** The menu names that card's legal moves the way the card prints them —
+"Bike Blast", "Tracker's Arrow" — because 980 of the Cookies name their attack.
+The 220 that use the older `<{P}{P}> Deals 2 damage.` printing have no name to
+show, and no 【Activate】 skill in the whole pool is named, so those fall back
+to the marker itself: "Attack" and "Activate". An attack gets one row per legal
+target, so choosing what to hit and choosing to swing are the same click.
+
+There *was* a list of every legal action stacked down the right-hand side, and
+it was the biggest thing on screen. It was also the least pleasant part of the
+game: it named cards you were already looking at, it grew to twenty rows on a
+busy turn, and it took the space the card you were hovering should have had. It
+is gone. What replaced it is three things working together:
+
+- **The cards say what they can do.** A card with something in its menu carries
+  a thin cool ring. A card the game has *stopped for* — a trap you can spring, a
+  Cookie you can block with, the Cookie an effect is pointing at — is louder:
+  green, pulsing, and raised out of the hand. Two volumes, and keeping them
+  apart is the point. On a good turn most of your hand is playable, so if
+  "playable" and "the game is waiting on you" looked the same, neither would
+  mean anything.
+- **Clicking a card opens its menu**, on either side of the table. Unless the
+  question already names that card, in which case the first click answers it —
+  "damage which Cookie?" should not make you open a menu to say "that one".
+- **Whatever has no card to point at goes in the middle of the table**, between
+  the two mats: End turn, Pass, an 【EXTRA】 played standalone out of its pile,
+  a banked rider that was never a card on the board.
+
+Which moves land in that middle tray is decided from the finished markup, not
+from a list of kinds: an option is homeless when nothing on screen carries its
+uid *and is clickable*. Those last three words matter — a face-up pile draws its
+top card with a real uid on it, but the pile's layers are inert, so "there is a
+node with that uid" was not the same question as "you can click it". The two
+now come from the same line of code. A move nobody anticipated therefore lands
+in the tray rather than quietly becoming unplayable, which is the one failure
+this layout could otherwise have had.
+
+The panel on the right keeps the prompt, one line saying where to click, and the
+log. Everything the move list was using now belongs to the card viewer.
 
 **The round, above the break area.** A strip on each mat shows Active → Draw →
 Support → Main → End, lit for whoever's turn it is and dimmed on the other side.
@@ -382,22 +414,34 @@ until this turn's support card is placed, then settles to **done**. That is the
 nudge — forgetting the free support card is the easiest mistake in the game.
 
 **Questions about cards are answered by pointing at cards.** When an effect
-asks which Cookie to damage or debuff, the candidates are outlined on the board
-and you click the one you mean — no trip to the list on the right. The same goes
-for a card in your support area. Cards you *cannot* reach on the table — in your
-hand, trash, break area or deck — come up as a strip instead, which is decided
-structurally rather than by prompt text.
+asks which Cookie to damage or debuff, the candidates light up on the board and
+you click the one you mean. The same goes for a card in your support area. Cards
+you *cannot* reach on the table — in your hand, trash, break area or deck — come
+up as a strip instead, which is decided structurally rather than by prompt text.
 
 That worked on your opponent's half and, for a long time, nowhere else. Your own
 cards are *dragged* to play them, so they carried a pointerdown handler and no
 click handler at all — and "select up to 1 of your Cookies", one of the most
 common clauses in the pool, could only be answered from the list in the far
-corner while the Cookie sat right there on the board. They take a click now:
-one that names a card answers with it, and anything else falls through to the
-drag, so playing cards is unchanged. A drag that ends over its own card fires a
-click too, which is ignored for a quarter-second afterwards. A "pick N of these"
-question is never answered this way — that one is a batch, and a single index
-sent to it gets padded out by the engine with cards nobody chose.
+corner while the Cookie sat right there on the board. Both sides run the same
+handler now: a question that names the card answers with it, and anything else
+opens the card's menu. A drag that ends over its own card fires a click too,
+which is ignored for a quarter-second afterwards. A "pick N of these" question
+is never answered this way — that one is a batch, and a single index sent to it
+gets padded out by the engine with cards nobody chose; it gets the strip, and
+since there is no list left to decline from, the strip carries its own
+**Decline**.
+
+**The opening Cookie is picked out of your hand, not off a list.** It was the
+one hand question with a genuinely short answer — three or four Cookies in a fan
+of six cards — and a strip laid the same three cards out a second time, below a
+list naming them a third. The eligible Cookies now stand up out of the hand and
+glow, which is exactly the treatment an armed trap gets during an attack window,
+and a click plays one. `hand_pick` returns `None` for that prompt so no strip is
+built, and the panel says where to click instead of listing the answers. The
+gesture is the same `directOption` path your own board Cookies already use, so
+nothing new can be clicked that was not already legal; a hand card with no drop
+target does not start a drag, so the click has the card to itself.
 
 **A yes/no is asked in the middle of the table.** `Ctx.confirm` and every
 optional `<...>` cost are one button and a decline, and they were rendering as a
@@ -499,12 +543,24 @@ cards it is choosing between are outlined and clicking one answers it.
 as at the end of the move list — it is the move you reach for most and the far
 corner of the screen is the worst place for it.
 
-Hover any card for its full text; click one to filter the move list down to the
-moves that use it; click the trash or break area to search through it, where the hover preview
-now paints over the browser rather than behind it — a modal `<dialog>` lives in
-the browser's top layer, which no z-index can beat, so the preview moves inside
-it while it is open; keys
-`1`–`9` take the numbered option and `space` / `→` pause and step. `reveal`
+Hover any card for its full text. It appears in the panel on the right rather
+than under the cursor: an enlargement that follows the mouse covers the thing
+you leaned in to look at, and hovering a Cookie in your own battle area used to
+paint over the row it was standing in. That panel is now the largest thing in
+the column, and **everything that names a card feeds it** — a card on the table,
+a row in a card's menu, a button in the middle of the table, and every card name
+in the log. One place to look, whatever you pointed at.
+
+The deck builder and the full-screen deck view have no panel to dock to and keep
+the cursor-following version; so does the trash/break browser, where the preview
+paints over the dialog rather than behind it — a modal `<dialog>` lives in the
+browser's top layer, which no z-index can beat, so the preview moves inside it
+while it is open.
+
+Click a card for the menu of what it can do; click the trash or break area to
+search through it. Keys `1`–`9` take a row from an open card menu, or a button
+from the middle of the table when no menu is open, and `space` / `→` pause and
+step. `reveal`
 shows both hands, and is a spectator's tool only: in a match you are playing it
 is disabled and ignored, so your opponent's hand stays hidden however the
 request is made.
@@ -802,35 +858,66 @@ and every damage step reports what was actually taken off the pile, and whether
 it was the swing or something else:
 
 ```
-T7 P0 Sea Fairy Cookie attacks Leek Cookie for 3
-T7 P0 Leek Cookie takes 3 attack damage — 2 HP left
-T7 P0 Leek Cookie takes 1 effect damage — 1 HP left
+T7 P0 Sea Fairy Cookie attacks Leek Cookie with Sea of Stars for 3
+T7 P0 Leek Cookie takes 3 attack damage from Sea Fairy Cookie's Sea of Stars — 2 HP left
+T7 P0 [Sea Fairy Cookie · attack effect] Leek Cookie takes 1 effect damage — 1 HP left
 ```
 
 A swing is `attack damage`; a `Then, ...` rider, a skill and a trap are all
 `effect damage`, since they all route through the same `Ctx.deal_damage`.
 
-`effect damage` says it was not the swing; it does not say *which* card did it,
-and with a dozen cards on the board and a FLIP turning over mid-attack that is
-most of the question. So every line written while an effect is resolving is
-stamped with the card resolving it — `Game._effect_source` pushes the name
-around each effect body and `GameState.record` reads the top of that stack:
+That much was there from the start, and it was not enough. `effect damage` says
+only that it was not the swing. It covers a trap sprung on your own turn, an
+【Activate】 skill, an ITEM and the rider on an attack line — four very different
+things to be on the wrong end of, and with a dozen cards on the board and a FLIP
+turning over mid-attack, *which* of them just hit you is most of the question.
+
+Two halves answer it. Every line written while an effect is resolving is stamped
+with the card resolving it *and what sort of thing that card is being* —
+`Game._effect_source` pushes a `(name, kind)` pair around each effect body and
+`GameState.record` reads the top of that stack:
 
 ```
-T7 P0 Leek Cookie takes 3 attack damage — 2 HP left
+T7 P0 Leek Cookie takes 3 attack damage from Wind Archer Cookie's Tracker's Arrow — 2 HP left
 T7 P0 FLIP! Blue Slushy Cookie
-T7 P0 [Blue Slushy Cookie] Leek Cookie gains +1 HP — 3 HP
-T7 P0 [Wind Archer Cookie] draws 1 card
+T7 P0 [Blue Slushy Cookie · FLIP] Leek Cookie gains +1 HP — 3 HP
+T7 P0 [Piercing Arrow of Purity · trap] Leek Cookie takes 2 effect damage — 1 HP left
+T7 P0 [Wind Archer Cookie · 【Activate】] draws 1 card
 ```
+
+The kind comes from the trigger first and the card second (`source_kind`),
+because the same card arrives by different routes: a FLIP card in an HP pile is
+a *FLIP* when it turns over, whatever its printed type says. The one trigger
+that defers to the card is `Trigger.ITEM`, which is the shared body of an ITEM
+and a TRAP — and that is exactly the pair worth telling apart, because the trap
+is the one that fired on your turn.
+
+The other half is the attack, which has no stamp at all: nothing is "resolving"
+during a swing. So the attacker names itself on the line, and names the attack
+too, since 980 of the Cookies print one — `attacks for 3` said which Cookie
+swung but not which of its lines did.
 
 The stack is nested, so a FLIP that fires inside an attack names the FLIP rather
 than the attack that turned it over, and lines the engine writes on its own
 account — playing a Cookie, resting for a cost — carry no name at all.
 
+**Every card name in the log is hoverable**, and previews in the panel exactly
+as a card on the table does. That line above names three cards, none of them
+necessarily still on the board — one is in a trash and one may have been the
+FLIP that just left it — and reading a log that names cards you cannot look at
+is most of why a log gets skipped. The index is every distinct name in the pool
+(`/api/cardnames`, 813 of them, fetched once), matched longest-first so a name
+that contains a shorter one still wins. Not the cards in *this* game: the log
+names cards from a deck, a trash and cards already gone, so nothing narrower
+would be correct.
+
 The board says it too, without a word being read. A swing shoves the card,
 flashes it white and throws a heavy red number out sideways, over the thud of
 the impact; a rider, skill or trap pulses the card cool blue, floats a smaller
-number straight up and ticks rather than thuds. Both numbers are set large and
+number straight up and ticks rather than thuds. The number carries the name of
+whatever dealt it underneath — a red `-3` says how much but never what, and
+"what" is the whole question when the swing, its rider and a trap sprung in
+between all land in the same beat. Both numbers are set large and
 carry a hard dark outline, so they stay legible over card art of any colour —
 `paint-order` puts the stroke behind the glyph where it is honoured, and a ring
 of text shadows does the same job where it is not. Being chipped twice by riders
@@ -898,7 +985,21 @@ The opening sequence now runs draw 6 → **mulligan** → the mandatory
 "no Cookie in hand" redraw → place the opening Cookie, in that order, so a
 mulligan into a Cookie-less hand still triggers the forced redraw the guide
 describes. The whole hand goes back, the deck is shuffled, six new cards come
-off it; there is no card penalty and it is offered exactly once.
+off it.
+
+The **first** one is free, and that free one is the whole allowance for
+shopping around: mulligan into a hand you like and you are not asked again.
+Mulligan into a hand with no Cookie in it and you are asked again, and again,
+for as long as you keep missing — but each of those later redraws hands the
+opponent one card, the same price `opponent_draws_on_redraw` puts on the
+mandatory Cookie-less redraw. The two questions had been sitting next to each
+other doing almost the same thing, one of them a choice and one of them done
+*to* you; joining them means a bricked opening hand is something you dig out
+of rather than something you watch happen. `_redraw_until_cookie` stays
+underneath as the floor, so declining with no Cookie is not a way to keep an
+unplayable hand — it just has the redraw done for you at that same price.
+`RulesConfig.max_mulligans` caps the loop, and is a runaway guard rather than
+a rule.
 
 Only a controller that implements `wants_mulligan` is asked, which in practice
 means a human seat. A scripted agent has no read on hand quality, so answering
@@ -988,6 +1089,14 @@ is what decides how long a bot waits before moving again.
 `Ctx.trash_hp` reveals too — "place N cards from the top of that Cookie's HP
 into the trash" turns cards face up — but flagged `flip=False`, because no FLIP
 fires on that path and it should not read as one.
+
+The animation is the moment and it is gone in under a second, so the same batch
+also fills a standing strip in the middle of the right-hand panel, between the
+card viewer above and the log below. It used to be a row of 46-pixel slivers
+wedged under the prompt, which is not something you can read a FLIP off; the
+cards are drawn at hand size now and the strip scrolls sideways when a big hit
+turns over six of them. The log gave up the height for it, being the thing in
+that column you glance at rather than read.
 
 ### Healing is cards, not a bigger Cookie
 
@@ -1251,10 +1360,11 @@ and that are easy to get wrong:
   is worth choosing: in mirror matches under the heuristic, whoever goes first
   wins **68%** of the time (ST9 68.7%, ST8 67.3% over 150 games each), despite
   the opener skipping their first draw and being unable to attack.
-- **Setup**: draw 6, optional full mulligan, and a forced reveal-and-redraw
-  until you hold a Cookie (your opponent draws 1 each time you do). Each player
-  places one Cookie face down, reveals it and builds its HP pile from the deck.
-  [On Play] does not fire during setup.
+- **Setup**: draw 6, one free full mulligan, then further redraws while your
+  hand holds no Cookie — offered, not imposed, and your opponent draws 1 each
+  time you take one — with a forced reveal-and-redraw underneath as the floor.
+  Each player places one Cookie face down, reveals it and builds its HP pile
+  from the deck. [On Play] does not fire during setup.
 
 One deliberate simplification, marked NOT IN GUIDE in `braverse/config.py`: every
 【Activate】 skill is capped at once per turn per source. Printed

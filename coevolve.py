@@ -119,10 +119,19 @@ def main() -> None:
     best_path = checkpoint.with_suffix(".best.pt")
     try:
         net = Trainer.load_net(checkpoint)
-        print(f"continuing from {checkpoint}")
-    except (FileNotFoundError, RuntimeError):
+        print(f"continuing from {checkpoint} "
+              f"({net.feature_dim}-wide rows)")
+    except FileNotFoundError:
         net = None
         print("starting from a fresh policy")
+    except Exception as exc:
+        # Only a *missing* checkpoint means "start fresh". A file that exists
+        # but will not load is a real problem, and swallowing it would silently
+        # discard a trained policy and quietly restart an overnight run from
+        # scratch — which looks like a successful run until the numbers land.
+        raise SystemExit(
+            f"{checkpoint} exists but could not be loaded: {exc}\n"
+            f"Move it aside to start fresh, or point --checkpoint elsewhere.")
 
     print(f"card pool: {len(pool)} ({args.pool}"
           f"{': ' + ','.join(set_ids) if args.pool == 'starter_sets' else ''})"

@@ -297,8 +297,6 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
 .card.rested { transform: rotate(90deg); }
 .card.small { width: 54px; height: 75px; }
 .card.mid { width: 74px; height: 103px; }
-.card.hl { box-shadow: 0 0 0 2px var(--accent), 0 6px 18px rgba(0,0,0,.6); z-index: 3; }
-.card.hl-target { box-shadow: 0 0 0 2px var(--bad), 0 6px 18px rgba(0,0,0,.6); z-index: 3; }
 .card:hover { z-index: 6; }
 
 /* the printed card back, for everything face down */
@@ -371,25 +369,51 @@ body.has-cardback .card.back::after { content: none; }
 .side.me .hand .card:hover { transform: translateY(-12px) scale(1.05); }
 .side.opponent .hand .card:hover { transform: translateY(8px); }
 
-/* A trap that can be sprung on the attack being declared right now. It stands
- * up out of the hand rather than waiting to be found: the response window is
- * short, and every other card in the hand is inert during it. The pulse is on
- * the glow rather than the transform so that hovering still lifts the card. */
-.side.me .hand .card.armed {
-  transform: translateY(-14px);
+/* Two volumes, and the difference between them is the whole navigation model
+ * now that the move list is gone.
+ *
+ * `armed` is loud: the game has stopped and is waiting for you to pick one of
+ * these. A trap you can spring on the attack being declared right now, the
+ * Cookie you open with, the Cookie an effect is pointing at. Two or three cards
+ * among a dozen inert ones, so a card in the hand stands up out of it rather
+ * than waiting to be found. The pulse is on the glow rather than the transform,
+ * so hovering can still lift the card. */
+.card.armed {
   animation: armed-glow 1.1s ease-in-out infinite alternate;
+  cursor: pointer;
 }
+.side.me .hand .card.armed { transform: translateY(-14px); }
 .side.me .hand .card.armed:hover { transform: translateY(-22px) scale(1.05); }
 @keyframes armed-glow {
   from { box-shadow: 0 0 0 2px var(--good), 0 0 9px rgba(67,192,123,.30); }
   to   { box-shadow: 0 0 0 2px var(--good), 0 0 21px rgba(67,192,123,.62); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .side.me .hand .card.armed {
+  .card.armed {
     animation: none;
     box-shadow: 0 0 0 2px var(--good), 0 0 16px rgba(67,192,123,.45);
   }
 }
+
+/* `actionable` is quiet: this card has a menu behind it. On a good turn that is
+   most of your hand and both your Cookies, which is exactly why it cannot be
+   the loud one — a glow on everything would say nothing. A thin cool ring and
+   a pointer, no pulse and no lift. */
+.card.actionable {
+  box-shadow: 0 0 0 1.5px rgba(74,168,255,.55);
+  cursor: pointer;
+}
+.side.me .hand .card.actionable { transform: translateY(-5px); }
+.side.me .hand .card.actionable:hover { transform: translateY(-14px) scale(1.05); }
+
+/* Hovering a move — a row in a card's menu, a button in the middle of the
+   table — rings the cards it touches: gold for the one acting, red for the one
+   it lands on. These come *after* `actionable` on purpose. Both are a plain
+   box-shadow on `.card.<one class>`, so the later rule wins, and if the ring
+   for "this card has a menu" outranked the ring for "this is the card you are
+   pointing at" you could not see what an attack was aimed at. */
+.card.hl { box-shadow: 0 0 0 2px var(--accent), 0 6px 18px rgba(0,0,0,.6); z-index: 3; }
+.card.hl-target { box-shadow: 0 0 0 2px var(--bad), 0 6px 18px rgba(0,0,0,.6); z-index: 3; }
 
 .middle { display: flex; align-items: center; justify-content: center; min-height: 26px; }
 .banner { font-size: 12px; color: var(--dim); padding: 4px 12px; border-radius: 999px; border: 1px solid transparent; }
@@ -514,18 +538,32 @@ body.has-cardback .card.back::after { content: none; }
 .panel {
   grid-area: panel;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto minmax(120px, 40%);
+  grid-template-rows: auto minmax(200px, 1fr) auto auto auto minmax(84px, 20%);
   border-left: 1px solid var(--line);
   background: var(--panel);
   min-height: 0;
 }
+/* Pinned rather than auto-placed: the reveals strip spends most of the game
+   at `display: none`, and an auto-placed row it vacates drags everything
+   below it up one — the move list ends up in the log's row. */
+.panel > .panel-head   { grid-row: 1; }
+.panel > .preview-dock { grid-row: 2; }   /* the row that grows */
+.panel > .options      { grid-row: 3; }   /* one line of "where to click" */
+.panel > .reveals      { grid-row: 4; }   /* the middle band */
+.panel > .log-head     { grid-row: 5; }
+.panel > .log          { grid-row: 6; }
 .panel-head { padding: 10px 12px 6px; border-bottom: 1px solid var(--line); }
 .panel-head h2 { font-size: 13px; margin: 0; }
 .panel-head .who { font-size: 11px; color: var(--dim); margin-top: 2px; }
 
-/* the standing record of the last HP reveal */
+/* The standing record of the last HP reveal, in the middle of the panel
+   between the card viewer above and the log below. The animation over the
+   board is the moment and it is gone in a second; this is the part you can
+   actually read, so the cards are drawn at hand size rather than as slivers
+   and the strip scrolls sideways when a big hit turns over six of them. */
 .reveals {
-  padding: 8px 10px;
+  padding: 8px 10px 9px;
+  border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: rgba(240, 169, 43, .06);
 }
@@ -534,30 +572,20 @@ body.has-cardback .card.back::after { content: none; }
   font-size: 9.5px; text-transform: uppercase; letter-spacing: .5px;
   color: var(--dim); margin-bottom: 6px;
 }
-.reveal-row { display: flex; gap: 8px; flex-wrap: wrap; }
-.reveal-item { width: 46px; }
-.reveal-item .cname { font-size: 9px; line-height: 1.15; color: var(--dim); margin-top: 3px; }
+.reveal-row {
+  display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden;
+  padding-bottom: 2px;
+}
+.reveal-item { flex: 0 0 auto; width: 74px; }   /* matches .card.mid */
+.reveal-item .cname {
+  font-size: 9.5px; line-height: 1.15; color: var(--dim); margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .reveal-item.isflip .cname { color: var(--accent); font-weight: 700; }
 .reveal-item.isflip .card { box-shadow: 0 0 0 1.5px var(--accent), 0 2px 8px rgba(0,0,0,.5); }
 
-.options { overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
-.opt {
-  display: flex; align-items: center; gap: 8px;
-  text-align: left; width: 100%;
-  padding: 7px 9px; border-radius: 8px;
-  background: #262b39; border: 1px solid transparent;
-}
-.opt:hover { border-color: var(--accent); }
-.opt .k {
-  font-size: 9px; text-transform: uppercase; letter-spacing: .4px;
-  color: var(--dim); background: #1a1e29; border-radius: 4px; padding: 1px 5px;
-}
-.opt img { width: 26px; height: 36px; object-fit: cover; border-radius: 3px; }
-.opt.end { background: #22283a; color: var(--dim); }
-.opt.attack { background: #33222a; }
-.opt.support { background: #23283a; color: #c3cbdd; }
-.opt.extra { background: #332a1c; color: #f0d19a; }
-.optgroup { font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--dim); padding: 6px 4px 0; }
+/* One line of "where to click", not a list. See `renderOptions`. */
+.options { padding: 6px 4px; }
 .filterbar { padding: 4px 9px; font-size: 11px; color: var(--dim); display: flex; justify-content: space-between; align-items: center; }
 
 .log-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-top: 1px solid var(--line); }
@@ -566,6 +594,14 @@ body.has-cardback .card.back::after { content: none; }
 .log li { padding: 1px 0; }
 .log li::marker { color: #4a5470; font-size: 10px; }
 .log li.new { color: var(--accent); }
+/* A card name in the log previews like a card on the table. Underlined rather
+   than coloured: the line's own colour already says whether it was a swing, a
+   rider or a faint, and a second colour on top would fight it. */
+.logcard {
+  text-decoration: underline dotted rgba(255,255,255,.32);
+  text-underline-offset: 2px; cursor: help;
+}
+.logcard:hover { text-decoration-color: var(--accent); color: #fff; }
 
 /* ------------------------------------------------------------------ preview */
 .preview {
@@ -583,6 +619,37 @@ body.has-cardback .card.back::after { content: none; }
 .preview .meta { color: var(--dim); font-size: 11px; margin-bottom: 6px; }
 .preview .text { font-size: 11.5px; white-space: pre-wrap; }
 .preview .atkline { color: var(--accent); font-size: 11.5px; margin-bottom: 4px; }
+
+/* -- the dock ---------------------------------------------------------- */
+/* On the play tab the preview lives here instead: a fixed slot at the top of
+   the panel, right above the move list. Its height does not depend on what is
+   in it, so hovering along a row of cards cannot make the options underneath
+   jump around — and nothing is ever drawn over the board. */
+.preview-dock {
+  min-height: 0;
+  padding: 10px; border-bottom: 1px solid var(--line);
+  overflow: auto; position: relative;
+  /* A long rules text is taller than the slot and scrolls. The fade is what
+     says so — without it the last line is simply sliced off and reads as a
+     rendering fault rather than as "there is more, wheel down". */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 16px), transparent);
+}
+.preview-dock.empty::before {
+  content: "hover a card to see it here";
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--dim); opacity: .55; text-align: center;
+}
+.preview.indock {
+  position: static; width: auto; padding: 0;
+  border: none; box-shadow: none; background: none;
+}
+/* Art first and as big as the slot allows, then the words under it. Capping
+   the height rather than the width is what keeps a tall card whole. */
+.preview.indock img {
+  width: auto; max-width: 100%; max-height: min(46vh, 400px);
+  margin: 0 auto 9px; border-radius: 6px;
+}
 
 /* ------------------------------------------------------------------ dialogs */
 dialog {
@@ -718,11 +785,6 @@ body.online #reveal-label { display: none; }
   background: rgba(12,16,24,.9); border: 1px solid var(--line);
   padding: 4px 12px; border-radius: 999px; pointer-events: none;
 }
-.card.choosable {
-  box-shadow: 0 0 0 2px var(--accent2), 0 0 18px rgba(74,168,255,.35);
-  cursor: pointer;
-}
-.opt .throw { font-size: 18px; line-height: 1; }
 
 /* ------------------------------------------------------------- card menu */
 /* What this card can do, named the way the card names it. */
@@ -744,10 +806,13 @@ body.online #reveal-label { display: none; }
 .cardmenu-row:hover { border-color: var(--accent); background: #2c3244; }
 .cardmenu-row .skill { font-weight: 600; font-size: 12.5px; }
 .cardmenu-row .detail { font-size: 10.5px; color: var(--dim); }
-.opt .skilltag {
-  font-size: 10px; font-weight: 700; color: var(--accent);
-  background: rgba(240,169,43,.12); border-radius: 4px; padding: 1px 5px;
-  white-space: nowrap;
+/* The number key that takes this row. Absolute so it does not push the two
+   lines of text around; the row reserves the gutter for it. */
+.cardmenu-row { position: relative; padding-left: 26px; }
+.cardmenu-row .k {
+  position: absolute; left: 7px; top: 7px;
+  font-size: 9px; color: var(--dim);
+  background: #1a1e29; border-radius: 4px; padding: 1px 5px;
 }
 
 /* a skill, Item or Trap confirming that it went off */
@@ -1030,14 +1095,19 @@ body.online #reveal-label { display: none; }
   50%      { box-shadow: 0 0 0 4px rgba(240, 169, 43, 0); }
 }
 
-/* end turn, where the eye already is */
-.endturn { display: flex; justify-content: center; }
+/* The tray in the middle of the table: End turn, and every move no card on the
+   board can carry. Where the eye already is, and the only list left on screen. */
+.endturn { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
 .endturn.hidden { display: none; }
-.endturn-btn {
-  padding: 7px 22px; border-radius: 999px; font-weight: 600;
-  background: #2a3142; border-color: var(--line); color: var(--ink);
+.tray-btn {
+  padding: 7px 18px; border-radius: 999px; font-weight: 600; font-size: 12px;
+  background: #313a4f; border-color: var(--line); color: var(--ink);
 }
-.endturn-btn:hover { border-color: var(--accent); background: #333b50; color: #fff; }
+.tray-btn:hover { border-color: var(--accent); background: #3a4460; color: #fff; }
+/* End turn and Pass give the rest of your turn away; they read quieter than
+   the things you can still choose to do. */
+.tray-btn.end { background: #2a3142; color: var(--dim); font-weight: 500; }
+.tray-btn.end:hover { border-color: var(--accent); background: #333b50; color: #fff; }
 
 /* the log, by what actually happened */
 .log li.declare { color: #d8e2f2; }
@@ -1045,6 +1115,14 @@ body.online #reveal-label { display: none; }
 .log li.hit-effect { color: #9fd0ff; }      /* a rider, a skill, a trap */
 .log li.faint { color: var(--bad); font-weight: 600; }
 .log li.new { color: var(--accent); }
+/* A card name in the log previews like a card on the table. Underlined rather
+   than coloured: the line's own colour already says whether it was a swing, a
+   rider or a faint, and a second colour on top would fight it. */
+.logcard {
+  text-decoration: underline dotted rgba(255,255,255,.32);
+  text-underline-offset: 2px; cursor: help;
+}
+.logcard:hover { text-decoration-color: var(--accent); color: #fff; }
 .log li.new.hit-attack { color: #ff8a82; }
 .log li.new.hit-effect { color: #8ac6ff; }
 
@@ -1063,6 +1141,7 @@ body.online #reveal-label { display: none; }
   position: absolute; z-index: 36; pointer-events: none;
   font-size: 46px; font-weight: 900; letter-spacing: -1px; line-height: 1;
   transform: translate(-50%, -50%);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
   /* A hard dark edge so the number reads over card art of any colour. The
      stroke is painted behind the glyph where `paint-order` is honoured; the
      ring of shadows is the fallback where it is not, and doubles as the drop
@@ -1088,6 +1167,13 @@ body.online #reveal-label { display: none; }
    spare cards, so the extra ticks sit on the end of the bar and glow. */
 .hpbar i.over { background: var(--good); box-shadow: 0 0 6px var(--good); }
 
+/* The name of whatever hit, under the number. Small, plain and in the number's
+   colour: it has to be readable over card art without competing with the -3. */
+.hitnum .src {
+  font-size: 10.5px; font-weight: 700; letter-spacing: 0; line-height: 1.1;
+  max-width: 140px; text-align: center;
+  -webkit-text-stroke: 2.5px rgba(5, 8, 13, .95);
+}
 .hitnum.heal {
   color: #57e08a; font-size: 38px;
   animation: hitnum-effect 1000ms cubic-bezier(.25,.7,.3,1) forwards;

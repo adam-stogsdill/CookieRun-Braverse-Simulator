@@ -306,6 +306,7 @@ def gim_on_play(ctx: Ctx) -> None:
             card.rested = False
             return
 
+# -- BS8-056 Spicy Dumpling Cookie -------------------------------------------
 
 # --- BS8-059 Mystic Flour Cookie --------------------------------------------
 @effect("BS8-059", Trigger.ACTIVATE)

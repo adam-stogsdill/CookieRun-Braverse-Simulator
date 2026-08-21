@@ -132,3 +132,41 @@ def test_crossover_of_two_mono_parents_stays_legal(db, wide):
     assert validate(child, db).ok
     # Repair keeps the child inside the colours it actually leans on.
     assert len(Counter(db[c].color for c in child)) <= 2
+
+
+def test_priced_blockers_are_in_the_deckbuilder_pool(db):
+    """【Blocker】 <{G}> is a card the engine plays in full, effect registry or
+    not — the marker and the price are read straight off the printed line. The
+    pool used to ask only "is there an effect, or is the card blank?", so every
+    energy-priced Blocker was filed as unimplemented and vanished from the deck
+    builder and from deck evolution."""
+    from braverse.cards import blocker_price
+    from braverse.deckgen import implemented_pool
+    from braverse.enums import Marker
+
+    pool = {c.id for c in implemented_pool(db)}
+    priced = [c for c in db.cards.values()
+              if c.is_cookie and blocker_price(c) is not None]
+    assert len(priced) >= 20
+    assert not [c.id for c in priced if c.id not in pool]
+    assert "ST8-011" in pool          # Kiwi Cookie, 【Blocker】 <{G}>
+    assert "BS4-047" in pool          # Blue Lily Cookie, <Rest this card.>
+
+    # A card that merely *mentions* 【Blocker】 keeps its real text and stays
+    # out until someone codes it.
+    assert db["BS3-018"].has(Marker.BLOCKER)
+    assert "BS3-018" not in pool
+
+
+def test_an_unreadable_blocker_price_keeps_the_card_out_of_the_pool(db):
+    """A price the engine cannot charge means the Cookie cannot block at all,
+    so the card is mis-played and does not belong in the pool."""
+    import dataclasses
+
+    from braverse.cards import blocker_price, strip_blocker_text
+
+    kiwi = db["ST8-011"]
+    odd = dataclasses.replace(
+        kiwi, description="【Blocker】 <Sacrifice your firstborn.>")
+    assert blocker_price(odd) is None
+    assert strip_blocker_text(odd, odd.description) == odd.description

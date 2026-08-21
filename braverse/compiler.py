@@ -994,7 +994,11 @@ class BankEndTurnUntap(Op):
     amount: int = 1
 
     def run(self, ctx, env) -> bool:
-        ctx.me.set_active_at_end_turn += self.amount
+        source = ctx.source_card
+        if source is None and ctx.source_cookie is not None:
+            source = ctx.source_cookie.card
+        ctx.me.end_turn_untaps.append(
+            (source.card_id if source is not None else "", self.amount))
         return True
 
 

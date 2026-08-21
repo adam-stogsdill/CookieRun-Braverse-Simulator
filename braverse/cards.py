@@ -217,6 +217,52 @@ def _parse_attack(text: str) -> Attack | None:
     )
 
 
+# 【Blocker】 is engine-native: there is no effect to write for it, because the
+# engine reads the marker and its price straight off the printed line. Kept
+# here, next to the text it parses, so the two readers that need it — the
+# engine charging the price and the deck pool deciding whether a card is fully
+# played — cannot drift apart.
+_BLOCKER_LINE = re.compile(r"【Blocker】[ \t]*(?:<([^>]*)>)?")
+_BLOCKER_REMINDER = re.compile(r"\([^)]*redirect the attack[^)]*\)", re.I)
+_BLOCKER_ENERGY = re.compile(r"(?:\{[A-Za-z]+\})*")
+_BLOCKER_REST = re.compile(r"rest this card", re.I)
+
+
+def blocker_price(defn: CardDef) -> tuple[Cost, bool] | None:
+    """What redirecting an attack to this Cookie costs, as printed.
+
+    Returns ``(energy, rests itself)``, or ``None`` if the card has no
+    【Blocker】 — or prices it in a currency this engine cannot charge. An
+    unread price is not a free one: a Cookie whose bracket makes no sense to
+    us is left unable to block rather than blocking for nothing.
+    """
+    if not defn.has(Marker.BLOCKER):
+        return None
+    match = _BLOCKER_LINE.search(defn.description)
+    if match is None:
+        return None
+    token = match.group(1)
+    if token is None:
+        return Cost(), False
+    if _BLOCKER_ENERGY.fullmatch(token):
+        return Cost.parse(token), False
+    if _BLOCKER_REST.search(token):
+        return Cost(), True
+    return None
+
+
+def strip_blocker_text(defn: CardDef, text: str) -> str:
+    """``text`` with the 【Blocker】 line the engine plays natively removed.
+
+    Only for a card whose price actually reads: if the bracket is unreadable
+    the Cookie cannot block at all, and pretending the line is handled would
+    put a card the engine mis-plays into the pool.
+    """
+    if blocker_price(defn) is None:
+        return text
+    return _BLOCKER_LINE.sub(" ", _BLOCKER_REMINDER.sub(" ", text), count=1)
+
+
 def _parse_markers(text: str) -> frozenset[Marker]:
     found = set()
     for token in _MARKER_RE.findall(text or ""):

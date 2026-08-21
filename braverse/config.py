@@ -24,6 +24,12 @@ class RulesConfig:
     # redraw 6; the opponent may draw 1. Repeated until both have a Cookie.
     redraw_until_cookie: bool = True
     opponent_draws_on_redraw: int = 1
+    # NOT IN GUIDE. The guide gives one free redraw of the opening hand and,
+    # separately, the mandatory Cookie-less redraw that pays the opponent a
+    # card. This joins them: after the free one, a player holding no Cookie may
+    # keep redrawing at that same price rather than having it done for them.
+    # The cap is only a runaway guard on a deck that keeps missing.
+    max_mulligans: int = 20
 
     # --- turn (PLAY GUIDE, "Gameplay") ------------------------------------
     draw_per_turn: int = 2

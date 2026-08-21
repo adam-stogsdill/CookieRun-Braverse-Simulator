@@ -140,7 +140,11 @@ class PlayerState:
     hp_gained_this_turn: bool = False
     blockers_disabled: bool = False   # "your opponent cannot activate Blocker"
     traps_disabled: bool = False      # "your opponent cannot activate traps"
-    set_active_at_end_turn: int = 0   # banked "when your turn ends" untaps
+    # Banked "when your turn ends, set N cards as active" riders, one entry
+    # per rider as (card id that banked it, how many). A list rather than a
+    # running total so each one is its own item in the end-of-turn queue and
+    # can be named and ordered like any other end-of-turn effect.
+    end_turn_untaps: list = field(default_factory=list)
     used_once_per_game: set = field(default_factory=set)  # card uids
     support_skip_untap: set = field(default_factory=set)  # support card uids
     played_from_break_this_turn: set = field(default_factory=set)
@@ -234,8 +238,36 @@ class GameState:
         return self.winner is not None
 
     def record(self, message: str) -> None:
-        source = f"[{self.effect_sources[-1]}] " if self.effect_sources else ""
-        self.log.append(f"T{self.turn_number} P{self.turn_player} {source}{message}")
+        self.log.append(f"T{self.turn_number} P{self.turn_player} "
+                        f"{self.source_stamp()}{message}")
+
+    def source_stamp(self) -> str:
+        """`[Card Name]`, or `[Card Name \u00b7 trap]` when the kind is known.
+
+        The name alone left "effect damage" doing far too much work: the same
+        card can hit you as a trap, as an 【Activate】 skill or as a FLIP that
+        turned over mid-swing, and the record read identically for all three.
+        Entries are either a bare name (older callers) or a `(name, kind)`
+        pair; both are accepted so nothing has to be updated in lockstep.
+        """
+        name, kind = self.source_name(), self.source_kind()
+        if not name:
+            return ""
+        return f"[{name} \u00b7 {kind}] " if kind else f"[{name}] "
+
+    def source_name(self) -> str:
+        """The card whose effect is resolving right now, or "" for none."""
+        if not self.effect_sources:
+            return ""
+        top = self.effect_sources[-1]
+        return top[0] if isinstance(top, tuple) else top
+
+    def source_kind(self) -> str:
+        """One word for what sort of thing that is — trap, FLIP, 【Activate】."""
+        if not self.effect_sources:
+            return ""
+        top = self.effect_sources[-1]
+        return top[1] if isinstance(top, tuple) else ""
 
     def all_cookies(self) -> list[tuple[int, Cookie]]:
         return [(p.index, c) for p in self.players for c in p.battle]

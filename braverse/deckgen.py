@@ -18,7 +18,7 @@ from typing import Callable, Sequence
 
 from . import config as cfg
 from .agents import HeuristicAgent, SeatedAgent
-from .cards import CardDB, CardDef, default_db
+from .cards import CardDB, CardDef, default_db, strip_blocker_text
 from .decks import validate
 from .effects import Trigger, is_implemented
 from .engine import Game
@@ -27,13 +27,23 @@ TRIGGERS = list(Trigger)
 
 
 def implemented_pool(db: CardDB) -> list[CardDef]:
-    """Cards the engine plays correctly: vanilla bodies plus coded effects."""
+    """Cards the engine plays correctly: vanilla bodies plus coded effects.
+
+    "Vanilla" is not the same as "blank". 【Blocker】 has no entry in the effect
+    registry because it needs none — the engine reads the marker and its price
+    off the printed line — so a Cookie whose only text is a readable 【Blocker】
+    line is played in full. Counting that line as unimplemented text kept every
+    energy-priced Blocker out of the deck builder and out of deck evolution,
+    which is most of them: the rest-priced ones only got in because they happen
+    to carry a second, hand-written ability.
+    """
     pool = []
     for card in db.cards.values():
         if card.is_ban or card.type.value == "NPC":
             continue
         text = " ".join([card.description, card.flip_text,
-                         card.attack.text if card.attack else ""]).strip()
+                         card.attack.text if card.attack else ""])
+        text = strip_blocker_text(card, text).strip()
         coded = is_implemented(card.id)
         if coded or not text:
             pool.append(card)

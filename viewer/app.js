@@ -10,7 +10,6 @@ const state = {
   snap: null,
   version: -1,
   pendingId: null,
-  filterUid: null,
   config: { decks: [], pilots: [] },
   busy: false,
   browsing: null,       // {seat, zone} while the trash/break browser is open
@@ -220,10 +219,25 @@ function prettyPilot(name) {
 }
 
 /* ---------------------------------------------------------------- preview */
+/* Hovering a card shows it big. It used to do that under the cursor, which put
+ * the enlargement on top of the thing you were looking at — hover a Cookie in
+ * your battle area and the preview covers the row it sits in. So the play view
+ * has a fixed dock at the top of the right-hand panel instead, directly above
+ * the move list: the card lands in the one place your eyes already go for the
+ * options, and the board is never covered.
+ *
+ * The floating behaviour is still there for the views that have no panel — the
+ * deck builder, the deck showcase, and the trash/break <dialog>, which is in
+ * the browser's top layer and can only be drawn over from inside itself. */
 const preview = el("#preview");
+const previewDock = el("#preview-dock");
+
+/** Is the preview currently parked in the panel rather than chasing the mouse? */
+function previewDocked() { return preview.parentElement === previewDock; }
 
 function showPreview(card, event) {
   if (!card) return;
+  previewDock.classList.remove("empty");
   preview.innerHTML = "";
   if (card.img) {
     const img = h("img");
@@ -249,6 +263,7 @@ function showPreview(card, event) {
 }
 
 function movePreview(event) {
+  if (previewDocked()) return;
   if (!event || preview.classList.contains("hidden")) return;
   const pad = 14;
   const width = preview.offsetWidth || 260;
@@ -261,8 +276,21 @@ function movePreview(event) {
   preview.style.top = y + "px";
 }
 
-function hidePreview() { preview.classList.add("hidden"); }
+function hidePreview() {
+  preview.classList.add("hidden");
+  previewDock.classList.add("empty");
+}
 window.addEventListener("mousemove", (e) => { if (preview.dataset.follow) movePreview(e); });
+
+/** Park the preview in the panel: no cursor tracking, nothing over the board. */
+function dockPreview() {
+  preview.classList.add("indock");
+  preview.style.left = "";
+  preview.style.top = "";
+  if (preview.parentElement !== previewDock) previewDock.appendChild(preview);
+  hidePreview();
+}
+dockPreview();
 
 /* ------------------------------------------------------------- the card back */
 /* The real Braverse card back is not among the assets this project can fetch —
@@ -312,17 +340,17 @@ function cardNode(card, opts = {}) {
   node.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
   node.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
   if (opts.uid !== undefined && opts.uid !== null) {
-    if (opts.seat === state.mySeat) {
-      makeDraggable(node, opts.uid, opts.seat);
-      // Your own cards are dragged to play them, which is why they had no
-      // click handler at all — but a question that names one of your Cookies
-      // ("Select one of your Cookies") is answered by pointing at it, exactly
-      // as it is on your opponent's side. Without this the only way to answer
-      // was the list in the far corner, while the Cookie sat right there.
-      node.addEventListener("click", () => answerByPointing(opts.uid));
-    } else {
-      node.addEventListener("click", () => toggleFilter(opts.uid));
-    }
+    if (opts.seat === state.mySeat) makeDraggable(node, opts.uid, opts.seat);
+    // The same click on either side of the table. Your own cards are also
+    // dragged to play them; a drag that goes nowhere lands here too.
+    node.addEventListener("click", () => cardClick(opts.uid, node));
+    /* The marker `renderTray` reads to decide whether a move has somewhere to
+     * be clicked. It goes on here, next to the handler, because the two have to
+     * agree: a card drawn face-up on top of a pile carries a uid and answers
+     * `[data-uid]` searches, but the pile's layers are inert, so a move that
+     * named it would have been silently unreachable. Same condition, same
+     * line — they cannot drift apart. */
+    node.classList.add("pickable");
   }
   return node;
 }
@@ -566,12 +594,7 @@ function renderSide(seat, snap) {
   const hand = h("div", "hand");
   hand.dataset.zone = "hand";
   if (p.hand.length) {
-    const armed = opponent ? null : armedTraps();
-    p.hand.forEach((c) => {
-      const node = cardNode(c, { mid: true, uid: c.uid, seat });
-      if (armed && armed.has(c.uid)) node.classList.add("armed");
-      hand.appendChild(node);
-    });
+    p.hand.forEach((c) => hand.appendChild(cardNode(c, { mid: true, uid: c.uid, seat })));
   } else {
     for (let i = 0; i < p.handCount; i++) hand.appendChild(faceDown("mid"));
   }
@@ -586,22 +609,64 @@ function renderSide(seat, snap) {
     side.appendChild(mat);
     side.appendChild(handRow);
   }
+  markActionable(side, !opponent);
 }
 
-/* End turn is the one move you reach for constantly, and hunting for it at the
- * bottom of a list on the far right is the worst place to put it. */
-function renderEndTurn(snap) {
+/* The middle of the table: End turn, and every move no card can carry.
+ *
+ * With the move list gone the board has to be able to reach every option, and
+ * almost all of them name a card you can click. The rest have nothing to point
+ * at. End turn and Pass name no card at all — End turn is the move you reach
+ * for constantly and the far corner of the screen was always the worst place
+ * for it. An 【EXTRA】 played standalone names a card inside a pile. A
+ * mid-effect question can offer a banked rider that was never a card on the
+ * board.
+ *
+ * Which ones are homeless is worked out from the finished markup rather than
+ * from a list of kinds: an option is homeless when nothing on screen carries
+ * its uid. So a move nobody thought about lands here instead of quietly
+ * becoming unplayable, which is the failure this whole layout could otherwise
+ * have — and `tests/test_viewer.py` pins the server side of it.
+ */
+function homelessOptions(snap) {
+  const pending = snap.pending;
+  if (!pending || state.animating || pending.waiting) return [];
+  // These two have already claimed their own place on screen, decline included.
+  if (pending.centre || pending.pick) return [];
+  return pending.options.filter((opt) => {
+    if (opt.subject === undefined) return true;
+    return !document.querySelector(`.card.pickable[data-uid="${opt.subject}"]`);
+  });
+}
+
+function renderTray(snap) {
   const host = el("#endturn");
   host.innerHTML = "";
   const pending = snap.pending;
-  const end = pending && !state.animating
-    && pending.options.find((o) => o.kind === "EndTurn");
-  if (!end) { host.classList.add("hidden"); return; }
+  const homeless = homelessOptions(snap);
+  const declines = !!(pending && pending.optional && !pending.centre && !pending.pick
+                      && !state.animating && !pending.waiting);
+  if (!homeless.length && !declines) { host.classList.add("hidden"); return; }
   host.classList.remove("hidden");
-  const btn = h("button", "endturn-btn", "End turn");
-  btn.title = "End your turn (also on the list, and the last number key)";
-  btn.onclick = () => answer(end.index);
-  host.appendChild(btn);
+
+  // End turn goes last and looks different: it is the one that gives up the
+  // rest of your turn, and it should not sit first among the things you can
+  // still do.
+  const ordered = [...homeless].sort(byKindOrder);
+  ordered.forEach((opt) => {
+    const end = opt.kind === "EndTurn" || opt.kind === "Pass";
+    const btn = h("button", "tray-btn" + (end ? " end" : ""),
+                  opt.kind === "EndTurn" ? "End turn" : opt.label);
+    btn.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
+    btn.onmouseleave = () => { highlight(null); hidePreview(); };
+    btn.onclick = () => answer(opt.index);
+    host.appendChild(btn);
+  });
+  if (declines) {
+    const no = h("button", "tray-btn end", "Decline");
+    no.onclick = () => answer(null);
+    host.appendChild(no);
+  }
 }
 
 function renderBanner(snap) {
@@ -853,7 +918,18 @@ function playDamage(event, delay = 0) {
     }
 
     const node = h("div", "hitnum " + (attack ? "attack" : "effect"));
-    node.textContent = "-" + event.amount;
+    node.appendChild(h("span", "n", "-" + event.amount));
+    /* What hit, under the number. A red -2 floating off a Cookie says how much
+     * but never what, and "what" is the whole question when three different
+     * things can be hitting you in the same beat — the swing, the "Then, ..."
+     * rider on it, and a trap sprung in between. The engine names the source
+     * on the event; this is that name, with one word for what sort of thing it
+     * was where the two differ. */
+    if (event.sourceName) {
+      const kind = event.sourceKind && event.sourceKind !== "attack"
+        && event.sourceKind !== "effect" ? ` · ${event.sourceKind}` : "";
+      node.appendChild(h("span", "src", event.sourceName + kind));
+    }
     node.style.left = at.left + at.width / 2 - bounds.left + "px";
     node.style.top = at.top + at.height / 2 - bounds.top + "px";
     node.dataset.born = performance.now();
@@ -1138,7 +1214,10 @@ function renderReveals(events) {
   const row = h("div", "reveal-row");
   events.forEach((event) => {
     const item = h("div", "reveal-item" + (event.flip ? " isflip" : ""));
-    item.appendChild(cardNode(event.card, { small: true }));
+    // Drawn at the size a card in a hand is drawn, not as a thumbnail: this is
+    // the standing record of a scene that went past in under a second, and a
+    // 46px sliver of art is not something you can read a FLIP off.
+    item.appendChild(cardNode(event.card, { mid: true }));
     item.appendChild(h("div", "cname", (event.flip ? "FLIP! " : "") + event.card.name));
     row.appendChild(item);
   });
@@ -1189,7 +1268,19 @@ function flipCard(event, rank = 0, seq = 0) {
 /* A modal <dialog> is promoted to the browser's top layer, which paints above
  * every z-index on the page — so the hover preview has to move *into* the
  * dialog to be seen over it, and back out again afterwards. */
+/* Back to wherever the preview belongs for the view that is on screen. The
+ * dock only exists on the play tab; the builder and the showcase hide the
+ * panel, so there they go back to following the cursor. */
+function restorePreview() {
+  const panelHidden = document.body.classList.contains("view-build")
+    || document.body.classList.contains("view-table")
+    || !el("#showcase").classList.contains("hidden");
+  hostPreview(panelHidden ? document.body : previewDock);
+}
+
 function hostPreview(node) {
+  if (node === previewDock) { dockPreview(); return; }
+  preview.classList.remove("indock");
   if (preview.parentElement !== node) node.appendChild(preview);
   hidePreview();
 }
@@ -1250,54 +1341,28 @@ el("#browser-search").addEventListener("input", renderBrowser);
 el("#browser-close").onclick = () => { el("#browser").close(); state.browsing = null; };
 el("#browser").addEventListener("close", () => {
   state.browsing = null;
-  hostPreview(document.body);
+  restorePreview();
 });
 
 /* ---------------------------------------------------------------- options */
-/* Turn actions arrive in engine order, which buries the interesting moves
- * under a wall of "place this card as support". Group them the way a player
- * thinks about a turn instead. */
-const GROUPS = [
-  ["Attack", "Attack"],
-  ["PlayCookie", "Play a Cookie"],
-  ["PlayExtra", "EXTRA deck"],
-  ["PlaySupportCard", "Items & Stages"],
-  ["ActivateSkill", "Skills"],
-  ["PlayTrap", "Traps"],
-  ["Block", "Block"],
-  ["PlaceSupport", "Place as support"],
-  ["Pass", ""],
-  ["EndTurn", ""],
-];
+/* Moves arrive in engine order, which on a Cookie in hand offers "place this
+ * as support" above "play it". This is the order a player thinks in, and it
+ * sorts the rows of a card's menu and the buttons in the middle of the table.
+ * A kind not listed here sorts between the plays and the giving-up. */
+const KIND_ORDER = ["Attack", "PlayCookie", "PlayExtra", "PlaySupportCard",
+                    "ActivateSkill", "PlayTrap", "Block", "PlaceSupport",
+                    "Pass", "EndTurn"];
+
+function byKindOrder(a, b) {
+  const rank = (o) => {
+    const at = KIND_ORDER.indexOf(o.kind);
+    return at === -1 ? KIND_ORDER.indexOf("PlaceSupport") - 0.5 : at;
+  };
+  return rank(a) - rank(b);
+}
 
 /* The opening toss reads better as a hand than as a word. */
 const THROW_ICONS = { rock: "\u270a", paper: "\u270b", scissors: "\u270c\ufe0f" };
-
-function optionLabelClass(opt) {
-  if (opt.kind === "EndTurn" || opt.kind === "Pass") return "opt end";
-  if (opt.kind === "Attack") return "opt attack";
-  if (opt.kind === "PlaceSupport") return "opt support";
-  if (opt.kind === "PlayExtra") return "opt extra";
-  return "opt";
-}
-
-function groupOptions(options) {
-  const order = new Map(GROUPS.map(([kind], i) => [kind, i]));
-  const groups = [];
-  const byKind = new Map();
-  options.forEach((opt) => {
-    const kind = opt.kind || "";
-    if (!byKind.has(kind)) {
-      const entry = { kind, title: (GROUPS.find(([k]) => k === kind) || [, ""])[1], items: [] };
-      byKind.set(kind, entry);
-      groups.push(entry);
-    }
-    byKind.get(kind).items.push(opt);
-  });
-  groups.sort((a, b) => (order.has(a.kind) ? order.get(a.kind) : 50) -
-                        (order.has(b.kind) ? order.get(b.kind) : 50));
-  return groups;
-}
 
 /* Any question that is really "point at a card in your hand" is answered with
  * the hand itself: a discard cost, the Cookie you open with, the replacement
@@ -1365,6 +1430,19 @@ function renderPicker(snap) {
     ? (state.picked.length ? `${state.picked.length} of up to ${count}` : "none is allowed")
     : (state.picked.length === count ? "ready"
        : `choose ${count - state.picked.length} more`)));
+  /* An optional question is only half a question without the no. It used to
+   * come off the move list on the right; that list is gone, so the decline
+   * travels with the strip that took the question over. "Up to N" already has
+   * one — confirming with nothing picked is its no. */
+  if (pending.optional && !upTo) {
+    const no = h("button", "ghost", "Decline");
+    no.onclick = () => {
+      state.picked = [];
+      bar.classList.add("hidden");
+      answer(null);
+    };
+    foot.appendChild(no);
+  }
   foot.appendChild(confirm);
   bar.appendChild(foot);
   return true;
@@ -1406,81 +1484,83 @@ function renderCentre(snap) {
   return true;
 }
 
+/* The panel's one line about what the game is waiting for.
+ *
+ * This used to be the move list — every legal action as a button, stacked down
+ * the right-hand side. It was the biggest thing on screen and the least
+ * pleasant to use: it named cards you were already looking at, it grew to
+ * twenty rows on a busy turn, and it took the space the card you were hovering
+ * should have had. The moves live on the cards now, so all that is left here is
+ * a sentence saying where to click. It is deliberately one line: everything
+ * below it is the card viewer and the log.
+ */
 function renderOptions(snap) {
   const box = el("#options");
   box.innerHTML = "";
-  box.scrollTop = 0;
   const pending = snap.pending;
   const lastLine = (snap.log || []).slice(-1)[0] || "";
   setText(el("#prompt"), pending ? pending.prompt : (snap.over ? "Game over" : "Bots playing…"));
   el("#prompt-who").textContent = pending ? seatLabel(pending.seat, snap) : lastLine;
 
-  if (!pending) { state.filterUid = null; return; }
+  const say = (text, cls) => box.appendChild(h("div", "filterbar" + (cls ? " " + cls : ""), text));
+  if (!pending) return;
   if (pending.waiting) {
     // The question is the other seat's, and its options are that seat's hand,
     // so this browser was never sent them. Show what they are being asked.
-    state.filterUid = null;
-    box.appendChild(h("div", "filterbar waiting", "waiting for your opponent…"));
+    say("waiting for your opponent…", "waiting");
     return;
   }
-  if (pending.centre) {
-    box.appendChild(h("div", "filterbar", "answer in the middle of the table"));
-    return;
-  }
+  if (pending.centre) { say("answer in the middle of the table"); return; }
   if (pending.pick) {
-    box.appendChild(h("div", "filterbar",
-      pending.count > 1 ? "pick the cards on your hand below"
-                        : "pick the card on your hand below"));
+    say(pending.count > 1 ? "pick the cards on your hand below"
+                          : "pick the card on your hand below");
     return;
   }
 
-  if (state.filterUid !== null) {
-    const bar = h("div", "filterbar");
-    bar.appendChild(h("span", null, "filtered to the card you clicked"));
-    const clear = h("button", "ghost tiny", "clear");
-    clear.onclick = () => { state.filterUid = null; renderOptions(snap); highlight(null); };
-    bar.appendChild(clear);
-    box.appendChild(bar);
+  const { asked, actionable } = actionSets();
+  if (asked.size) {
+    say(asked.size === 1 ? "click the highlighted card"
+                         : `click one of the ${asked.size} highlighted cards`);
+    return;
   }
-
-  const options = pending.options.filter((o) =>
-    state.filterUid === null || (o.uids || []).includes(state.filterUid) || o.subject === state.filterUid);
-  const shown = options.length ? options : pending.options;
-
-  let n = 0;
-  groupOptions(shown).forEach((group) => {
-    if (group.title && group.items.length) box.appendChild(h("div", "optgroup", group.title));
-    group.items.forEach((opt) => {
-      const btn = h("button", optionLabelClass(opt));
-      n += 1;
-      btn.appendChild(h("span", "k", n <= 9 ? String(n) : "·"));
-      if (opt.img) {
-        const img = h("img");
-        img.src = opt.img;
-        img.onerror = () => img.remove();
-        btn.appendChild(img);
-      }
-      const icon = THROW_ICONS[opt.label];
-      if (icon) btn.appendChild(h("span", "throw", icon));
-      // Name the move the way the card does — "Tracker's Arrow", not "Attack".
-      if (opt.skill && (opt.kind === "Attack" || opt.kind === "ActivateSkill")) {
-        btn.appendChild(h("span", "skilltag", opt.skill));
-      }
-      btn.appendChild(h("span", null, opt.label));
-      btn.onclick = () => answer(opt.index);
-      btn.onmouseenter = () => highlight(opt);
-      btn.onmouseleave = () => highlight(null);
-      box.appendChild(btn);
-    });
-  });
-
-  if (pending.optional) {
-    const btn = h("button", "opt end");
-    btn.appendChild(h("span", "k", "0"));
-    btn.appendChild(h("span", null, "Decline"));
-    btn.onclick = () => answer(null);
-    box.appendChild(btn);
+  if (actionable.size) {
+    say(`click a card for its moves — ${actionable.size} can act`);
+    return;
   }
+  if (homelessOptions(snap).length) { say("answer in the middle of the table"); return; }
+  say("nothing to do");
+}
+
+/* What an option looks like in the preview dock. An option is not a card — it
+ * is a move — so this is the card it is about, found on the board or in the
+ * hand by uid, and falling back to the thumbnail and label the option carries
+ * when the move names nothing you can see (a banked rider, an EXTRA play). */
+function optionCard(opt) {
+  if (!opt) return null;
+  // Target before subject: hovering "Attack \u2192 Wind Archer Cookie" should show
+  // you what you are about to hit, not the Cookie you already clicked on.
+  const uid = opt.target !== undefined ? opt.target
+    : opt.subject !== undefined ? opt.subject : (opt.uids || [])[0];
+  const known = uid !== undefined ? cardByUid(uid) : null;
+  if (known) return known;
+  if (!opt.img && !opt.label) return null;
+  return { img: opt.img, name: opt.label };
+}
+
+/** Every card this browser can see, by uid — the board, both hands, the piles. */
+function cardByUid(uid) {
+  const snap = state.snap;
+  if (!snap || !snap.players) return null;
+  for (const p of snap.players) {
+    for (const cookie of p.battle || []) {
+      if (cookie.card && cookie.card.uid === uid) return cookie.card;
+    }
+    for (const zone of [p.hand, p.support, p.stage, p.trash, p.extra, p["break"]]) {
+      const hit = (zone || []).find((c) => c && c.uid === uid);
+      if (hit) return hit;
+    }
+  }
+  return null;
 }
 
 function highlight(opt) {
@@ -1494,15 +1574,27 @@ function highlight(opt) {
   });
 }
 
-/* A click on one of your own cards, which is also the gesture that starts a
- * drag. It answers only a question that actually names that card; anything
- * else is left to the drag, so playing cards is unchanged. */
-function answerByPointing(uid) {
+/* One click, one card, and one place every move comes from.
+ *
+ * There is no move list on the right any more, so this is the whole vocabulary
+ * for acting on a card. A question that names the card answers with it on the
+ * first click — "damage which Cookie?" should not make you open a menu to say
+ * "that one". Anything else opens the card's own menu of what it can do, which
+ * is where attacks, skills, plays and supports live. It runs the same on both
+ * sides of the table: your Cookie's menu holds its attacks, your opponent's
+ * Cookie answers the question that is pointing at it.
+ */
+function cardClick(uid, node) {
   // A drag that ends on top of its own card fires a click too. That was a
   // drag, and it has already been answered or cancelled.
   if (Date.now() - lastDragEnd < 250) return;
   const direct = directOption(uid);
-  if (direct) answer(direct.index);
+  if (direct) { closeCardMenu(); answer(direct.index); return; }
+  // No moves is not "nothing happens": a menu left open over the last card has
+  // to shut, which `openCardMenu` does before it decides there is nothing to
+  // show. Hovering the card has already put it in the panel, so a dead card
+  // clicked is a card looked at.
+  openCardMenu(uid, node);
 }
 
 /** The pending option that names this card, if the question is ours to answer. */
@@ -1515,19 +1607,6 @@ function directOption(uid) {
   if ((pending.count || 1) > 1 || pending.upTo) return null;
   return (pending.options || []).find(
     (o) => (o.kind === "cookie" || o.kind === "card") && o.subject === uid) || null;
-}
-
-function toggleFilter(uid) {
-  const snap = state.snap;
-  if (!snap || !snap.pending || state.animating) return;
-  // Mid-effect questions ("Damage which Cookie?") name a card, so clicking that
-  // card on the board *is* the answer rather than a filter.
-  const direct = directOption(uid);
-  if (direct) { answer(direct.index); return; }
-  const node = document.querySelector(`.card[data-uid="${uid}"]`);
-  if (node && movesFor(uid).length) { openCardMenu(uid, node); return; }
-  state.filterUid = state.filterUid === uid ? null : uid;
-  renderOptions(snap);
 }
 
 /* --------------------------------------------------------- the card menu */
@@ -1545,6 +1624,7 @@ function openCardMenu(uid, node) {
   const moves = movesFor(uid);
   if (!moves.length) return;
 
+  moves.sort(byKindOrder);
   const menu = h("div", "cardmenu");
   menu.id = "cardmenu";
   const card = (state.snap.players || [])
@@ -1556,14 +1636,18 @@ function openCardMenu(uid, node) {
   menu.appendChild(h("div", "cardmenu-title",
     (title && title.card.name) || (card && card.name) || "Card"));
 
-  moves.forEach((opt) => {
+  moves.forEach((opt, i) => {
     const row = h("button", "cardmenu-row");
+    if (i < 9) row.appendChild(h("span", "k", String(i + 1)));
     row.appendChild(h("span", "skill", opt.skill || "Play"));
     // The engine's own description carries the target and the numbers.
     const detail = opt.label.replace(/^[^:]*:\s*/, "").replace(/^Play\s+/, "");
     if (detail && detail !== opt.skill) row.appendChild(h("span", "detail", detail));
-    row.onmouseenter = () => highlight(opt);
-    row.onmouseleave = () => highlight(null);
+    // Same hover contract as everything else: the board lights up and the card
+    // the move is about lands in the panel. For an attack that is the Cookie
+    // you are about to hit, which is the one you want to read before swinging.
+    row.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
+    row.onmouseleave = () => { highlight(null); hidePreview(); };
     row.onclick = (event) => {
       event.stopPropagation();
       closeCardMenu();
@@ -1592,18 +1676,6 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") closeCardMenu();
 });
 
-/** Outline the cards a mid-effect question is asking you to pick between. */
-function markChoosable(snap) {
-  document.querySelectorAll(".choosable").forEach((n) => n.classList.remove("choosable"));
-  const pending = snap.pending;
-  if (!pending) return;
-  pending.options.forEach((opt) => {
-    if (opt.kind !== "cookie" && opt.kind !== "card") return;
-    document.querySelectorAll(`.card[data-uid="${opt.subject}"]`)
-      .forEach((n) => n.classList.add("choosable"));
-  });
-}
-
 /* --------------------------------------------------------- drag and drop */
 /* Dragging is a second way to name an option that already exists, never a new
  * kind of move: a drag resolves to (subject, target) and then looks for the one
@@ -1615,17 +1687,64 @@ function pendingOptions() {
   return snap && snap.pending && !state.animating ? snap.pending.options : [];
 }
 
-/* Traps you can actually spring, right now.
+/* What the cards on screen can do right now, at two different volumes.
  *
- * A response window is the one moment the hand can act on someone else's turn,
- * and the only thing in it that can act is a trap you can pay for — the engine
- * already leaves out the ones whose effect would land on nothing. Standing them
- * up out of the hand says so without the player having to click through six
- * cards to find out which one is live. */
-function armedTraps() {
-  return new Set(pendingOptions()
-    .filter((o) => o.kind === "PlayTrap")
-    .map((o) => o.subject));
+ * `asked` is a question the game has stopped for: a trap you can spring in a
+ * response window, a Cookie you can block with, the Cookie you open with, the
+ * Cookie an effect wants you to point at. There are two or three of them among
+ * a dozen dead cards and nothing proceeds until you choose, so they get the
+ * loud treatment — raised out of the hand, ringed and pulsing.
+ *
+ * `actionable` is the quiet one: every card with something in its menu. On a
+ * good turn that is most of your hand and both your Cookies, which is exactly
+ * why it cannot share the loud signal — a glow on everything means nothing. It
+ * is a soft ring that says "there is a menu behind this click", and it is the
+ * thing that replaced reading the move list to find out what was live.
+ */
+function actionSets() {
+  const asked = new Set();
+  const actionable = new Set();
+  const pending = state.snap && state.snap.pending;
+  if (!pending) return { asked, actionable };
+  const options = pendingOptions();
+  options.forEach((o) => {
+    if (o.subject !== undefined) actionable.add(o.subject);
+  });
+  // A response window is the one moment your cards act on someone else's turn,
+  // and a trap or a blocker is the only thing in it that can. The engine has
+  // already dropped the ones whose effect would land on nothing.
+  options.forEach((o) => {
+    if (o.kind === "PlayTrap" || o.kind === "Block") asked.add(o.subject);
+  });
+  // Everything else only counts as asked if pointing at one card *is* a whole
+  // answer: a batch goes to the picker strip, and a `pick` or a `centre`
+  // question has already claimed its own place on screen. `directOption`'s rule.
+  if (!pending.pick && !pending.centre
+      && (pending.count || 1) === 1 && !pending.upTo) {
+    options.forEach((o) => {
+      if ((o.kind === "card" || o.kind === "cookie") && o.subject !== undefined) {
+        asked.add(o.subject);
+      }
+    });
+  }
+  return { asked, actionable };
+}
+
+/* Paint those two volumes onto the finished markup for one side of the table.
+ *
+ * A pass over the built nodes rather than a flag threaded through each builder:
+ * the cards come from four of them — hand, battle area, support, stage — and a
+ * rule that has to be remembered in four places is a rule that gets forgotten
+ * in one of them. `quietToo` is off for your opponent's half, where a card
+ * having a menu is none of your business; being *asked* about one still is. */
+function markActionable(root, quietToo) {
+  const { asked, actionable } = actionSets();
+  if (!asked.size && !(quietToo && actionable.size)) return;
+  root.querySelectorAll(".card.pickable[data-uid]").forEach((node) => {
+    const uid = Number(node.dataset.uid);
+    if (asked.has(uid)) node.classList.add("armed");
+    else if (quietToo && actionable.has(uid)) node.classList.add("actionable");
+  });
 }
 
 /** Legal actions that this card could be the subject of. */
@@ -1727,7 +1846,7 @@ function endDrag(event) {
   } else {
     // A drag that goes nowhere is a click: ask the card what it can do.
     const node = document.querySelector(`.card[data-uid="${uid}"]`);
-    if (node) openCardMenu(uid, node); else toggleFilter(uid);
+    if (node) openCardMenu(uid, node);
   }
 }
 
@@ -1746,7 +1865,6 @@ async function answer(index) {
   // one the server is asking now; an index from it would answer the wrong thing.
   if (state.busy || state.animating) return;
   state.busy = true;
-  state.filterUid = null;
   el("#options").innerHTML = "";
   try {
     // The pending id goes with the answer so the server can drop it if the
@@ -1768,11 +1886,62 @@ function roomAuth() {
 }
 
 /* -------------------------------------------------------------------- log */
+/* -------------------------------------------------- card names in the log */
+/* The log is prose, and the only handle it gives on a card is its name:
+ * "Wind Archer Cookie takes 3 attack damage from Gold Citrine Cookie's
+ * Tracker's Arrow". Three cards in one line, none of them clickable, and two
+ * of them quite possibly not on the board any more. So every name in the log
+ * becomes hoverable and previews in the panel exactly as a card on the table
+ * does — which is also the fastest way to find out what a FLIP you blinked
+ * through actually said.
+ *
+ * The index is every distinct card name in the pool, fetched once. Not the
+ * cards in this game: the log names cards from a trash, a deck, and cards that
+ * have already left the board entirely, so nothing narrower would be right. */
+const cardIndex = { byName: new Map(), matcher: null };
+
+async function loadCardIndex() {
+  try {
+    const data = await api("/api/cardnames");
+    (data.cards || []).forEach((card) => cardIndex.byName.set(card.name, card));
+    // Longest first, so "Wind Archer Cookie" wins over a shorter name inside
+    // it. The server already sorts that way; the alternation preserves it.
+    const names = [...cardIndex.byName.keys()]
+      .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (names.length) cardIndex.matcher = new RegExp("(" + names.join("|") + ")", "g");
+  } catch (err) {
+    // A log without hover is a log; it is not worth failing the page over.
+    cardIndex.matcher = null;
+  }
+}
+loadCardIndex();
+
+/** One log line, with every card name in it turned into a hover target. */
+function logLine(line) {
+  const li = h("li");
+  if (!cardIndex.matcher) { li.textContent = line; return li; }
+  cardIndex.matcher.lastIndex = 0;
+  let at = 0;
+  let match;
+  while ((match = cardIndex.matcher.exec(line)) !== null) {
+    if (match.index > at) li.appendChild(document.createTextNode(line.slice(at, match.index)));
+    const card = cardIndex.byName.get(match[0]);
+    const tag = h("span", "logcard", match[0]);
+    tag.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
+    tag.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
+    li.appendChild(tag);
+    at = match.index + match[0].length;
+  }
+  if (at < line.length) li.appendChild(document.createTextNode(line.slice(at)));
+  return li;
+}
+
 function renderLog(snap) {
   const box = el("#log");
   const lines = snap.log || [];
   box.innerHTML = "";
   lines.forEach((line, i) => {
+    const li = logLine(line);
     let cls = i >= lines.length - 3 ? "new" : "";
     // The engine names the source, so the log can colour a swing differently
     // from a "Then, ..." rider, a skill or a trap.
@@ -1780,7 +1949,8 @@ function renderLog(snap) {
     else if (line.includes(" effect damage")) cls += " hit-effect";
     else if (line.includes(" attacks ")) cls += " declare";
     else if (line.includes("faints")) cls += " faint";
-    box.appendChild(h("li", cls.trim(), line));
+    if (cls.trim()) li.className = cls.trim();
+    box.appendChild(li);
   });
   box.scrollTop = box.scrollHeight;
 }
@@ -1799,7 +1969,7 @@ function render(snap) {
   renderSide(0, snap);
   renderTurnline(snap);
   renderBanner(snap);
-  renderEndTurn(snap);
+  renderTray(snap);
   renderOptions(snap);
   renderLog(snap);
   // Swap in what this render just drew, so the next one can see what moved.
@@ -1807,7 +1977,6 @@ function render(snap) {
   state.restSeen = new Map();
   renderCentre(snap);
   renderPicker(snap);
-  markChoosable(snap);
   if (state.browsing) renderBrowser();
   if (snap.over && !state.announced) {
     state.announced = true;
@@ -1970,16 +2139,18 @@ function isTyping(event) {
 document.addEventListener("keydown", (e) => {
   if (isTyping(e)) return;
   if (el("#setup").open || el("#browser").open) return;
+  // The number keys used to index the move list. They index whatever is on
+  // screen offering itself instead: the rows of an open card menu first — that
+  // is the list you are looking at — and otherwise the tray in the middle of
+  // the table, where End turn always sits last.
   if (e.key >= "1" && e.key <= "9") {
-    const btn = el("#options").querySelectorAll("button.opt")[Number(e.key) - 1];
+    const host = el("#cardmenu") || el("#endturn");
+    const btn = host.querySelectorAll("button")[Number(e.key) - 1];
     if (btn) btn.click();
   } else if (e.key === "0") {
-    const buttons = el("#options").querySelectorAll("button.opt");
+    const buttons = el("#endturn").querySelectorAll("button.tray-btn");
     const last = buttons[buttons.length - 1];
     if (last && last.textContent.includes("Decline")) last.click();
-  } else if (e.key === "Escape") {
-    state.filterUid = null;
-    if (state.snap) renderOptions(state.snap);
   } else if (e.key === " ") {
     e.preventDefault();
     el("#btn-pause").click();

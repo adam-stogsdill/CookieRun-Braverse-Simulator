@@ -398,3 +398,41 @@ def test_single_pilot_path_is_unchanged_by_the_multi_pilot_refactor(db):
     # That is a rules fix, not drift: re-pin deliberately, never to make a red
     # test green.
     assert score == pytest.approx(20 / 30)
+
+
+# --- encoder swapping and checkpoint widths ---------------------------------
+def test_a_checkpoint_is_loaded_at_the_width_it_was_saved(tmp_path, db):
+    """Widths come off the weights, so an old checkpoint is never mis-sized."""
+    from braverse.features_wide import WideEncoder
+    from braverse.rl import TrainConfig, Trainer
+
+    decks = [STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]]
+    for encoder, expected in ((None, 55), (WideEncoder(db), WideEncoder.dim)):
+        trainer = Trainer(decks, TrainConfig(games=0), db=db, encoder=encoder)
+        path = tmp_path / f"agent_{expected}.pt"
+        trainer.save(path)
+        assert Trainer.load_net(path).feature_dim == expected
+
+
+def test_a_policy_and_encoder_of_different_widths_is_refused(tmp_path, db):
+    """The failure that would otherwise surface as a shape error mid-training."""
+    from braverse.features_wide import WideEncoder
+    from braverse.rl import PolicyNet, TrainConfig, Trainer
+
+    decks = [STARTER_DECKS["st9_sea_fairy"]]
+    stock_net = PolicyNet()                       # 55-wide
+    with pytest.raises(ValueError, match="different encoder"):
+        Trainer(decks, TrainConfig(games=0), db=db, net=stock_net,
+                encoder=WideEncoder(db))
+
+
+def test_the_wide_encoder_actually_trains(db):
+    """A short run must produce a usable policy, not just correct shapes."""
+    from braverse.features_wide import WideEncoder
+    from braverse.rl import TrainConfig, Trainer
+
+    decks = [STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]]
+    trainer = Trainer(decks, TrainConfig(games=60, eval_every=0, seed=3),
+                      db=db, encoder=WideEncoder(db))
+    trainer.train(log=lambda *_: None)
+    assert 0.0 <= trainer.evaluate(20) <= 1.0

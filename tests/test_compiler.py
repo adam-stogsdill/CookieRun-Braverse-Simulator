@@ -518,7 +518,7 @@ def test_incoming_damage_reduction_applies_to_the_attack(db):
 # in a completed set still fails these tests.
 KNOWN_UNCODED = {
     "ST1-018", "ST2-016", "ST2-019", "ST2-021",
-    "ST3-016", "ST3-018", "ST3-021", "ST3-022",
+    "ST3-021", "ST3-022",
     "ST4-016", "ST4-019", "ST5-022",
     "BS1-023", "BS1-024", "BS1-025", "BS1-026", "BS1-048", "BS1-050", "BS1-078",
     "BS2-014", "BS2-020", "BS2-021", "BS2-048", "BS2-049", "BS2-051",
@@ -1161,3 +1161,27 @@ def test_can_be_used_as_is_a_cost_not_a_free_rider(db):
     me.support[0].rested = False
     assert swing() == 1
     assert me.support[0].rested, "the cost was not actually rested"
+
+
+def test_when_your_turn_ends_untap_is_banked_against_its_card(db):
+    """"Then, when your turn ends, set up to N cards as active" must not untap
+    anything where it is written. It is banked, with the card that banked it, so
+    the end of the turn can name it and order it against everything else."""
+    from braverse.compiler import BankEndTurnUntap
+    from braverse.effects import Ctx, Trigger
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=17)
+    game.setup()
+    me, them = game.state.players[0], game.state.players[1]
+    me.support = [CardInstance.make("ST9-013", 0)]
+    me.support[0].rested = True
+    source = CardInstance.make("BS5-060", 0)
+
+    BankEndTurnUntap(3).run(
+        Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+            source_card=source, trigger=Trigger.ATTACK.value), {})
+
+    assert me.support[0].rested, "untapped on the spot instead of at end of turn"
+    assert me.end_turn_untaps == [("BS5-060", 3)]

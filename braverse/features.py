@@ -37,6 +37,12 @@ _TYPE_INDEX[A.PlayExtra] = _TYPE_INDEX[A.PlayCookie]
 class Encoder:
     """Turns legal actions into a float32 matrix of shape (n_actions, FEATURE_DIM)."""
 
+    #: Row width, and the width of the leading state block inside it. Read by
+    #: the trainer and by PolicyNet so an encoder of a different shape — see
+    #: features_wide.py — can be swapped in without touching either.
+    dim = FEATURE_DIM
+    state_dim = STATE_DIM
+
     def __init__(self, db: CardDB):
         self.db = db
 
@@ -93,10 +99,12 @@ class Encoder:
     def encode(self, state: GameState, seat: int,
                options) -> np.ndarray:
         base = self.state_vector(state, seat)
-        rows = np.zeros((len(options), FEATURE_DIM), dtype=np.float32)
-        rows[:, :STATE_DIM] = base
+        # self.dim / self.state_dim rather than the module constants: a
+        # subclass with a wider state block reuses this method as-is.
+        rows = np.zeros((len(options), self.dim), dtype=np.float32)
+        rows[:, :self.state_dim] = base
         for i, action in enumerate(options):
-            offset = STATE_DIM
+            offset = self.state_dim
             type_index = _TYPE_INDEX.get(type(action))
             if type_index is not None:
                 rows[i, offset + type_index] = 1.0

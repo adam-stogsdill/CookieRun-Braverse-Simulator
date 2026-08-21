@@ -459,8 +459,12 @@ def test_questions_about_your_own_hand_are_answered_with_your_hand():
     Decided structurally — every option is a card in your hand — rather than by
     matching prompt strings, so a new prompt of the same shape gets the picker
     for free. Only the verb on the confirm button reads from the prompt.
+
+    The one carve-out is the opening Cookie: it is answered by clicking the
+    Cookies the viewer stands up out of your hand, so it takes no picker.
     """
     from braverse import Game, HeuristicAgent, SeatedAgent
+    from braverse.engine import OPENING_COOKIE_PROMPT
     from play_server import hand_pick
 
     db = default_db()
@@ -470,15 +474,62 @@ def test_questions_about_your_own_hand_are_answered_with_your_hand():
     game.setup()
     me = game.state.players[0]
 
-    assert hand_pick("Opening Cookie", me.hand, me) == {"verb": "Play Cookie"}
     assert hand_pick("Field a replacement Cookie", me.hand, me) == {"verb": "Play Cookie"}
     assert hand_pick("Discard 2 cards", me.hand, me) == {"verb": "Discard"}
     assert hand_pick("Reveal a card", me.hand, me) == {"verb": "Choose"}
 
     # Not your hand, not the picker: a question about the board stays a list.
     assert hand_pick("Damage which Cookie?", me.battle, me) is None
-    assert hand_pick("Opening Cookie", game.state.players[1].hand, me) is None
+    assert hand_pick("Field a replacement Cookie",
+                     game.state.players[1].hand, me) is None
     assert hand_pick("Anything", [], me) is None
+
+    # The opening Cookie opts out: it is raised in the hand and clicked there.
+    assert hand_pick(OPENING_COOKIE_PROMPT, me.hand, me) is None
+
+
+def test_every_action_that_names_a_card_names_it_in_subject():
+    """The board is the move list now, so `subject` is load-bearing.
+
+    The viewer offers a move by lighting up the card it belongs to and putting
+    it in that card's click menu, and it finds that card by `subject`. A move
+    that named a card only inside its prose label would light nothing up and
+    open no menu. The two kinds that legitimately name nothing — End turn and
+    Pass — are the ones the tray in the middle of the table exists for, and the
+    viewer routes anything else it cannot place there too, so this is a
+    tidiness pin rather than the only thing standing between a move and being
+    unreachable.
+    """
+    from braverse import Game, HeuristicAgent, SeatedAgent
+    from play_server import action_json
+
+    db = default_db()
+    NAMES_NOTHING = {"EndTurn", "Pass"}
+    seen = set()
+    for seed in range(6):
+        agents = [SeatedAgent(HeuristicAgent(db=db), 0),
+                  SeatedAgent(HeuristicAgent(db=db), 1)]
+        game = Game([available_decks()["st9_sea_fairy"], available_decks()["st8_wind_archer"]],
+                    agents, db=db, seed=seed)
+        game.setup()
+        for _ in range(300):
+            if game.state.over:
+                break
+            options = game.legal_actions()
+            if not options:
+                break
+            for i, action in enumerate(options):
+                payload = action_json(db, game.state, i, action)
+                seen.add(payload["kind"])
+                if payload["kind"] in NAMES_NOTHING:
+                    assert "subject" not in payload, payload
+                else:
+                    assert payload.get("subject") is not None, payload
+            chosen = agents[game.state.turn_player].choose_action(game.state, options)
+            game.step(chosen or options[0])
+
+    # The pin is worthless if the games never got past "end turn".
+    assert {"Attack", "PlayCookie", "PlaceSupport"} <= seen, seen
 
 
 def test_the_toss_is_asked_in_the_middle_of_the_table():
@@ -488,6 +539,12 @@ def test_the_toss_is_asked_in_the_middle_of_the_table():
 
     assert centre_style(list(THROWS)) == "throw"
     assert centre_style(list(CHOICES)) == "choice"
+    # Both mulligan questions belong there too — the free one and the priced
+    # repeat a Cookie-less hand is offered.
+    from play_server import MULLIGAN_CHOICES, REDRAW_CHOICES
+    assert centre_style(list(MULLIGAN_CHOICES)) == "choice"
+    assert centre_style(list(REDRAW_CHOICES)) == "choice"
+
     # Everything else stays in the panel, including anything non-textual.
     assert centre_style(["rock", "paper"]) is None
     assert centre_style([]) is None

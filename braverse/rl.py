@@ -39,15 +39,18 @@ from tqdm import tqdm
 class PolicyNet(nn.Module):
     """Scores one (state, action) row; a softmax over rows gives the policy."""
 
-    def __init__(self, hidden: int = 96):
+    def __init__(self, hidden: int = 96, feature_dim: int = FEATURE_DIM,
+                 state_dim: int = STATE_DIM):
         super().__init__()
+        self.feature_dim = feature_dim
+        self.state_dim = state_dim
         self.body = nn.Sequential(
-            nn.Linear(FEATURE_DIM, hidden), nn.ReLU(),
+            nn.Linear(feature_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, 1),
         )
         self.value = nn.Sequential(
-            nn.Linear(STATE_DIM, hidden), nn.ReLU(),
+            nn.Linear(state_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, 1),
         )
 
@@ -60,7 +63,7 @@ class PolicyNet(nn.Module):
 
 @dataclass
 class Step:
-    rows: np.ndarray      # (n_actions, FEATURE_DIM)
+    rows: np.ndarray      # (n_actions, encoder.dim)
     chosen: int
 
 
@@ -134,13 +137,21 @@ class Trainer:
     def __init__(self, decks: Sequence[Sequence[str]] | None = None,
                  config: TrainConfig = TrainConfig(),
                  db: CardDB | None = None,
-                 net: PolicyNet | None = None):
+                 net: PolicyNet | None = None,
+                 encoder: Encoder | None = None):
         self.cfg = config
         self.db = db or default_db()
-        self.encoder = Encoder(self.db)
+        self.encoder = encoder or Encoder(self.db)
         self.decks = [list(d) for d in (decks or [
             STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]])]
-        self.net = net or PolicyNet()
+        self.net = net or PolicyNet(feature_dim=self.encoder.dim,
+                                    state_dim=self.encoder.state_dim)
+        if self.net.feature_dim != self.encoder.dim:
+            raise ValueError(
+                f"encoder emits {self.encoder.dim}-wide rows but the policy "
+                f"expects {self.net.feature_dim}. The checkpoint was trained "
+                f"with a different encoder — train a new one rather than "
+                f"resuming this.")
         self.opt = torch.optim.Adam(self.net.parameters(), lr=config.lr)
         self.rng = random.Random(config.seed)
         self.league: list[PolicyNet] = []
@@ -214,7 +225,7 @@ class Trainer:
             return {}
 
         width = max(s.rows.shape[0] for s, _ in steps)
-        batch = np.zeros((len(steps), width, FEATURE_DIM), dtype=np.float32)
+        batch = np.zeros((len(steps), width, self.encoder.dim), dtype=np.float32)
         mask = np.zeros((len(steps), width), dtype=bool)
         chosen = np.zeros(len(steps), dtype=np.int64)
         returns = np.zeros(len(steps), dtype=np.float32)
@@ -237,7 +248,7 @@ class Trainer:
 
         # The state block is identical across a decision's rows, so row 0 of
         # each padded group carries it.
-        values = self.net.state_value(rows[:, 0, :STATE_DIM])
+        values = self.net.state_value(rows[:, 0, :self.encoder.state_dim])
         advantage = (returns_t - values).detach()
         if advantage.numel() > 1 and advantage.std() > 1e-6:
             advantage = (advantage - advantage.mean()) / (advantage.std() + 1e-6)
@@ -342,15 +353,27 @@ class Trainer:
         path = Path(path)
         torch.save(self.net.state_dict(), path)
         path.with_suffix(".json").write_text(json.dumps({
-            "feature_dim": FEATURE_DIM,
-            "state_dim": STATE_DIM,
+            "encoder": type(self.encoder).__name__,
+            "feature_dim": self.encoder.dim,
+            "state_dim": self.encoder.state_dim,
             "config": self.cfg.__dict__,
             "history": self.history[-50:],
         }, indent=1))
 
     @staticmethod
     def load_net(path: str | Path) -> PolicyNet:
-        net = PolicyNet()
-        net.load_state_dict(torch.load(path, map_location="cpu"))
+        """Load a checkpoint, sizing the net from the weights themselves.
+
+        The widths are read off the tensors rather than assumed, so a
+        checkpoint trained under a different encoder loads as the shape it was
+        actually saved at. Guessing instead would raise a shape error that
+        unattended callers catch and treat as "no checkpoint", silently
+        throwing away a trained policy.
+        """
+        blob = torch.load(path, map_location="cpu")
+        net = PolicyNet(hidden=blob["body.0.weight"].shape[0],
+                        feature_dim=blob["body.0.weight"].shape[1],
+                        state_dim=blob["value.0.weight"].shape[1])
+        net.load_state_dict(blob)
         net.eval()
         return net

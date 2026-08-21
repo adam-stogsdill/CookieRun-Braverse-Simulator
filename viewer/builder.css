@@ -100,8 +100,12 @@ body.view-build .builder {
   background: var(--panel);
   border-left: 1px solid var(--line);
 }
-.deck-bar { display: flex; gap: 6px; align-items: center; }
-.deck-bar input, .deck-bar select { flex: 1; min-width: 0; }
+/* Wraps rather than squeezes: the row of deck actions grew past what 340px
+   fits on one line, and a "load a deck…" select crushed to six characters is
+   worse than a second line of buttons. */
+.deck-bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.deck-bar input { flex: 1; min-width: 0; }
+.deck-bar select { flex: 1 1 100%; min-width: 0; }
 
 .deck-meter {
   height: 6px;

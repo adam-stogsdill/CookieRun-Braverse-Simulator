@@ -530,6 +530,18 @@ class Ctx:
             return
         self.game.return_cookie_to_hand(cookie)
 
+    def move_to_support(self, cookie: Cookie, *, rested: bool = False) -> None:
+        """"Place that Cookie in your support area" — it becomes energy.
+
+        Removal that pays its controller back: nothing reaches the break area,
+        and the card lands in the support area as a colour source. It goes
+        through the same movement lock and move-protection checks as a bounce,
+        because from the board's point of view it is one.
+        """
+        if not self._may_move(cookie):
+            return
+        self.game.move_cookie_to_support(cookie, rested=rested)
+
     def trash_cookie(self, cookie: Cookie) -> None:
         """Remove a Cookie to the trash *without* it fainting.
 
@@ -559,8 +571,14 @@ class Ctx:
         """"not set as active during your opponent's next Active Phase"."""
         cookie.skip_next_active = True
 
-    def play_cookie_from_trash(self, predicate=None) -> bool:
-        """"Play up to 1 Cookie ... from your trash."""
+    def play_cookie_from_trash(self, predicate=None, *,
+                               optional: bool = True) -> bool:
+        """"Play up to 1 Cookie ... from your trash."
+
+        ``optional`` is the difference between "play *up to* 1" and "play 1":
+        the latter is mandatory once its cost is paid, so declining is not one
+        of the answers.
+        """
         if len(self.me.battle) >= self.game.rules.max_battle_cookies:
             return False
         options = [c for c in self.me.trash
@@ -568,7 +586,8 @@ class Ctx:
                    and (predicate is None or predicate(self.db[c.card_id]))]
         if not options:
             return False
-        card = self.choose("Play a Cookie from your trash", options, optional=True)
+        card = self.choose("Play a Cookie from your trash", options,
+                           optional=optional)
         if card is None:
             return False
         self.me.trash.remove(card)

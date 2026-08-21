@@ -8,6 +8,7 @@ from braverse import (STARTER_DECKS, STARTER_SET_IDS, Game, HeuristicAgent,
 from braverse import actions as A
 from braverse.cost import Cost, plan_payment
 from braverse.enums import CardType, Color, Marker
+from braverse.engine import BankedUntap
 from braverse.state import CardInstance
 
 
@@ -524,6 +525,68 @@ def test_the_log_tells_a_swing_apart_from_a_rider_or_a_skill():
     assert "effect damage" in game.state.log[-1], "effect damage is the default"
 
 
+def test_the_log_says_what_kind_of_thing_hit_you():
+    """"effect damage" covers a trap, an 【Activate】, an ITEM and an attack
+    rider. The stamp every line carries names the card; this pins that it also
+    says which of those four the card was being at the time."""
+    from braverse.effects import Trigger
+    from braverse.engine import source_kind
+    from braverse.enums import CardType
+
+    db = default_db()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=6)
+    game.setup()
+    _plain_pile(game, db)
+    _, target = _lone_cookie(game)
+
+    trap = next(c for c in db.cards.values() if c.type is CardType.TRAP)
+    item = next(c for c in db.cards.values() if c.type is CardType.ITEM)
+    # The trigger wins where it says something; the card answers for the shared
+    # ITEM/TRAP body, which is the pair most worth telling apart.
+    assert source_kind(db, CardInstance.make(trap.id, 0), Trigger.FLIP) == "FLIP"
+    assert source_kind(db, CardInstance.make(trap.id, 0), Trigger.ITEM) == "trap"
+    assert source_kind(db, CardInstance.make(item.id, 0), Trigger.ITEM) == "item"
+
+    with game._effect_source("Piercing Arrow of Purity", "trap"):
+        game.deal_damage(target, 1, source_player=1)
+    line = game.state.log[-1]
+    assert "[Piercing Arrow of Purity \u00b7 trap]" in line, line
+    assert "effect damage" in line, line
+
+    # An attack has no `[...]` stamp — nothing is resolving — so the swinging
+    # Cookie has to be named on the line itself.
+    game.deal_damage(target, 1, source_player=1, kind="attack",
+                     source="Wind Archer Cookie's Tracker's Arrow")
+    line = game.state.log[-1]
+    assert "from Wind Archer Cookie's Tracker's Arrow" in line, line
+
+
+def test_an_attack_is_named_the_way_the_card_names_it():
+    """"attacks for 3" said which Cookie swung, not which of its lines did."""
+    db = default_db()
+    agents = [SeatedAgent(HeuristicAgent(db=db), 0),
+              SeatedAgent(HeuristicAgent(db=db), 1)]
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                agents, db=db, seed=11)
+    game.setup()
+    for _ in range(200):
+        if game.state.over:
+            break
+        options = game.legal_actions()
+        if not options:
+            break
+        chosen = agents[game.state.turn_player].choose_action(game.state, options)
+        game.step(chosen or options[0])
+
+    declares = [l for l in game.state.log if " attacks " in l]
+    assert declares, "the game never swung"
+    assert any(" with " in l for l in declares), declares[:5]
+    hits = [l for l in game.state.log if "attack damage" in l]
+    assert all(" from " in l for l in hits), hits[:5]
+
+
 def test_an_attack_applies_its_printed_damage_after_buffs_and_reductions():
     db = default_db()
     game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
@@ -1023,6 +1086,7 @@ def test_a_controller_that_wants_a_mulligan_gets_a_whole_new_hand():
     class Mulligans:
         def __init__(self):
             self.asked = 0
+            self.free = []
 
         def choose_action(self, state, options):
             return options[0]
@@ -1030,8 +1094,9 @@ def test_a_controller_that_wants_a_mulligan_gets_a_whole_new_hand():
         def choose(self, state, prompt, options, *, optional):
             return options[0]
 
-        def wants_mulligan(self, state, hand):
+        def wants_mulligan(self, state, hand, *, free):
             self.asked += 1
+            self.free.append(free)
             return self.asked == 1      # once, and only once
 
     seat = Mulligans()
@@ -1040,7 +1105,10 @@ def test_a_controller_that_wants_a_mulligan_gets_a_whole_new_hand():
     twin = new_game(seed=11, db=db)
 
     game.setup()
-    assert seat.asked == 1, "the mulligan is offered exactly once"
+    assert seat.free[0] is True, "the first one is the free one"
+    # Offered again only if the fresh hand came up Cookie-less, and never free
+    # a second time.
+    assert all(f is False for f in seat.free[1:])
     player = game.state.players[0]
     # Same number of cards, drawn from a reshuffled deck: the opening hand of
     # the identically-seeded game it did not mulligan out of is gone.
@@ -1066,6 +1134,74 @@ def test_a_bot_is_never_asked_to_mulligan():
     assert not any("mulligan" in line for line in a.state.log)
 
 
+def test_a_cookieless_hand_can_keep_mulliganing_and_the_opponent_draws():
+    """The free mulligan is the whole allowance for shopping around; a hand
+    with no Cookie in it may keep redrawing, one card to the opponent each."""
+    db = default_db()
+
+    class Greedy:
+        """Says yes every time it is asked, and records the price."""
+
+        def __init__(self):
+            self.free = []
+
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+        def wants_mulligan(self, state, hand, *, free):
+            self.free.append(free)
+            return True
+
+    seat = Greedy()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [seat, SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=11)
+    game.setup()
+
+    paid = seat.free.count(False)
+    # It stops the moment a Cookie turns up, so a yes-man is not asked forever.
+    assert seat.free[0] is True
+    assert paid == len(seat.free) - 1
+    # Every priced redraw handed the opponent a card, and every card is still
+    # accounted for on both sides.
+    for player in game.state.players:
+        on_the_board = sum(1 + len(c.hp_cards) for c in player.battle)
+        assert (len(player.deck) + len(player.hand) + len(player.trash)
+                + on_the_board) == game.rules.deck_size
+    if paid:
+        assert any("draws 1" in line for line in game.state.log)
+
+
+def test_a_playable_hand_is_only_offered_the_free_mulligan():
+    """Yes-to-everything must not spin the opening hand forever: once a Cookie
+    is in hand the offer is closed."""
+    db = default_db()
+
+    class Greedy:
+        def __init__(self):
+            self.asked = 0
+
+        def choose_action(self, state, options):
+            return options[0]
+
+        def choose(self, state, prompt, options, *, optional):
+            return options[0]
+
+        def wants_mulligan(self, state, hand, *, free):
+            self.asked += 1
+            return True
+
+    seat = Greedy()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [seat, SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=11)
+    game.setup()
+    assert seat.asked < game.rules.max_mulligans, "the loop terminated on merit"
+    assert any(db[c.card_id].is_cookie for c in game.state.players[0].hand) \
+        or game.state.players[0].battle, "it stopped once a Cookie was there"
+
+
 def test_the_mulligan_can_be_turned_off():
     db = default_db()
     import dataclasses
@@ -1080,7 +1216,7 @@ def test_the_mulligan_can_be_turned_off():
         def choose(self, state, prompt, options, *, optional):
             return options[0]
 
-        def wants_mulligan(self, state, hand):
+        def wants_mulligan(self, state, hand, *, free):
             raise AssertionError("must not be asked when the rule is off")
 
     game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
@@ -1189,6 +1325,35 @@ def test_a_blocker_priced_in_rest_actually_rests():
     target = game._response_window(defender, attacker, defender.battle[0])
     assert target is blocker, "the attack was not redirected"
     assert blocker.rested, "the blocker did not pay with its own rest"
+
+
+def test_a_blocker_priced_in_energy_pays_from_support():
+    """The other half of the price: `【Blocker】 <{G}>` rests a green support
+    card and leaves the Cookie itself upright."""
+    db = default_db()
+    game, defender = _attack_setup(db)
+    defender.battle.pop()                                  # drop the rest-priced one
+    game._deploy_cookie(defender, CardInstance.make("ST8-011", 1),
+                        run_on_play=False)                 # Kiwi Cookie, <{G}>
+    blocker = defender.battle[1]
+    assert game._blocker_cost(blocker) == (Cost(colored=((Color.GREEN, 1),)), False)
+    defender.hand = []                                     # no trap to distract it
+
+    attacker = game.state.players[0].battle[0]
+    game._pending_attack = (attacker, defender.battle[0])
+    game._response_player = 1
+    game._trap_used = 0
+    game._responded = None
+
+    class Blocks:
+        def choose_action(self, state, options):
+            return next((o for o in options if isinstance(o, A.Block)), A.Pass())
+
+    game._controllers[1] = Blocks()
+    target = game._response_window(defender, attacker, defender.battle[0])
+    assert target is blocker
+    assert not blocker.rested, "an energy price must not also rest the Cookie"
+    assert sum(c.rested for c in defender.support) == 1
 
 
 def test_a_blocker_whose_price_cannot_be_read_does_not_block_for_free():
@@ -1321,3 +1486,256 @@ def test_hero_cookies_shield_only_stands_on_its_own_turn():
     # It never blocked its controller's own damage either way.
     game.deal_damage(ally, 1, source_player=1, kind="effect")
     assert ally.remaining_hp == held - 1
+
+
+# --- ST3-016 Ancient Healer's Gaze ------------------------------------------
+class _PicksFirst:
+    """A controller that passes on its own turn and takes the first option."""
+
+    def choose_action(self, state, options):
+        return next((o for o in options if isinstance(o, A.Pass)), options[0])
+
+    def choose(self, state, prompt, options, *, optional):
+        return options[0]
+
+
+def _gaze_game(db):
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [_PicksFirst(), _PicksFirst()], db=db, seed=3)
+    game.setup()
+    _plain_pile(game, db)
+    player = game.state.players[0]
+    player.hand = [CardInstance.make("ST3-016", 0)]
+    player.support = [CardInstance.make("ST3-012", 0) for _ in range(3)]
+    for card in player.support:
+        card.rested = False
+    assert str(db["ST3-016"].play_cost) == "{G}{G}{G}", "exactly enough, no spare"
+    return game, player
+
+
+def test_ancient_healers_gaze_banks_a_cookie_as_energy():
+    """Played through the engine, so the item's own {G}{G}{G} is really paid.
+
+    The Cookie leaves the battle area for the support area as active, its HP
+    pile is spent, and — the point of the card — nothing reaches the break
+    area, so the opponent banks no Level for it.
+    """
+    db = default_db()
+    game, player = _gaze_game(db)
+    target = player.battle[0]
+    assert target.level(db) <= 2, target.level(db)
+    hp_cards = list(target.hp_cards)
+    trash_before = len(player.trash)
+
+    game._do_play_support_card(A.PlaySupportCard(player.hand[0].uid))
+
+    assert target not in player.battle
+    assert target.card in player.support, "the Cookie card is the support card"
+    assert not target.card.rested, "placed as active"
+    assert not player.break_area, "a move to support is not a faint"
+    assert all(c in player.trash for c in hp_cards), "the HP pile is spent"
+    assert len(player.trash) >= trash_before + len(hp_cards)
+    # Three support cards rested to pay {G}{G}{G}; the Cookie arrives active,
+    # so it is the one thing in the support area still able to pay for anything.
+    assert player.active_support() == [len(player.support) - 1]
+
+
+def test_ancient_healers_gaze_is_not_offered_without_a_legal_target():
+    """"A listed move must do something": with only LV.3 Cookies on the board
+    the item has nothing to select, so it must not appear in the action list."""
+    db = default_db()
+    game, player = _gaze_game(db)
+    for cookie in player.battle:
+        cookie.level_override = 3
+
+    actions = game.legal_actions()
+    assert not [a for a in actions if isinstance(a, A.PlaySupportCard)], \
+        "offered an item that cannot select anything"
+
+    for cookie in player.battle:
+        cookie.level_override = 1
+    assert [a for a in game.legal_actions() if isinstance(a, A.PlaySupportCard)]
+
+
+# --- ST3-018 Parsley Tea of Invigoration ------------------------------------
+class _PicksLast:
+    """Passes on its own turn; records every question and takes the last option."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def choose_action(self, state, options):
+        return next((o for o in options if isinstance(o, A.Pass)), options[0])
+
+    def choose(self, state, prompt, options, *, optional):
+        self.prompts.append((prompt, optional, list(options)))
+        return options[-1]
+
+
+def _parsley_game(db):
+    seat = _PicksLast()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [seat, _PicksFirst()], db=db, seed=3)
+    game.setup()
+    player = game.state.players[0]
+    player.hand = [CardInstance.make("ST3-018", 0)]
+    player.support = [CardInstance.make("ST3-012", 0) for _ in range(2)]
+    for card in player.support:
+        card.rested = False
+    assert str(db["ST3-018"].play_cost) == "{G}{G}", "exactly enough, no spare"
+    player.trash = [CardInstance.make("ST3-016", 0),
+                    CardInstance.make("ST3-001", 0),
+                    CardInstance.make("ST3-002", 0)]
+    return game, player, seat
+
+
+def test_parsley_tea_plays_the_cookie_its_controller_picked():
+    """The card's whole body is a selection: with two Cookies in the trash the
+    player says which one comes back, and it is not a choice they can decline."""
+    db = default_db()
+    game, player, seat = _parsley_game(db)
+    battle_before = len(player.battle)
+    wanted = player.trash[-1]
+
+    game._do_play_support_card(A.PlaySupportCard(player.hand[0].uid))
+
+    prompts = [p for p in seat.prompts if "trash" in p[0].lower()]
+    assert len(prompts) == 1, "asked exactly once which Cookie to bring back"
+    prompt, optional, options = prompts[0]
+    assert not optional, "'Play 1', not 'up to 1' — the cost is already spent"
+    assert [c.card_id for c in options] == ["ST3-001", "ST3-002"], \
+        "only the Cookies in the trash are on offer"
+
+    assert wanted not in player.trash
+    assert len(player.battle) == battle_before + 1
+    played = player.battle[-1]
+    assert played.uid == wanted.uid
+    assert played.hp_cards, "it comes back with a fresh HP pile"
+
+
+def test_parsley_tea_is_not_offered_with_no_cookie_in_the_trash():
+    """"A listed move must do something" — an empty trash means the item has
+    nothing to play, so it is not a move."""
+    db = default_db()
+    game, player, _ = _parsley_game(db)
+    player.trash = [CardInstance.make("ST3-016", 0)]
+
+    assert not [a for a in game.legal_actions() if isinstance(a, A.PlaySupportCard)]
+
+    player.trash.append(CardInstance.make("ST3-001", 0))
+    assert [a for a in game.legal_actions() if isinstance(a, A.PlaySupportCard)]
+
+
+# --- end-of-turn ordering --------------------------------------------------
+class OrderingController:
+    """A seat that always resolves the *last* offered effect first."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def choose_action(self, state, options):
+        return options[0] if options else None
+
+    def choose(self, state, prompt, options, *, optional):
+        return None if optional else (options[0] if options else None)
+
+    def order_effects(self, state, prompt, options):
+        self.prompts.append(list(options))
+        return options[-1]
+
+
+def _end_turn_pair(monkeypatch):
+    """Two Cookies whose end-of-turn effects just log which one ran."""
+    from braverse import effects as E
+
+    order = []
+    registry = dict(E._REGISTRY)
+    for card_id in ("ST8-002", "ST8-003"):
+        registry[(card_id, E.Trigger.END_TURN)] = (
+            lambda ctx, cid=card_id: order.append(cid)
+        )
+    monkeypatch.setattr(E, "_REGISTRY", registry)
+    return order
+
+
+def test_end_turn_effects_resolve_in_the_players_chosen_order(db, monkeypatch):
+    order = _end_turn_pair(monkeypatch)
+    seat = OrderingController()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [seat, SeatedAgent(HeuristicAgent(seed=1), 1)], db=db, seed=0)
+    game.setup()
+    me = game.state.current
+    for card_id in ("ST8-002", "ST8-003"):
+        game._deploy_cookie(me, CardInstance.make(card_id, me.index))
+
+    game.end_turn()
+
+    assert len(seat.prompts) == 1
+    assert order == ["ST8-003", "ST8-002"]
+
+
+def test_bots_keep_board_order_at_end_of_turn(db, monkeypatch):
+    """No `order_effects` on a controller means no question and no reordering —
+    seeded self-play has to stay bit-identical."""
+    order = _end_turn_pair(monkeypatch)
+    game = new_game(db=db)
+    me = game.state.current
+    for card_id in ("ST8-002", "ST8-003"):
+        game._deploy_cookie(me, CardInstance.make(card_id, me.index))
+
+    game.end_turn()
+
+    assert order == ["ST8-002", "ST8-003"]
+
+
+# --- banked "when your turn ends" riders ------------------------------------
+def test_banked_untap_queues_with_the_other_end_of_turn_effects(monkeypatch):
+    """An attack rider that reads "when your turn ends, ..." happens in the same
+    step as every 【End of Turn】 effect, so it is one more item in the queue —
+    orderable against them, and named after the card that banked it."""
+    db = default_db()
+    order = _end_turn_pair(monkeypatch)
+    seat = OrderingController()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [seat, SeatedAgent(HeuristicAgent(seed=1), 1)], db=db, seed=0)
+    game.setup()
+    me = game.state.current
+    game._deploy_cookie(me, CardInstance.make("ST8-002", me.index))
+    me.support = [CardInstance.make("ST8-012", 0) for _ in range(2)]
+    for card in me.support:
+        card.rested = True
+    me.end_turn_untaps.append(("BS5-060", 1))
+
+    game.end_turn()
+
+    assert len(seat.prompts) == 1, "the rider and the effect were ordered together"
+    offered = seat.prompts[0]
+    assert any(isinstance(o, BankedUntap) for o in offered)
+    banked = next(o for o in offered if isinstance(o, BankedUntap))
+    assert db["BS5-060"].name in str(banked), "named after the card that banked it"
+    # The controller takes the last option, which is the rider, so it resolved
+    # first and the Cookie's own effect second.
+    assert order == ["ST8-002"]
+    assert [c.rested for c in me.support] == [False, True], "set up to 1 as active"
+    assert not me.end_turn_untaps, "banked riders do not carry into the next turn"
+
+
+def test_banked_untap_is_not_offered_with_no_rested_support(monkeypatch):
+    """Nothing to set as active is nothing to order — the queue only asks about
+    events that would do something."""
+    db = default_db()
+    order = _end_turn_pair(monkeypatch)
+    seat = OrderingController()
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [seat, SeatedAgent(HeuristicAgent(seed=1), 1)], db=db, seed=0)
+    game.setup()
+    me = game.state.current
+    game._deploy_cookie(me, CardInstance.make("ST8-002", me.index))
+    me.support = [CardInstance.make("ST8-012", 0)]
+    me.support[0].rested = False
+    me.end_turn_untaps.append(("BS5-060", 3))
+
+    game.end_turn()
+
+    assert not seat.prompts, "asked to order an event that does nothing"
+    assert order == ["ST8-002"]

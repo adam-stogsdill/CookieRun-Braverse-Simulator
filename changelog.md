@@ -1,5 +1,146 @@
 # Changelog
 
+## 0.2.19
+
+- **The log says what hit you, not just that something did.** "takes 2 effect
+  damage" covered a trap sprung on your turn, an 【Activate】 skill, an item and
+  the "Then, …" rider on an attack — four different things, one line. Every log
+  line written by an effect now names the card *and* what sort of thing it was
+  being: `[Piercing Arrow of Purity · trap]`, `[Blue Slushy Cookie · FLIP]`,
+  `[Wind Archer Cookie · 【Activate】]`. Attacks name themselves the same way:
+  `Sea Fairy Cookie attacks Leek Cookie with Sea of Stars for 3`, and the damage
+  line repeats the source so it stands on its own.
+- **The damage number on the board is labelled.** The red `-3` floating off a
+  Cookie now carries the name of whatever dealt it underneath, which matters
+  most when a swing, its rider and a trap all land in the same second.
+- **Hover any card name in the log to see the card.** The log names cards that
+  are in a trash, still in a deck, or already gone — none of them anything you
+  could look at. Now every name in it previews in the panel exactly as a card on
+  the table does.
+- **Revealed HP cards get a proper strip.** The record of what a hit turned over
+  moves to the middle of the right-hand panel and is drawn at hand size instead
+  of as 46-pixel slivers, so you can actually read the FLIP you blinked through.
+  It scrolls sideways when a big hit turns over six of them.
+- **The log is shorter**, giving that height to the reveal strip and the card
+  viewer above it.
+
+## 0.2.18
+
+- **The move list on the right is gone; the moves are on the cards.** The
+  stack of "Play Wave Drop / Support: Wave Drop / Attack →…" buttons down the
+  right-hand side was the biggest thing on screen, listed cards you were
+  already looking at, and took the room the card viewer should have had.
+  Instead: cards that can do something carry a thin ring, cards the game has
+  actually stopped for glow green and stand up out of your hand, and clicking
+  a card opens a menu of what that card can do — attacks named the way the card
+  names them, one row per target. It works the same on both sides of the table.
+- **End turn and anything with no card to point at sit in the middle.** End
+  turn is where it always was, between the two mats, now joined by Pass, a
+  standalone 【EXTRA】 play and any other move that names no card you can
+  click. Nothing can fall through: a move with nowhere to be clicked lands
+  there automatically.
+- **The card viewer got the space back.** The panel on the right is now the
+  prompt, the card you are hovering at nearly twice the size, one line telling
+  you where to click, and the log. Hovering a row in a card's menu shows the
+  card that row is about — for an attack, the Cookie you are about to hit.
+- **A "pick these cards" question can be declined from the strip itself.** The
+  decline used to live at the bottom of the move list, which no longer exists.
+- Number keys now take rows from an open card menu, or the buttons in the
+  middle of the table when no menu is open.
+
+## 0.2.17
+
+- **The card you are hovering shows up beside the board, not on top of it.**
+  The enlargement used to follow the cursor, which meant it covered whatever
+  you had just leaned in to look at — hover a Cookie in your battle area and
+  the preview sat over the row it was standing in. It now lands in a fixed
+  panel at the top right, directly above the move list, so the board is never
+  hidden and the card is always in the same place. Hovering a move in that list
+  puts its card in the same panel, so the list and the table answer a hover the
+  same way. The deck builder and the full-screen deck view still preview under
+  the cursor — they have no panel to dock to.
+- **Pick your opening Cookie by clicking it in your hand.** The Cookies you can
+  open with now stand up out of your hand and glow, exactly the way an armed
+  trap does during an attack, and clicking one plays it. The separate list of
+  Cookies to choose from is gone — it was naming cards you were already looking
+  at.
+- **A hand with no Cookie in it can keep redrawing.** Your first mulligan is
+  free and unchanged. If the hand you draw into still has no Cookie, you are
+  now asked again rather than having the redraw done for you, and you can keep
+  going until you find one — each of those extra redraws lets your opponent
+  draw 1 card. Mulliganing a hand that *does* have a Cookie is still a one-off:
+  the free redraw is the whole allowance for shopping around.
+
+## 0.2.16
+
+- **Blocker Cookies are back in the deck builder.** Every Cookie whose
+  【Blocker】 is priced in energy — Kiwi Cookie, Mystic Opal Cookie, Milk
+  Cookie, Churro Cookie, Wizard Cookie and eleven more — was hidden by the
+  builder's "playable only" filter, and was skipped by deck evolution for the
+  same reason. The engine has always charged that price correctly; it was the
+  card list that counted 【Blocker】 as text nobody had implemented. Sixteen
+  Cookies are now searchable and deck-legal again. A Blocker priced in
+  something the engine cannot charge still stays hidden, since it could not
+  block at all.
+
+## 0.2.15
+
+- **A full-screen view of the deck, for sharing.** The deck builder's new
+  **View** button opens the whole deck as a picture: one section per card
+  category — Cookies, FLIP, items, traps, stages, then the EXTRA pile — with
+  every distinct card at full size and its copies as a badge instead of a
+  repeated row. The header carries the deck name, the card and Cookie counts
+  and the colour spread. A size slider shrinks the cards until the whole deck
+  fits in one screenshot, and **names** can be turned off for art only.
+  Hovering a card still previews it; Esc or Close puts it away.
+- **The deck buttons wrap instead of squeezing.** The row of deck actions had
+  outgrown the pane, crushing "load a deck…" down to a few characters.
+
+## 0.2.14
+
+- **Export your decklist as a text file.** A new Export button in the deck
+  builder, next to Copy, downloads the deck grouped by card type — a `--COOKIE--`
+  header, then a line per card reading `4x Sea Fairy Cookie ST9-006 LV3`, and
+  the same for FLIP, ITEM, TRAP, STAGE and NPC. Cards with no printed Level end
+  after the ID. Lines come in the order the pane lists them, and your EXTRA deck
+  is included as its own section at the end. The file is named after the deck.
+
+## 0.2.13
+
+- **"When your turn ends, set N cards as active" joins the end-of-turn queue.**
+  An attack rider that banks an untap used to fire on its own after every
+  【End of Turn】 effect had resolved. It is now one more event in the same
+  queue, listed under the card that banked it, so you order it against your
+  other end-of-turn effects — untapping support before or after an effect that
+  wants to spend it is your call. It is left out of the question when you have
+  no rested support for it to set active.
+
+## 0.2.12
+
+- **Parsley Tea of Invigoration (ST3-018) works.** The item was in the CSV but
+  had no implementation, so it played for {G}{G} and did nothing. It now asks
+  which Cookie in your trash to bring back — any Cookie, any Level — and puts
+  it into your battle area with a fresh HP pile. "Play 1", not "up to 1": with
+  the cost already spent the question is which one, not whether. It is not
+  offered at all when your trash holds no Cookie or your battle area is full.
+
+## 0.2.11
+
+- **You choose the order of your end-of-turn effects.** When two or more of
+  your Cookies or Stage cards have an 【End of Turn】 effect, the game asks
+  which one resolves next instead of firing them in board order — it matters
+  when one effect would trash, buff or heal what another was about to use.
+  Effects that would fizzle anyway are not offered. Bots keep board order.
+
+## 0.2.10
+
+- **Ancient Healer's Gaze (ST3-016) works.** The card was in the CSV but not in
+  the deck builder's default (playable) list, because the engine had no way to
+  move a Cookie out of the battle area and into the support area. It does now:
+  select one of your LV.2-or-lower Cookies and it goes to your support area as
+  active. Its HP pile — and anything 【Awaken】ed under it — is spent, and it
+  never touches the break area, so your opponent banks no Level for it.
+
 ## 0.2.9
 
 - **Item cards go off in the middle of the table**, the way traps do — gold

@@ -45,6 +45,9 @@ function showTab(name) {
     if (tab.body) document.body.classList.toggle(tab.body, tab.name === name);
     el(tab.button).classList.toggle("on", tab.name === name);
   });
+  // The hover preview is docked in the play panel, and the other two tabs hide
+  // that panel — so it goes back to following the cursor there. app.js owns it.
+  if (typeof restorePreview === "function") restorePreview();
   if (name === "build" && !build.meta) openBuilder();
   // table.js defines this; it is loaded after this file, so it is checked for
   // rather than assumed.
@@ -271,6 +274,10 @@ function renderDeck() {
   if (build.extra.length) line.push(`${build.extra.length}/${EXTRA_SIZE()} extra`);
   line.forEach((text) => mix.appendChild(h("span", null, text)));
 
+  // showcase.js is loaded after this file, so it is checked for rather than
+  // assumed — the full-screen view keeps up with edits made behind it.
+  if (typeof renderShowcase === "function") renderShowcase();
+
   validateSoon();
 }
 
@@ -410,6 +417,63 @@ el("#deck-copy").onclick = async () => {
     flash("clipboard blocked — the list is in the console");
     console.log(text);
   }
+};
+
+/* Export: the same list the Copy button puts on the clipboard, but as a file
+ * laid out in sections the way a decklist is written out — a `--TYPE--` header,
+ * then a line per distinct card with its copies, name, ID and Level. The EXTRA
+ * deck gets its own section at the end: it is part of the deck you register,
+ * and a separate pile on the table. Cards with no printed Level (items, traps,
+ * stages) simply end after the ID. */
+const SECTION_LABEL = {
+  COOKIE: "COOKIE", FLIP: "FLIP", EXTRA: "EXTRA",
+  ITEM: "ITEM", TRAP: "TRAP", STAGE: "STAGE", NPC: "NPC",
+};
+
+function exportSections() {
+  const sections = [];
+  const collect = (pile, order) => {
+    const entries = [...countsById(pile).entries()]
+      .map(([id, count]) => ({ card: build.cards.get(id), id, count }))
+      .filter((r) => r.card);
+    order.forEach((type) => {
+      // Listed the way the pane lists it, so the file reads like the screen.
+      const rows = entries.filter((r) => r.card.type === type)
+        .sort((a, b) => (b.card.level || 0) - (a.card.level || 0)
+                        || a.card.name.localeCompare(b.card.name))
+        .map(({ card, id, count }) => [
+          `${count}x`, card.name, id, card.level ? "LV" + card.level : "",
+        ].filter(Boolean).join(" "));
+      if (rows.length) sections.push({ label: SECTION_LABEL[type] || type, rows });
+    });
+  };
+  collect(build.list, TYPE_ORDER.filter((t) => t !== "EXTRA"));
+  collect(build.extra, ["EXTRA"]);
+  return sections;
+}
+
+function deckFileName() {
+  const name = el("#deck-name").value.trim() || build.loaded || "decklist";
+  return name.replace(/[^\w.-]+/g, "_") + ".txt";
+}
+
+el("#deck-export").onclick = () => {
+  const sections = exportSections();
+  if (!sections.length) { flash("nothing to export yet"); return; }
+  const text = sections
+    .map((section) => `--${section.label}--\n${section.rows.join("\n")}\n`)
+    .join("\n");
+  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  const link = h("a");
+  link.href = url;
+  link.download = deckFileName();
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoked late: Safari reads the blob after the click returns.
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  const lines = sections.reduce((sum, s) => sum + s.rows.length, 0);
+  flash(`exported ${lines} cards (${build.list.length + build.extra.length} copies)`);
 };
 
 el("#deck-name").addEventListener("input", () => { build.dirty = true; });

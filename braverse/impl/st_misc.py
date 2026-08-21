@@ -40,6 +40,35 @@ def hero_attack(ctx: Ctx) -> None:
         ctx.skip_next_active(target)
 
 
+# --- ST3-016 Ancient Healer's Gaze (ITEM) -----------------------------------
+def _lv2_or_lower(ctx: Ctx):
+    return ctx.own_cookies(lambda c: c.level(ctx.db) <= 2)
+
+
+@effect("ST3-016", Trigger.ITEM)
+@playable_if(lambda ctx: bool(_lv2_or_lower(ctx)) and not ctx.movement_locked)
+def ancient_healers_gaze(ctx: Ctx) -> None:
+    """<{G}{G}{G}> Select 1 Cookie from your battle area that is LV.2 or lower
+    and place it in your support area as active.
+
+    The {G}{G}{G} is the item's own play cost and is already paid by the time
+    this runs. "Select 1" with a legal target is mandatory, so the choice is
+    not optional — the cost is spent either way.
+
+    The Cookie stops being a body: its HP pile is spent and only the card
+    itself lands in the support area, where it is worth one active {G}. Read
+    as a way to bank a nearly-dead Cookie as energy rather than let the
+    opponent break it.
+    """
+    options = _lv2_or_lower(ctx)
+    if not options:
+        return
+    target = ctx.choose("Move a LV.2 or lower Cookie to your support area",
+                        options, optional=False)
+    if target is not None:
+        ctx.move_to_support(target, rested=False)
+
+
 # --- ST4-004 Lobster Cookie -------------------------------------------------
 @effect("ST4-004", Trigger.ACTIVATE)
 def lobster_activate(ctx: Ctx) -> None:
@@ -192,6 +221,25 @@ def space_doughnut_trashed(ctx: Ctx) -> None:
     """When this Cookie is placed from your battle area into your trash, draw
     up to 1 card from your deck."""
     ctx.draw(1)
+
+
+# --- ST3-018 Parsley Tea of Invigoration (ITEM) ------------------------------
+def _trashed_cookies(ctx: Ctx):
+    return [c for c in ctx.me.trash if ctx.db[c.card_id].is_cookie]
+
+
+@effect("ST3-018", Trigger.ITEM)
+@playable_if(lambda ctx: bool(_trashed_cookies(ctx))
+             and len(ctx.me.battle) < ctx.game.rules.max_battle_cookies)
+def parsley_tea_of_invigoration(ctx: Ctx) -> None:
+    """<{G}{G}> Play 1 Cookie from your trash.
+
+    The `<{G}{G}>` is the item's own play cost and is already paid by the time
+    this runs. "Play 1" — not "up to 1" — so with the cost spent and a legal
+    Cookie in the trash the choice is which one, not whether: any Cookie in
+    the trash, at any Level, comes back with a fresh HP pile.
+    """
+    ctx.play_cookie_from_trash(optional=False)
 
 
 # --- ST3-020 Divine Light Crystal (TRAP) ------------------------------------
