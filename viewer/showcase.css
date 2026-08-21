@@ -1,0 +1,132 @@
+/* Full-screen deck view.
+ *
+ * A sheet over the whole window rather than a panel in the builder's grid:
+ * the point is a clean rectangle to screenshot, so nothing from the app —
+ * header, tabs, deck pane — is in the picture. It sits under the card preview
+ * (z-index 95) so hovering a card still works while it is open. */
+.showcase {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  /* Faint light from the top so a full page of cards is not a flat field. */
+  background-image: radial-gradient(120% 70% at 50% -10%, #1d2331 0%, var(--bg) 60%);
+  --sc-card: 118px;
+}
+.showcase.hidden { display: none; }
+
+.sc-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 22px 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(16, 19, 26, .7);
+}
+.sc-title { min-width: 0; }
+.sc-head h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: .2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-sub { font-size: 11.5px; color: var(--dim); margin-top: 2px; }
+
+/* The colour spread: one pip per colour in the deck, widest first. */
+.sc-colors { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; }
+.sc-pip {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--pip, var(--ink));
+  border: 1px solid var(--pip, var(--line));
+  border-radius: 999px;
+  padding: 1px 9px;
+  background: color-mix(in srgb, var(--pip, #fff) 12%, transparent);
+}
+
+.sc-tools { display: flex; align-items: center; gap: 12px; }
+.sc-tools label { font-size: 11px; color: var(--dim); }
+.sc-tools input[type="range"] { width: 110px; vertical-align: middle; }
+
+.sc-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 22px 28px;
+}
+
+.sc-group { margin-top: 18px; }
+.sc-group h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.1px;
+  color: var(--accent);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+}
+.sc-group h3 .sc-n { color: var(--ink); letter-spacing: .3px; }
+.sc-group h3 .sc-note {
+  color: var(--dim);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.sc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--sc-card), max-content));
+  gap: 14px 12px;
+  align-items: start;
+}
+
+.sc-entry { position: relative; width: var(--sc-card); }
+.sc-entry .card {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 5 / 7;
+}
+.sc-entry:hover .card { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Copies as a badge on the card. One copy carries no badge: an unmarked card
+   reads as "one of these" without having to print it 40 times over. */
+.sc-copies {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  background: rgba(10, 12, 18, .88);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.sc-name {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  line-height: 1.25;
+}
+.sc-cname {
+  font-size: 11px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-cmeta { font-size: 9.5px; color: var(--dim); }
+/* Names off: the art alone, for a tighter picture. */
+.showcase.no-names .sc-name { display: none; }

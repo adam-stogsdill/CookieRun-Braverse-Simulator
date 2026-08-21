@@ -1,0 +1,18 @@
+[
+ {
+  "encoder": "wide",
+  "dim": 142,
+  "out": "rl_wide.pt",
+  "vs_heuristic": 0.63,
+  "vs_unseen": 0.6,
+  "minutes": 8.666014897823334
+ },
+ {
+  "encoder": "stock",
+  "dim": 55,
+  "out": "rl_wide_stock.pt",
+  "vs_heuristic": 0.56,
+  "vs_unseen": 0.575,
+  "minutes": 6.963617881139119
+ }
+]

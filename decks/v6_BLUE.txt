@@ -1,0 +1,115 @@
+# run: v6
+# archetype: BLUE
+# round: 1
+# holdout: 0.815
+# validation: 0.8583333333333333
+
+COOKIE (24)
+  4x ST9-006    Sea Fairy Cookie                 LV3 HP6
+  3x ST4-010    Squid Ink Cookie                 LV1 HP1
+  2x ST4-008    Soda Cookie                      LV2 HP3
+  2x ST4-015    Pirate Cookie                    LV2 HP2
+  2x ST9-005    Mystic Opal Cookie               LV1 HP3
+  2x ST9-008    Crimson Coral Cookie             LV3 HP5
+  2x ST9-009    Wave Drop                        LV1 HP2
+  1x ST4-001    Candy Diver Cookie               LV2 HP3
+  1x ST4-002    Snow Sugar Cookie                LV1 HP3
+  1x ST4-005    GingerBright                     LV2 HP4
+  1x ST4-011    GingerBrave                      LV1 HP2
+  1x ST4-013    Captain Caviar Cookie            LV2 HP3
+  1x ST9-007    Peppermint Cookie                LV2 HP5
+  1x ST9-012    White Pearl Cookie               LV1 HP2
+FLIP (14)
+  4x ST9-003    Blue Whale Cookie                LV2 HP4
+  3x ST4-003    Dr. Wasabi Cookie                LV3 HP3
+  3x ST4-006    Peppermint Cookie                LV1 HP1
+  2x ST9-010    Parfait Cookie                   LV1 HP1
+  1x ST4-009    Ice Candy Cookie                 LV2 HP2
+  1x ST9-004    Pond Dino Cookie                 LV2 HP3
+ITEM (11)
+  3x ST9-015    Essence of the Ocean             
+  2x ST4-018    Lucky Pearls                     
+  2x ST9-013    Shimmering Moonlit Coral         
+  1x ST4-016    Bear Jelly Ice Cream             
+  1x ST4-017    Emergency Lifebuoy               
+  1x ST4-019    Sugar Crystal Lamp               
+  1x ST9-016    Bubble Wave Shell                
+TRAP (7)
+  4x ST4-021    Fallen Ice Statue                
+  2x ST9-018    Tower of Frozen Waves            
+  1x ST9-019    Curse of the Seas                
+STAGE (4)
+  3x ST4-022    Sugar Glass Dome                 
+  1x ST9-020    Tearcrown                        
+
+legal: True  size 60  flips 14
+
+{
+ "deck": [
+  "ST4-011",
+  "ST4-015",
+  "ST9-010",
+  "ST4-015",
+  "ST4-018",
+  "ST9-012",
+  "ST9-006",
+  "ST9-010",
+  "ST4-003",
+  "ST4-001",
+  "ST4-002",
+  "ST9-006",
+  "ST4-022",
+  "ST4-003",
+  "ST9-018",
+  "ST4-006",
+  "ST4-009",
+  "ST4-003",
+  "ST9-008",
+  "ST4-010",
+  "ST4-006",
+  "ST4-010",
+  "ST9-006",
+  "ST4-019",
+  "ST4-018",
+  "ST4-022",
+  "ST4-017",
+  "ST9-003",
+  "ST4-008",
+  "ST9-006",
+  "ST9-013",
+  "ST9-013",
+  "ST9-015",
+  "ST9-005",
+  "ST9-004",
+  "ST9-015",
+  "ST9-009",
+  "ST9-009",
+  "ST4-006",
+  "ST4-005",
+  "ST9-003",
+  "ST9-020",
+  "ST4-010",
+  "ST4-021",
+  "ST9-003",
+  "ST4-021",
+  "ST9-015",
+  "ST9-007",
+  "ST9-003",
+  "ST9-018",
+  "ST4-021",
+  "ST4-013",
+  "ST9-019",
+  "ST4-016",
+  "ST9-005",
+  "ST4-008",
+  "ST4-021",
+  "ST4-022",
+  "ST9-008",
+  "ST9-016"
+ ],
+ "run": "v6",
+ "archetype": "BLUE",
+ "round": 1,
+ "holdout": 0.815,
+ "validation": 0.8583333333333333
+}
