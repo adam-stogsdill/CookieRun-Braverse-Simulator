@@ -283,7 +283,38 @@ def load_cards(path: str | Path = DEFAULT_CSV, *, drop_alt_art: bool = True) -> 
             if card is not None:
                 cards[card.id] = card
     _backfill_set_colors(cards)
+    _promote_extra_cards(cards)
     return cards
+
+
+def _promote_extra_cards(cards: dict[str, CardDef]) -> None:
+    """Type a card by the 【EXTRA】 printed on it, not by the dump's `type`.
+
+    Seven cards print 【EXTRA】 and are filed as ordinary Cookies — BS9's four
+    Shadow Milk Cookies and Pure Vanilla Cookie, BS11's Avatar of Destiny and
+    Dark Enchantress Cookie. The dump cannot even keep its own story straight
+    about them: the two BS11 rows set `isExtra` to 1 while typing them COOKIE,
+    the BS9 rows say Cookie in both columns, and BS10's rows type them `EXRTA`
+    with no 【EXTRA】 in the text at all. No single column is right.
+
+    The marker is, because it is the keyword printed on the card face and
+    `_parse_markers` reads it off the rules text. It comes out a strict
+    superset of the `type` column — all 10 typed EXTRA carry it, plus these 7 —
+    so promoting on it can only ever add cards, never reclassify a real Cookie.
+
+    This is a rules fix, not a tidy-up. An EXTRA card typed COOKIE sits in the
+    main 60 and is offered as a free play from hand, so BS9-102 — "can be
+    played if there are 20 cards or more in each player's trash" — could be
+    dropped on turn one for nothing. Running it after the load rather than
+    inside `_row_to_def` is safe because `CardType.EXTRA.is_cookie` is True,
+    exactly like COOKIE: every type-dependent branch in that function takes the
+    same path either way.
+    """
+    from dataclasses import replace
+
+    for card_id, card in list(cards.items()):
+        if card.type is not CardType.EXTRA and Marker.EXTRA in card.markers:
+            cards[card_id] = replace(card, type=CardType.EXTRA)
 
 
 def _backfill_set_colors(cards: dict[str, CardDef]) -> None:

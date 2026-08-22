@@ -156,7 +156,31 @@ printed cards, `ctx.state` for the whole game.
 `draw(n)` (never loses the game on an empty deck), `discard(n, optional=)`,
 `discard_colored(n, color)`, `mill_deck(n)`, `mill_to_support(n, rested=)`,
 `return_support_to_hand(predicate=)`, `opponent_discards(n)`,
-`play_cookie_from_trash(predicate=)`.
+`play_cookie_from_trash(predicate=)`,
+`view_top(n, pick=, criterion=, reveal=, rest=)`, `reveal_top(n)`,
+`discard_matching(n, predicate)`, `run_flip(card, host=)`,
+`steal_to_hp(cookie, card, source)`.
+
+`reveal_top` is **not** `view_top`. A view is private and you take out of it; a
+reveal is shown to both players, moves nothing, and leaves the cards on top for
+the clause that follows to ask about — which is why the names go in the (public)
+log and a view's do not. `steal_to_hp` puts a card on the *bottom* of an HP pile
+face up; bottom is index 0, because damage pops off the end, so a stolen card is
+the last one that pile turns over. `run_flip` fires a FLIP from somewhere that
+is not an HP pile — one card does this, and `host` is the Cookie the effect
+treats as its own.
+
+`view_top` is "View N cards from the top of your deck, take one, put the rest
+back", and the thing to get right about it is that those are **two separate
+instructions**. `pick` is a predicate over the `CardDef` and narrows what may
+be *taken*; every card viewed is still put in front of the player, greyed where
+the criterion rules it out. Filtering the view down to the eligible cards turns
+"look at three" into "look at one", which is a different and much worse card —
+that was the bug in Aloe Cookie before this verb existed. `criterion` is the
+text for the prompt ("{B}"), `reveal=True` is "show it to your opponent" and
+names the taken card in the (public) log while never naming the ones left
+behind, and `rest` is `"bottom"` or `"trash"`. When nothing matches, the view is
+still shown, as a look-and-acknowledge.
 
 **Cookies**
 `deal_damage(cookie, n)` — effect damage, which is what everything that is not

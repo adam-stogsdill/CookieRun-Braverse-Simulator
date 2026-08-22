@@ -17,6 +17,12 @@ from .enums import Color
 from .state import Cookie, CardInstance, GameState, PlayerState
 
 
+def _view_prompt(criterion: str) -> str:
+    """"Add a {P} card to your hand", or just "Add a card to your hand"."""
+    what = f"{criterion} card" if criterion else "card"
+    return f"Add a {what} to your hand"
+
+
 class Trigger(str, Enum):
     ON_PLAY = "on_play"          # 【On Play】
     ACTIVATE = "activate"        # 【Activate】 skill, main phase
@@ -245,6 +251,13 @@ def is_implemented(card_id: str) -> bool:
     base = card_id.split("@")[0]
     if base in MOVEMENT_LOCK_CARDS or base in STATIC_ABILITY_CARDS:
         return True
+    # An 【EXTRA】 card's gate is a clause like any other, and the one that
+    # decides whether the card can be in the game at all. A registered gate
+    # with no body is a vanilla Cookie that enters on a real condition, which
+    # is a playable card; hiding it from the deck builder was treating the most
+    # important half of its text as if it were not there.
+    if base in EXTRA_PLAYS:
+        return True
     return any((base, trigger) in _REGISTRY for trigger in Trigger)
 
 
@@ -377,6 +390,145 @@ class Ctx:
 
     def discard_colored(self, n: int, color: Color) -> list[CardInstance]:
         return self.game.discard(self.me, n, self, color=color)
+
+    def discard_matching(self, n: int, predicate) -> list[CardInstance]:
+        """Discard ``n`` cards the predicate accepts, chosen by the controller.
+
+        `discard_colored` covers the common "{Y} cards" wording; this is for
+        the costs that ask for something narrower — BS9-030 wants three yellow
+        Cookies *that have FLIP*, which is a type as well as a colour.
+        """
+        return self.game.discard(self.me, n, self, predicate=predicate)
+
+    def view_top(self, n: int, *, pick=None, take: int = 1,
+                 prompt: str = "", reveal: bool = False,
+                 rest: str = "bottom", criterion: str = "") -> list[CardInstance]:
+        """"View N cards from the top of your deck, take one, put the rest back."
+
+        Three cards in the pool are written this way and each did it by hand,
+        slicing `ctx.me.deck` directly — which is the one thing a card effect is
+        not supposed to do, and which got the important detail wrong: Aloe
+        Cookie's "select 1 {B} card" only ever *offered* the blue ones, so a
+        player looked at the top three and was shown one. Looking at all three
+        is the effect. What you may take out of them is a separate restriction,
+        and the two must not be collapsed into each other.
+
+        So `pick` narrows what is selectable and nothing else. Every viewed card
+        travels on the question as context (`state.viewing`) and the browser
+        draws all of them, greying the ones the criterion rules out.
+
+        The cards stay in the deck while the question is open, and move only
+        once it is answered — nothing has happened yet, and leaving them there
+        is also what lets the viewer recognise them as cards it can lay out in
+        a strip rather than as a list of buttons.
+
+        `reveal` is "show it to your opponent": the taken card is named in the
+        log, and the ones left behind never are. The log is public, and what
+        you saw and did not take is yours.
+
+        `rest` is where the leftovers go — "bottom" of the deck, or "trash".
+        """
+        viewed = self.me.deck[:n]
+        if not viewed:
+            return []
+        self.state.record(f"views {len(viewed)} card"
+                          f"{'' if len(viewed) == 1 else 's'} from the top of the deck")
+        eligible = [c for c in viewed if pick is None or pick(self.db[c.card_id])]
+        taken: list[CardInstance] = []
+        if not eligible:
+            # You still looked. Skipping the prompt here would have made the
+            # commonest miss — three cards, none of them the right colour —
+            # the one case where the card does nothing you can see, which is
+            # exactly when knowing what went past matters most.
+            with self.game.showing(viewed):
+                self.confirm(f"Nothing among the {len(viewed)} viewed cards "
+                             f"can be taken")
+        for _ in range(take):
+            if not eligible:
+                break
+            with self.game.showing(viewed):
+                chosen = self.choose(prompt or _view_prompt(criterion), eligible,
+                                     optional=True)
+            if chosen is None:
+                break
+            eligible.remove(chosen)
+            taken.append(chosen)
+
+        # Only now does anything move. Taken cards come out of the deck by
+        # identity, because the top N may not be the first N any more if an
+        # effect reshuffled underneath us — it cannot, today, but the identity
+        # form costs nothing and cannot go wrong.
+        for card in viewed:
+            if card in self.me.deck:
+                self.me.deck.remove(card)
+        for card in taken:
+            card.face_up = bool(reveal)
+            self.me.hand.append(card)
+            if reveal:
+                self.state.record(f"reveals {self.db[card.card_id].name} "
+                                  f"and adds it to hand")
+        leftovers = [c for c in viewed if c not in taken]
+        if rest == "trash":
+            self.me.trash.extend(leftovers)
+        else:
+            # "in any order" — the printed text lets the controller order them
+            # and this does not ask, because the deck is face down and the only
+            # thing that could read the difference is the controller's own
+            # memory of what they just saw.
+            self.me.deck.extend(leftovers)
+        if leftovers:
+            where = "the trash" if rest == "trash" else "the bottom of the deck"
+            self.state.record(f"places {len(leftovers)} viewed card"
+                              f"{'' if len(leftovers) == 1 else 's'} in {where}")
+        return taken
+
+    def reveal_top(self, n: int = 1) -> list[CardInstance]:
+        """"Reveal N cards from the top of your deck" — and put them back.
+
+        A *reveal* is not a *view*: the cards are shown to both players and the
+        card then asks a question about them ("if that card is a {B} LV.2
+        Cookie, ..."). Nothing moves, so they stay exactly where they were,
+        still in draw order. Nine cards in the pool open this way.
+
+        Public, unlike `view_top`, which is why the names go in the log — that
+        is the whole difference between the two verbs and the reason they are
+        not one with a flag.
+        """
+        seen = self.me.deck[:n]
+        if seen:
+            names = ", ".join(self.db[c.card_id].name for c in seen)
+            self.state.record(f"reveals {names} from the top of the deck")
+        return list(seen)
+
+    def run_flip(self, card: CardInstance, host: Cookie | None = None) -> None:
+        """Resolve a card's FLIP as though it had just turned over.
+
+        BS9-030 discards a FLIP Cookie out of hand and fires its effect from
+        there, which is the only card in the pool that runs a FLIP anywhere but
+        an HP pile. `host` is the Cookie the effect treats as its own — the one
+        a "this Cookie gains +1 HP" clause lands on — and defaults to whatever
+        is resolving.
+        """
+        from .enums import CardType
+        if self.db[card.card_id].type is not CardType.FLIP:
+            return
+        self.game._run_effect(card, Trigger.FLIP, self.me,
+                              flip_host=host or self.source_cookie)
+
+    def steal_to_hp(self, cookie: Cookie, card: CardInstance,
+                    source: list) -> None:
+        """Move a card out of `source` onto the bottom of `cookie`'s HP pile.
+
+        Face up, because every card that does this says so: HP taken off
+        someone else is public where your own pile is not. The bottom is
+        `index 0` — damage pops off the end — so a stolen card is the last one
+        the pile will turn over, not the next.
+        """
+        if card not in source:
+            return
+        source.remove(card)
+        card.face_up = True
+        cookie.hp_cards.insert(0, card)
 
     def mill_to_support(self, n: int, *, rested: bool = True) -> int:
         moved = 0

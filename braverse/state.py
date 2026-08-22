@@ -152,6 +152,10 @@ class PlayerState:
     # this turn, so the trash case is tracked the same way as the break one.
     played_from_trash_this_turn: set = field(default_factory=set)
     support_trashed_this_turn: int = 0
+    # Cookies that left your battle area for the bottom of your deck this turn.
+    # BS9-088's 【Awaken】 gate is the only card that asks, and it asks because
+    # the two BS9 Cookies that bury themselves are what set it up.
+    cookies_to_deck_bottom_this_turn: int = 0
     hp_gain_locked: bool = False      # "cannot add HP via card effects"
     # (turn_counter, colour, level) for every Cookie of yours that fainted,
     # so cards can ask about "your opponent's previous turn".
@@ -218,6 +222,13 @@ class GameState:
     # log says *what* caused a draw, a heal or a point of damage — a FLIP, a
     # trap and an 【Activate】 skill all read identically without it.
     effect_sources: list = field(default_factory=list)
+    # Cards the player being asked is currently *looking at* — the top three
+    # off their own deck, say. They are not in any zone the board draws, and
+    # they are the asking player's secret, so they travel on the question
+    # rather than in the snapshot: `_hide_pending` already strips a question
+    # the other seat is not being asked, which is exactly the right rule for
+    # these. Set only for the duration of one `choose`.
+    viewing: list = field(default_factory=list)
 
     def player(self, index: int) -> PlayerState:
         return self.players[index]

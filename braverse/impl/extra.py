@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from braverse.cost import Cost
 from braverse.effects import Ctx, Trigger, effect, extra_play
+from braverse.enums import Marker
 
 
 # --- standalone EXTRA Cookies ------------------------------------------------
@@ -118,6 +119,100 @@ def white_lily_awaken_gate(ctx: Ctx) -> bool:
     """【EXTRA】 If there are 8 cards or more in your support area, you can
     【Awaken】 your [White Lily Cookie]."""
     return len(ctx.me.support) >= 8
+
+
+# --- BS9 and BS11: the seven the dump filed as ordinary Cookies --------------
+# These print 【EXTRA】 and were typed COOKIE by the scrape, which meant they sat
+# in the main 60 and could be played from hand for free, gate and all ignored.
+# `_promote_extra_cards` fixes the type; these are the gates that go with it.
+# Their 【On Play】 and 【Activate】 bodies are still unwritten — an EXTRA card
+# with a gate and no body is a vanilla body with a real entry condition, which
+# is the right way round to be incomplete.
+@extra_play("BS9-102")
+def shadow_milk_purple_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 Can be played if there are 20 cards or more in each player's
+    trash."""
+    return len(ctx.me.trash) >= 20 and len(ctx.opp.trash) >= 20
+
+
+@extra_play("BS9-055")
+def shadow_milk_green_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 Can be played if there are 3 cards or more in your opponent's
+    support area and if, during this turn, 2 cards or more were placed from
+    your support area into your trash."""
+    return (len(ctx.opp.support) >= 3
+            and ctx.me.support_trashed_this_turn >= 2)
+
+
+@extra_play("BS9-010")
+def shadow_milk_red_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 Can be played if 2 or more of your {R} LV.1 Cookies fainted
+    during your opponent's previous turn."""
+    from braverse.enums import Color
+    want = ctx.state.turn_counter - 1
+    return sum(1 for turn, color, level in ctx.me.faint_log
+               if turn == want and color is Color.RED and level == 1) >= 2
+
+
+def _discard_three_yellow_flips(ctx: Ctx) -> bool:
+    from braverse.enums import CardType, Color
+    return bool(ctx.discard_matching(
+        3, lambda d: d.color is Color.YELLOW and d.type is CardType.FLIP))
+
+
+@extra_play("BS9-030", pay=_discard_three_yellow_flips)
+def shadow_milk_yellow_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 <Discard 3 {Y} Cookies that have FLIP from your hand.> Play this
+    Cookie.
+
+    "Cookies that have FLIP" is the FLIP card type, not a Cookie with a flip
+    effect stapled on — FLIP cards *are* Cookies in this game, which is why
+    they can sit in an HP pile and stand up when they turn over.
+    """
+    from braverse.enums import CardType, Color
+    return sum(1 for c in ctx.me.hand
+               if ctx.db[c.card_id].color is Color.YELLOW
+               and ctx.db[c.card_id].type is CardType.FLIP) >= 3
+
+
+@extra_play("BS11-091")
+def avatar_of_destiny_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 If both players' break areas are LV.6 or higher and there are
+    3 cards or less in both players' hands, this Cookie can be played."""
+    return (ctx.me.break_level_total(ctx.db) >= 6
+            and ctx.opp.break_level_total(ctx.db) >= 6
+            and len(ctx.me.hand) <= 3 and len(ctx.opp.hand) <= 3)
+
+
+@extra_play("BS9-088", hosts=lambda ctx: _named_in_battle(
+    ctx, "Pure Vanilla Cookie"))
+def pure_vanilla_awaken_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 During this turn, if a Cookie was placed from your battle area
+    on the bottom of your deck, you can 【Awaken】 [Pure Vanilla Cookie].
+
+    BS9-080 and BS9-087 are the Cookies that bury themselves to set this up,
+    which is what `cookies_to_deck_bottom_this_turn` counts.
+    """
+    return ctx.me.cookies_to_deck_bottom_this_turn > 0
+
+
+@extra_play("BS11-116", hosts=lambda ctx: _named_in_battle(
+    ctx, "Dark Enchantress Cookie",
+    lambda c: c.level(ctx.db) == 3 and c.defn(ctx.db).has(Marker.SPECIAL_PLAY)))
+def dark_enchantress_awaken_gate(ctx: Ctx) -> bool:
+    """【EXTRA】 If your break area is LV.7 or higher and [Dark Enchantress's
+    Castle] is in your stage area, you can 【Awaken】 your LV.3 [Dark Enchantress
+    Cookie] that has Special Play.
+
+    【Special Play】 itself is not modelled — that is how the LV.3 gets onto the
+    board in the first place, and there is no path to it yet. Naming the marker
+    in the host filter anyway keeps this gate honest about which Cookie it
+    means rather than awakening any LV.3 of that name; it simply cannot open
+    until the other half exists.
+    """
+    return (ctx.me.break_level_total(ctx.db) >= 7
+            and any(ctx.db[c.card_id].name == "Dark Enchantress's Castle"
+                    for c in ctx.me.stage))
 
 
 # --- the one Awaken card with no effect of its own on file -------------------

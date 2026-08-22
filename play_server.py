@@ -653,6 +653,27 @@ def centre_style(options: Sequence) -> Optional[str]:
     return None
 
 
+def shown_cards(db: CardDB, state: GameState, options: Sequence) -> list:
+    """Cards to lay out alongside the answers, which are not answers themselves.
+
+    "View the top 3 cards of your deck, add 1 {P} card to your hand" is two
+    instructions, and only the second one is the question. Showing three cards
+    and letting you click one of them is the effect; showing you only the
+    purple one would be a different, much worse card. So the engine parks the
+    whole viewed set on `state.viewing` for the duration of the question and
+    this turns the part that is *not* selectable into greyed-out context.
+
+    Safe to send: a question the other seat is not being asked is stripped
+    wholesale by `Match._hide_pending`, so what you looked at and did not take
+    never leaves your own browser.
+    """
+    if not state.viewing:
+        return []
+    answers = {getattr(o, "uid", None) for o in options}
+    return [{**option_json(db, -1, card), "index": -1}
+            for card in state.viewing if card.uid not in answers]
+
+
 def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
     """Should this question be answered by pointing at the cards themselves?
 
@@ -686,6 +707,10 @@ def hand_pick(prompt: str, options: Sequence, player) -> Optional[dict]:
         # to losing. Naming it "Play Cookie" because the word "Cookie" appears
         # in the prompt reads as a reward for the click it actually punishes.
         verb = "To Break Area"
+    elif "to your hand" in lowered:
+        # "View 3 cards from the top of your deck, add 1 {P} card to your hand"
+        # and its relatives. "Choose" undersold what the button does.
+        verb = "Add to Hand"
     elif "cookie" in lowered:
         verb = "Play Cookie"
     else:
@@ -717,7 +742,8 @@ class HumanController:
         payload = [option_json(db, i, o) for i, o in enumerate(options)]
         pick = hand_pick(prompt, options, state.players[self.seat])
         index = self.match.ask(self.seat, prompt, payload, optional=optional,
-                               pick=pick, centre=centre_style(options))
+                               pick=pick, centre=centre_style(options),
+                               shown=shown_cards(db, state, options))
         return options[index] if index is not None else None
 
     def order_effects(self, state: GameState, prompt: str, options: Sequence):
@@ -1169,7 +1195,8 @@ class Match:
     # -- questions -------------------------------------------------------
     def ask(self, seat: int, prompt: str, options: list, *, optional: bool,
             count: int = 1, pick: Optional[dict] = None,
-            centre: Optional[str] = None, up_to: bool = False):
+            centre: Optional[str] = None, up_to: bool = False,
+            shown: Optional[list] = None):
         """Block the match thread until the browser answers.
 
         Returns an index, or a list of them when the question takes more than
@@ -1187,6 +1214,8 @@ class Match:
             "upTo": up_to,
             "pick": pick,
             "centre": centre,
+            # Drawn next to the answers but not answerable. See `shown_cards`.
+            "shown": shown or [],
             "id": self.version + 1,
         }
         self.publish(pending)
@@ -1304,6 +1333,7 @@ class Match:
             "count": 1,
             "pick": None,
             "centre": None,
+            "shown": [],
             "waiting": True,
         }
 

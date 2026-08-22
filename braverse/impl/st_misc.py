@@ -85,16 +85,12 @@ def lobster_activate(ctx: Ctx) -> None:
 @effect("ST4-013", Trigger.ON_PLAY)
 def captain_caviar_activate(ctx: Ctx) -> None:
     """View the top 3 cards of your deck; you can draw 1 of them to your hand.
-    Then, place the remaining cards at the bottom of your deck in any order."""
-    viewed = ctx.me.deck[:3]
-    if not viewed:
-        return
-    del ctx.me.deck[:len(viewed)]
-    picked = ctx.choose("Draw one of the top 3 cards", list(viewed), optional=True)
-    if picked is not None:
-        viewed.remove(picked)
-        ctx.me.hand.append(picked)
-    ctx.me.deck.extend(viewed)
+    Then, place the remaining cards at the bottom of your deck in any order.
+
+    No criterion, so all three are selectable; nothing is shown to the
+    opponent, because this one does not say to.
+    """
+    ctx.view_top(3, prompt="Draw one of the top 3 cards")
 
 
 # --- ST5-001 / ST5-006 / ST5-007 shared removal -----------------------------

@@ -1079,6 +1079,193 @@ class _SpringsTheTrap:
         return options[0]
 
 
+# --- viewing the top of your deck -------------------------------------------
+class _Watcher:
+    """A seat that records what it was offered and what it was shown beside it."""
+
+    def __init__(self):
+        self.offered = []
+        self.viewing = []
+
+    def choose_action(self, state, options):
+        return options[0]
+
+    def choose(self, state, prompt, options, *, optional):
+        self.offered.append(list(options))
+        self.viewing.append(list(state.viewing))
+        return options[0] if options else None
+
+
+def _viewer_game(db, top_colors):
+    """A game whose seat-0 deck has cards of `top_colors` on top, in order."""
+    from braverse.enums import Color as C
+    seat = _Watcher()
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [seat, SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=5)
+    game.setup()
+    seat.offered.clear()          # the opening-Cookie question is not ours
+    seat.viewing.clear()
+    me = game.state.players[0]
+    picks = []
+    for color in top_colors:
+        defn = next(c for c in db.cards.values() if c.color is C[color])
+        picks.append(CardInstance.make(defn.id, 0))
+    me.deck[:0] = picks
+    return game, seat, me
+
+
+def _ctx_for(game, me, **kw):
+    from braverse.effects import Ctx
+    return Ctx(game=game, state=game.state, db=game.db, me=me,
+               opp=game.state.opponent_of(me.index), **kw)
+
+
+def test_viewing_the_top_shows_every_card_and_offers_only_the_eligible_ones():
+    """"View the top 3, select 1 {B} card" is two instructions, not one.
+
+    Aloe Cookie used to filter to the blue cards and offer only those, so a
+    card whose whole point is looking at three showed you one. `pick` narrows
+    what is *selectable*; the full view rides along on `state.viewing` for the
+    front end to draw.
+    """
+    from braverse.effects import Trigger, get_effect
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, ["RED", "BLUE", "RED"])
+    top = list(me.deck[:3])
+    before = len(me.deck)
+
+    get_effect("BS2-040", Trigger.FAINT)(
+        _ctx_for(game, me, trigger=Trigger.FAINT.value))
+
+    assert seat.viewing == [top], "all three were put in front of the player"
+    assert seat.offered[0] == [top[1]], "only the {B} card could be taken"
+    assert me.hand[-1] is top[1]
+    # The other two go to the bottom, and nothing was lost on the way.
+    assert len(me.deck) == before - 1
+    assert me.deck[-2:] == [top[0], top[2]]
+
+
+def test_a_view_with_no_criterion_offers_all_of_them():
+    from braverse.effects import Trigger, get_effect
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, ["RED", "BLUE", "GREEN"])
+    top = list(me.deck[:3])
+
+    get_effect("ST4-013", Trigger.ON_PLAY)(
+        _ctx_for(game, me, trigger=Trigger.ON_PLAY.value))
+
+    assert seat.offered[0] == top
+    assert me.hand[-1] is top[0]
+
+
+def test_a_view_that_bins_the_leftovers_bins_them():
+    """BS9-101 is the same effect with the remainder going to the trash rather
+    than the bottom of the deck, and it pays for itself with the Cookie."""
+    from braverse.effects import Trigger, get_effect
+
+    from braverse.enums import Color
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, [])
+
+    # Deploy first: building the Cookie's HP pile draws off the deck, which
+    # would push a planted top three straight back down again.
+    pie = CardInstance.make("BS9-101", 0)
+    me.hand.append(pie)
+    game._deploy_cookie(me, pie, run_on_play=False)
+    cookie = me.battle[-1]
+    purple = next(c for c in db.cards.values() if c.color is Color.PURPLE)
+    me.support = [CardInstance.make(purple.id, 0) for _ in range(2)]
+    for card in me.support:
+        card.rested = False
+
+    red = next(c for c in db.cards.values() if c.color is Color.RED)
+    me.deck[:0] = [CardInstance.make(red.id, 0), CardInstance.make(purple.id, 0),
+                   CardInstance.make(red.id, 0)]
+    top = list(me.deck[:3])
+    trash_before = len(me.trash)
+
+    get_effect("BS9-101", Trigger.ACTIVATE)(
+        _ctx_for(game, me, source_cookie=cookie, source_card=cookie.card,
+                 trigger=Trigger.ACTIVATE.value))
+
+    assert seat.viewing[-1] == top, "all three shown"
+    assert seat.offered[-1] == [top[1]], "only the {P} card could be taken"
+    assert me.hand[-1] is top[1]
+    assert top[0] in me.trash and top[2] in me.trash
+    assert len(me.trash) > trash_before
+    assert cookie not in me.battle, "the Cookie paid for its own skill"
+    assert sum(c.rested for c in me.support) == 1, "{P} came off a support card"
+
+
+def test_a_view_names_only_the_card_it_reveals():
+    """The log is public. What you looked at and put back is not."""
+    from braverse.effects import Trigger, get_effect
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, ["RED", "BLUE", "RED"])
+    top = list(me.deck[:3])
+    mark = len(game.state.log)
+
+    get_effect("BS2-040", Trigger.FAINT)(
+        _ctx_for(game, me, trigger=Trigger.FAINT.value))
+
+    written = "\n".join(game.state.log[mark:])
+    assert db[top[1].card_id].name in written, "the revealed card is named"
+    for hidden in (top[0], top[2]):
+        assert db[hidden.card_id].name not in written, written
+
+
+def test_a_view_that_matches_nothing_still_shows_you_the_cards():
+    """The commonest miss — three cards, none the right colour — is exactly
+    when knowing what went past matters most, so it is shown and acknowledged
+    rather than skipped."""
+    from braverse.effects import Trigger, get_effect
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, ["RED", "RED", "RED"])
+    top = list(me.deck[:3])
+    hand = len(me.hand)
+
+    get_effect("BS2-040", Trigger.FAINT)(
+        _ctx_for(game, me, trigger=Trigger.FAINT.value))
+
+    assert seat.viewing == [top], "all three were still put in front of you"
+    assert seat.offered == [[True]], "the only answer was an acknowledgement"
+    assert len(me.hand) == hand, "nothing was taken"
+    assert me.deck[-3:] == top, "and all three went back to the bottom"
+
+
+def test_a_view_of_an_empty_deck_does_nothing():
+    from braverse.effects import Trigger, get_effect
+
+    db = default_db()
+    game, seat, me = _viewer_game(db, [])
+    me.deck.clear()
+    hand = len(me.hand)
+
+    get_effect("BS2-040", Trigger.FAINT)(
+        _ctx_for(game, me, trigger=Trigger.FAINT.value))
+
+    assert len(me.hand) == hand
+    assert not seat.offered
+
+
+def test_every_registered_effect_names_a_card_that_exists():
+    """BS9-101 sat dead for the life of the file because it was registered as
+    "BS09-101", which is not a card id — `get_effect` looks up the database's
+    normalised id and never found it. Nothing failed; the card simply never did
+    anything. A typo that costs a card its effect should not be silent."""
+    import braverse  # noqa: F401  (imports every impl module)
+    from braverse.effects import _REGISTRY
+
+    db = default_db()
+    unknown = sorted({cid for cid, _ in _REGISTRY if cid.split("@")[0] not in db})
+    assert not unknown, f"effects registered against ids that do not exist: {unknown}"
+
+
 # --- the mulligan -----------------------------------------------------------
 def test_a_controller_that_wants_a_mulligan_gets_a_whole_new_hand():
     db = default_db()

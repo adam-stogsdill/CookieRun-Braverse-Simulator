@@ -302,6 +302,7 @@ class Game:
         player.played_from_break_this_turn.clear()
         player.played_from_trash_this_turn.clear()
         player.support_trashed_this_turn = 0
+        player.cookies_to_deck_bottom_this_turn = 0
         player.hp_gain_locked = False
         state.opponent.blockers_disabled = False
         player.blockers_disabled = False
@@ -558,8 +559,18 @@ class Game:
                       defn: CardDef) -> list[A.Action]:
         """Any Cookie may be played into a free battle slot, at no cost.
 
-        【EXTRA】 Cookies additionally carry a "can be played if ..." gate.
+        Except an 【EXTRA】 one, which is never played from hand at all: it
+        lives in its own pile and comes out through `_extra_plays`, past the
+        "can be played if ..." gate printed on it. `validate` keeps EXTRA cards
+        out of the 60 so one should not be in a hand to begin with — but
+        `CardType.EXTRA.is_cookie` is True, so without this guard anything that
+        did put one there, a bounce off an 【Awaken】 among them, would hand the
+        player a free Cookie with its entry condition skipped. That is what
+        BS9-102 was doing before its type was fixed: "can be played if there
+        are 20 cards or more in each player's trash", droppable on turn one.
         """
+        if defn.type is CardType.EXTRA:
+            return []
         if len(player.battle) >= self.rules.max_battle_cookies:
             return []
         if not may_play(self.db, player,
@@ -1228,10 +1239,16 @@ class Game:
         return bool(player.deck)
 
     def discard(self, player: PlayerState, n: int, ctx, *,
-                color: Color | None = None, optional: bool = False) -> list[CardInstance]:
-        """Discard ``n`` cards. Returns what was discarded — empty if unpayable."""
+                color: Color | None = None, predicate=None,
+                optional: bool = False) -> list[CardInstance]:
+        """Discard ``n`` cards. Returns what was discarded — empty if unpayable.
+
+        `color` is the common narrowing and `predicate` the general one; a
+        caller may pass either, and both are applied when both are given.
+        """
         pool = [c for c in player.hand
-                if color is None or self.db[c.card_id].color is color]
+                if (color is None or self.db[c.card_id].color is color)
+                and (predicate is None or predicate(self.db[c.card_id]))]
         if len(pool) < n:
             if not optional:
                 ctx.fizzled = True
@@ -1276,6 +1293,25 @@ class Game:
                                  source_kind(self.db, card, trigger)):
             fn(self._ctx(player, source_cookie=flip_host, source_card=card,
                          trigger=trigger.value))
+
+    @contextlib.contextmanager
+    def showing(self, cards):
+        """Cards the player being asked is looking at, for the next question.
+
+        A "view the top 3" effect asks you to pick out of three cards that are
+        in no zone the board draws. The three ride along on the question rather
+        than in the snapshot, because a question the other seat is not being
+        asked is already stripped on the way out (`Match._hide_pending`) and
+        that is exactly the rule these need: what you looked at and did not take
+        is yours. Same shape as `_effect_source` — a stack on the state that the
+        layer above reads at the moment it builds the payload.
+        """
+        previous = self.state.viewing
+        self.state.viewing = list(cards)
+        try:
+            yield
+        finally:
+            self.state.viewing = previous
 
     @contextlib.contextmanager
     def _effect_source(self, name: str, kind: str = ""):

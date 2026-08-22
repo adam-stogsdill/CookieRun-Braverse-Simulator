@@ -107,18 +107,16 @@ def aloe_faint(ctx: Ctx) -> None:
     """When this Cookie faints, view the top 3 cards of your deck. Out of the 3
     cards, select 1 {B} card, show it to your opponent, and place that card in
     your hand. Then, return the remaining cards to the bottom of your deck in
-    any order."""
-    viewed = ctx.me.deck[:3]
-    if not viewed:
-        return
-    del ctx.me.deck[:len(viewed)]
-    blue = [c for c in viewed if ctx.db[c.card_id].color is Color.BLUE]
-    if blue:
-        picked = ctx.choose("Add a {B} card to your hand", blue, optional=True)
-        if picked is not None:
-            viewed.remove(picked)
-            ctx.me.hand.append(picked)
-    ctx.me.deck.extend(viewed)
+    any order.
+
+    "View the top 3" and "select 1 {B}" are two separate instructions, and this
+    used to run them as one: it filtered to the blue cards and offered only
+    those, so a card that lets you look at three showed you one. `pick` narrows
+    what is selectable and nothing else — all three are still put in front of
+    you, which is most of what the card is for.
+    """
+    ctx.view_top(3, pick=lambda d: d.color is Color.BLUE,
+                 criterion="{B}", reveal=True, rest="bottom")
 
 
 # --- BS2-047 Diving Goggles -------------------------------------------------

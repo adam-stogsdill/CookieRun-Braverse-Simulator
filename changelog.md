@@ -1,5 +1,70 @@
 # Changelog
 
+## 0.2.22
+
+- **The seven 【EXTRA】 cards now play their full text.** Last version gave them
+  their entry conditions; this one writes the rest — 【On Play】, 【Activate】,
+  attack riders and Dark Enchantress Cookie's "cannot be moved by your
+  opponent's effects". They are no longer vanilla bodies with a gate.
+  - Shadow Milk Cookie {R} takes a card out of your opponent's hand as HP, and
+    steals HP off a Cookie it swings at.
+  - Shadow Milk Cookie {Y} bins a LV.1 Cookie out of your break area to buy
+    back room on the clock, and can discard a FLIP from hand mid-attack to fire
+    its effect from the trash.
+  - Shadow Milk Cookie {G} feeds its own support area off the deck, and can
+    bounce a support card for a point of damage.
+  - Shadow Milk Cookie {P} trades a {P} card from your hand for one of your
+    opponent's, and chips in an extra damage once their trash passes 20.
+  - Pure Vanilla Cookie reveals the top card and pays out on a {B} LV.2 Cookie.
+  - Avatar of Destiny and Dark Enchantress Cookie were complete with their
+    gates.
+- Shadow Milk Cookie {R} takes its card from the opponent's hand at random,
+  matching every other card in the game that reaches into a hand — you get no
+  look at it first, so choosing would mean seeing their whole hand.
+- Dark Enchantress Cookie's 【Awaken】 still cannot happen: it needs a LV.3
+  Dark Enchantress Cookie with 【Special Play】 on the board, and 【Special
+  Play】 is not modelled. The condition is written correctly and will start
+  working when that is.
+
+## 0.2.21
+
+- **Seven 【EXTRA】 cards were being treated as ordinary Cookies.** Avatar of
+  Destiny, Dark Enchantress Cookie, Pure Vanilla Cookie and four of BS9's
+  Shadow Milk Cookies all print 【EXTRA】 on the card, but the card data filed
+  them as plain Cookies. They now go where they belong — a second pile of at
+  most 6, played through the condition printed on them — and they show up in
+  the deck builder.
+- **They could be cheated into play, and can't be any more.** Because they
+  counted as ordinary Cookies, they sat in the main 60 and could be played from
+  hand for free with their condition ignored: BS9-102 says "can be played if
+  there are 20 cards or more in each player's trash" and could be dropped on
+  turn one for nothing. Deck validation keeps them out of the 60, and an EXTRA
+  card in hand is never offered as a play.
+- Their entry conditions are all written, including 【Awaken】 for Pure Vanilla
+  Cookie and Dark Enchantress Cookie. Avatar of Destiny is complete. The other
+  six still play as vanilla bodies — their 【On Play】 and 【Activate】 text is
+  next.
+- Deck builder: the "playable" filter now counts an EXTRA card's entry
+  condition as part of its text, so a gated card is no longer hidden.
+
+## 0.2.20
+
+- **"View the top 3 cards of your deck" now shows you all three.** Aloe Cookie
+  (BS2-040) says to view the top three and take a {B} card from among them; it
+  was only ever *offering* you the blue ones, so a card whose whole point is
+  looking at three showed you one. All three are laid out now, with the ones
+  the condition rules out drawn dimmed beside the one you can take. If none of
+  them qualifies you still get to see what went past.
+- **Blueberry Pie Cookie (BS9-101) works.** Its 【Activate】 — pay {P}, bin the
+  Cookie, view three, reveal a {P} card to your hand and trash the rest — had a
+  stub whose card number was mistyped, so it had never done anything. It is
+  implemented, and a test now catches any effect registered against a card
+  number that does not exist.
+- Captain Caviar Cookie (ST4-013) gets the same treatment and reads the same
+  way as the other two.
+- Only the card you reveal is named in the log. What you looked at and put back
+  is yours; the log is shared.
+
 ## 0.2.19
 
 - **The log says what hit you, not just that something did.** "takes 2 effect

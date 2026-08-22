@@ -667,6 +667,8 @@ class SelfToDeckBottom(Op):
         ctx.me.battle.remove(cookie)
         ctx.me.deck.append(cookie.card)
         ctx.me.trash.extend(cookie.spent_cards)
+        # BS9-088 【Awaken】s off the back of exactly this happening.
+        ctx.me.cookies_to_deck_bottom_this_turn += 1
         ctx.game._check_battle_area(ctx.me)
         return True
 

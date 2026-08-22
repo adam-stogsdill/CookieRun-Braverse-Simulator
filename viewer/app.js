@@ -1411,6 +1411,20 @@ function renderPicker(snap) {
     };
     row.appendChild(wrap);
   });
+  /* Cards you are looking at but may not take. "View the top 3 cards of your
+   * deck, add 1 {P} card to your hand" is two instructions: seeing all three
+   * *is* the effect, and only the second instruction is the question. They are
+   * drawn dimmed and inert, after the ones you can choose, so the strip shows
+   * the whole view without ever offering an illegal answer. Hover still works
+   * — you are allowed to read what you cannot have. */
+  (pending.shown || []).forEach((opt) => {
+    const wrap = h("div", "picker-card locked");
+    wrap.appendChild(cardNode({ img: opt.img, name: opt.label, uid: opt.subject },
+                              { mid: true }));
+    wrap.appendChild(h("div", "cname", opt.label));
+    wrap.title = "Viewed, but this card does not meet the condition";
+    row.appendChild(wrap);
+  });
   bar.appendChild(row);
 
   const foot = h("div", "picker-foot");
@@ -1462,19 +1476,41 @@ function renderCentre(snap) {
   bar.classList.remove("hidden");
   bar.innerHTML = "";
   bar.appendChild(h("div", "centre-prompt", pending.prompt));
+
+  /* Cards attached to the question itself. "View the top 3 of your deck, add
+   * 1 {P} card to your hand" still shows you three cards when none of them is
+   * purple — that is the case where knowing what went past matters most, and
+   * skipping it would have made the commonest miss the one time the card
+   * appeared to do nothing. There is nothing to choose, so it renders as a
+   * look and an acknowledgement rather than as a question. */
+  const shown = pending.shown || [];
+  const lookOnly = shown.length && style === "yesno" && pending.options.length === 1;
+  if (shown.length) {
+    const strip = h("div", "centre-cards");
+    shown.forEach((opt) => {
+      const item = h("div", "centre-card");
+      item.appendChild(cardNode({ img: opt.img, name: opt.label, uid: opt.subject },
+                                { mid: true }));
+      item.appendChild(h("div", "cname", opt.label));
+      strip.appendChild(item);
+    });
+    bar.appendChild(strip);
+  }
+
   const row = h("div", "centre-row" + (style === "throw" ? " throws" : " choices"));
   pending.options.forEach((opt) => {
     const btn = h("button", "centre-btn" + (style === "yesno" ? " yes" : ""));
     const icon = THROW_ICONS[opt.label];
     if (icon) btn.appendChild(h("span", "big", icon));
-    btn.appendChild(h("span", "label", opt.label));
+    btn.appendChild(h("span", "label", lookOnly ? "OK" : opt.label));
     btn.onclick = () => answer(opt.index);
     row.appendChild(btn);
   });
   /* A yes/no is only half a question without the no. Declining lives on the
    * option list for everything else, but this question has left that list, so
-   * the answer has to come with it. */
-  if (style === "yesno" && pending.optional) {
+   * the answer has to come with it. A look-and-acknowledge has no no: both
+   * buttons would do the same thing. */
+  if (style === "yesno" && pending.optional && !lookOnly) {
     const no = h("button", "centre-btn no");
     no.appendChild(h("span", "label", "No"));
     no.onclick = () => answer(null);
@@ -1512,8 +1548,8 @@ function renderOptions(snap) {
   }
   if (pending.centre) { say("answer in the middle of the table"); return; }
   if (pending.pick) {
-    say(pending.count > 1 ? "pick the cards on your hand below"
-                          : "pick the card on your hand below");
+    say(pending.count > 1 ? "pick the cards in the strip below"
+                          : "pick the card in the strip below");
     return;
   }
 

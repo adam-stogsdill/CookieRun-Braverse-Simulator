@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.19
+Current Version: 0.2.22
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -1300,8 +1300,9 @@ is modelled as a *condition, not a cost*: while it is false the card is not in
 the legal-action list at all, which is the same rule as everywhere else here —
 a move you are offered is a move that does something.
 
-Ten cards, two shapes. Six are standalone Cookies that take a free battle slot.
-Four are 【Awaken】 cards, and those are the interesting ones: they print HP as
+Seventeen cards, two shapes. Eleven are standalone Cookies that take a free
+battle slot. Six are 【Awaken】 cards, and those are the interesting ones: they
+print HP as
 `+1` or `+2` rather than a total, because they go *on top of* a Cookie already
 in the battle area, which keeps the HP it has left and gains the modifier. That
 is what makes an Awaken worth most on a Cookie that has been chipped down —
@@ -1319,13 +1320,70 @@ The PLAY GUIDE this project was written from does not cover the EXTRA deck at
 all, so its construction limits are recorded in `config.py` with where they came
 from: a separate pile of at most **6**, under the same 4-per-number cap as the
 main deck, which the validator counts across both piles. Six against a pool of
-ten distinct EXTRA cards means the pile is a real deckbuilding choice rather
-than a place to put all of them.
+seventeen distinct EXTRA cards means the pile is a real deckbuilding choice
+rather than a place to put all of them.
 
-Two of the ten cards needed their text corrected before any of this could work:
-the dump gives BS10-024 and BS10-073 the rules text *and attack line* of the
-ordinary Cookie they awaken. That reads as a perfectly plausible card, so
-nothing structural catches it — it was found by reading the scans.
+Two of them needed their text corrected before any of this could work: the dump
+gives BS10-024 and BS10-073 the rules text *and attack line* of the ordinary
+Cookie they awaken. That reads as a perfectly plausible card, so nothing
+structural catches it — it was found by reading the scans.
+
+#### Seven of them were filed as ordinary Cookies
+
+For a long time this pile held ten cards, because ten is what the dump *types*
+as EXTRA. Seven more print 【EXTRA】 on the card face and were typed `COOKIE`:
+BS9's four Shadow Milk Cookies and Pure Vanilla Cookie, BS11's Avatar of Destiny
+and Dark Enchantress Cookie.
+
+No column in the scrape is reliable here, and they disagree with each other. The
+two BS11 rows set `isExtra` to 1 while typing the card COOKIE. The five BS9 rows
+say Cookie in both columns. BS10's rows type them `EXRTA` and carry no 【EXTRA】
+in their text at all. One card, BS9-088, even flips between its own printings —
+`isExtra` is 0 on the base row and 1 on the second alt art.
+
+The **printed marker** is the signal that gets all seventeen right, because it
+is a keyword on the card face and `_parse_markers` reads it straight off the
+rules text. It comes out a strict superset of the `type` column, so
+`_promote_extra_cards` can only ever add cards to the pile and never reclassify
+a genuine Cookie. A test pins the two sets equal.
+
+This was a rules bug, not a tidy-up. `CardType.EXTRA.is_cookie` is `True`, so a
+mistyped EXTRA card sat in the main 60 and was offered as a free play from hand
+with its gate skipped entirely — BS9-102, *"can be played if there are 20 cards
+or more in each player's trash"*, could be dropped on turn one for nothing.
+`validate` now keeps them out of the 60, and `_cookie_plays` refuses to offer an
+EXTRA card from hand at all, which closes the same hole from the other side for
+anything that puts one there by effect.
+
+All seven are now written in full — gates, 【On Play】, 【Activate】, attack
+riders and one static ability. Three of them needed vocabulary that did not
+exist:
+
+- **`reveal_top(n)`** is not `view_top`. A *view* is private and you take from
+  it; a *reveal* is shown to both players, nothing moves, and the card then
+  asks a question about what was seen. Nine cards in the pool open that way, so
+  it earns its own verb rather than a flag on the other. Pure Vanilla Cookie
+  reveals the top card, and if it is a {B} LV.2 Cookie gains +2 HP and draws 2 —
+  and because healing in this engine is *cards off the deck*, the card it just
+  revealed is the first one onto the HP pile and the two it draws come from
+  under it. The printed order is what decides that, and a test pins it.
+- **`run_flip(card)`** resolves a FLIP anywhere but an HP pile. Exactly one card
+  in the pool does this: BS9-030 discards a FLIP Cookie out of hand mid-attack
+  and fires its effect from the trash.
+- **`steal_to_hp(cookie, card, source)`** puts a card on the *bottom* of an HP
+  pile, face up. Bottom is index 0, because damage pops off the end — so a
+  stolen card is the last one that pile will ever turn over, not the next.
+
+BS9-010's 【On Play】 takes a card from the opponent's hand at **random**. The
+text does not say random, but every other card in the pool that reaches into a
+hand does, and this one gives you no way to look first — choosing would mean
+revealing their whole hand in order to make the choice.
+
+Dark Enchantress Cookie's gate cannot open yet, and that is honest rather than
+broken: it 【Awaken】s a LV.3 Dark Enchantress Cookie *that has Special Play*,
+and 【Special Play】 is unmodelled, so there is no way to get the host onto the
+board. The marker is named in the host filter anyway, so the gate says which
+Cookie it means instead of awakening any LV.3 of that name.
 
 ## Rules fidelity
 

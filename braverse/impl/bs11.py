@@ -9,7 +9,8 @@ half-resolving. Everything else is here.
 from __future__ import annotations
 
 from braverse.cost import Cost
-from braverse.effects import Ctx, Trigger, effect
+from braverse.effects import (MOVEMENT_PROTECTORS, STATIC_ABILITY_CARDS,
+                              Ctx, Trigger, effect)
 from braverse.enums import CardType, Color, Keyword
 
 
@@ -409,3 +410,18 @@ def oven_of_burning_fate(ctx: Ctx) -> None:
     target = ctx.select_enemy()
     if target is not None:
         ctx.deal_damage(target, 2)
+
+
+# --- BS11-116 Dark Enchantress Cookie ----------------------------------------
+def _dark_enchantress_protected(db, owner, cookie) -> bool:
+    """"This Cookie cannot be moved from the battle area by your opponent's
+    effects."
+
+    The whole of the card's text below its 【EXTRA】 gate. Unconditional and
+    self-only, so it is the per-Cookie registry rather than a player-wide lock.
+    """
+    return cookie.defn(db).base_id == "BS11-116"
+
+
+MOVEMENT_PROTECTORS.append(_dark_enchantress_protected)
+STATIC_ABILITY_CARDS.add("BS11-116")

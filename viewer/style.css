@@ -1009,6 +1009,13 @@ body.online #reveal-label { display: none; }
 .picker-card:hover { border-color: #46506a; }
 .picker-card.picked { border-color: var(--accent); background: rgba(240,169,43,.14); }
 .picker-card.picked .card { box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(0,0,0,.5); }
+/* Viewed, but ruled out by the card's condition. Dimmed and inert rather than
+   left out: looking at all three is the effect, and a strip that showed only
+   the one you may take would be a different, much worse card. Hovering still
+   previews — you are allowed to read what you cannot have. */
+.picker-card.locked { cursor: default; opacity: .42; filter: saturate(.35); }
+.picker-card.locked:hover { border-color: transparent; opacity: .72; filter: none; }
+.picker-card.locked .cname { font-style: italic; }
 .picker-card .cname { font-size: 9.5px; color: var(--dim); margin-top: 3px; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
@@ -1030,6 +1037,18 @@ body.online #reveal-label { display: none; }
 }
 .centre.hidden { display: none; }
 .centre-prompt { font-size: 14px; font-weight: 600; margin-bottom: 12px; max-width: 460px; }
+/* Cards the question is about, laid out above its buttons. Used by a
+   "view the top 3" whose criterion matched nothing: there is still a view to
+   show, there is just nothing to pick out of it. */
+.centre-cards {
+  display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.centre-card { width: 74px; }
+.centre-card .cname {
+  font-size: 9.5px; color: var(--dim); margin-top: 4px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .centre-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
 .centre-btn {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
