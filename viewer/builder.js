@@ -38,7 +38,17 @@ const TABS = [
   { name: "play", button: "#tab-play" },
   { name: "build", button: "#tab-build", body: "view-build" },
   { name: "table", button: "#tab-table", body: "view-table" },
+  { name: "replays", button: "#tab-replays", body: "view-replays" },
 ];
+
+/** Is the board itself what is on screen, rather than one of the other tabs?
+ *
+ * The overlays that belong to the play view — the title screen and the
+ * end-of-match card — are drawn over the whole window, so they have to know
+ * to stay out of a tab that has taken it over. */
+function onPlayTab() {
+  return !TABS.some((tab) => tab.body && document.body.classList.contains(tab.body));
+}
 
 function showTab(name) {
   TABS.forEach((tab) => {
@@ -48,10 +58,16 @@ function showTab(name) {
   // The hover preview is docked in the play panel, and the other two tabs hide
   // that panel — so it goes back to following the cursor there. app.js owns it.
   if (typeof restorePreview === "function") restorePreview();
+  // A finished match's card is not this tab's business. title.js is loaded
+  // after this file, so it is checked for rather than assumed.
+  if (typeof Title !== "undefined" && !onPlayTab()) Title.hideOver();
   if (name === "build" && !build.meta) openBuilder();
   // table.js defines this; it is loaded after this file, so it is checked for
   // rather than assumed.
   if (name === "table" && typeof renderTableKit === "function") renderTableKit();
+  // replays.js, loaded after this file, so it is checked for rather than
+  // assumed — the same way the sleeves tab is.
+  if (name === "replays" && typeof refreshReplays === "function") refreshReplays();
 }
 
 TABS.forEach((tab) => { el(tab.button).onclick = () => showTab(tab.name); });

@@ -8,6 +8,9 @@
 <link rel="stylesheet" href="/builder.css">
 <link rel="stylesheet" href="/table.css">
 <link rel="stylesheet" href="/showcase.css">
+<link rel="stylesheet" href="/tutorial.css">
+<link rel="stylesheet" href="/replays.css">
+<link rel="stylesheet" href="/title.css">
 </head>
 <body>
 
@@ -17,6 +20,7 @@
     <button id="tab-play" class="tab on">Play</button>
     <button id="tab-build" class="tab">Deck builder</button>
     <button id="tab-table" class="tab">Table</button>
+    <button id="tab-replays" class="tab">Replays</button>
   </nav>
   <div class="turnline" id="turnline">idle</div>
   <div class="controls">
@@ -36,6 +40,24 @@
     <label class="check" title="Card flicks, hits and breaks">
       <input id="sound" type="checkbox" checked> sound
     </label>
+    <label class="check pick" title="Hold the mouse button to send a move you cannot take back, instead of clicking it">
+      confirm
+      <select id="confirm-level">
+        <option value="off">off</option>
+        <option value="key">key moves</option>
+        <option value="all">every move</option>
+      </select>
+    </label>
+    <label class="check pick" id="hold-label" title="How long a move has to be held before it is sent">
+      hold
+      <select id="hold-ms">
+        <option value="200">0.2s</option>
+        <option value="350">0.35s</option>
+        <option value="550">0.55s</option>
+        <option value="800">0.8s</option>
+      </select>
+    </label>
+    <button id="btn-learn" class="ghost" title="A guided first game against the bot">Learn</button>
     <button id="btn-new" class="primary">New match</button>
   </div>
   <div class="roombar hidden" id="roombar">
@@ -123,6 +145,36 @@
     </div>
     <p class="hint" id="lobby-hint"></p>
     <button id="lobby-cancel" class="ghost">Cancel</button>
+  </div>
+</div>
+
+<div id="title" class="hidden">
+  <div class="title-mark">
+    <div class="big">CookieRun<span>: Braverse</span></div>
+    <div class="sub">unofficial rules engine</div>
+  </div>
+  <nav class="title-menu">
+    <button id="title-bot"><b>Play a bot</b><i>You take a seat; the bot answers for the other</i></button>
+    <button id="title-watch"><b>Watch two bots</b><i>Pause, step and read the whole match</i></button>
+    <button id="title-lan"><b>Play someone on your network</b><i>Host a room, or join one with its code</i></button>
+  </nav>
+  <div class="title-minor">
+    <button id="title-learn">Guided first game</button>
+    <button id="title-build">Deck builder</button>
+    <button id="title-replays">Replays</button>
+  </div>
+  <div class="title-foot">Fan-made. Not affiliated with Devsisters.</div>
+</div>
+
+<div id="gameover" class="hidden">
+  <div class="over-card">
+    <h2 id="over-title">Game over</h2>
+    <p class="why" id="over-why"></p>
+    <div class="row">
+      <button id="over-again" class="primary">New match</button>
+      <button id="over-menu" class="ghost">Title screen</button>
+    </div>
+    <button id="over-look" class="look">stay and look at the board</button>
   </div>
 </div>
 
@@ -215,6 +267,33 @@
   </form>
 </dialog>
 
+<section id="replays" class="replays">
+  <div class="replay-head">
+    <h2>Replays</h2>
+    <p>Every finished game is kept as the list of decisions both seats took —
+       not a recording of the screen. Watching one runs the game again from the
+       same decks, seed and answers, so it plays out exactly as it did, and
+       Pause, Step and the speed slider work on it.</p>
+  </div>
+  <div class="replay-bar">
+    <button id="replay-refresh" class="ghost tiny">Refresh</button>
+    <button id="replay-save" class="ghost tiny"
+            title="Write the game currently on the board to a file, finished or not">Save the game in progress</button>
+    <label class="check" title="Open the replay stopped, ready to step through">
+      <input id="replay-paused" type="checkbox"> start paused
+    </label>
+    <span class="grow"></span>
+    <span class="path" id="replay-path"></span>
+  </div>
+  <div class="replay-import">
+    <label>watch a file someone sent you
+      <input id="replay-file" type="file" accept=".json,application/json"></label>
+    <span class="path">…or drop it anywhere on this pane</span>
+  </div>
+  <p class="replay-note hidden" id="replay-note"></p>
+  <div class="replay-list" id="replay-list"></div>
+</section>
+
 <section id="tablekit" class="tablekit">
   <div class="kit-head">
     <h2>Sleeves &amp; playmats</h2>
@@ -236,9 +315,13 @@
 </section>
 
 <script src="/sfx.js"></script>
+<script src="/confirm.js"></script>
 <script src="/app.js"></script>
 <script src="/builder.js"></script>
 <script src="/showcase.js"></script>
 <script src="/table.js"></script>
+<script src="/replays.js"></script>
+<script src="/tutorial.js"></script>
+<script src="/title.js"></script>
 </body>
 </html>

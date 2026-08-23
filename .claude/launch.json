@@ -9,7 +9,7 @@
         "play_server.py",
         "--no-browser"
       ],
-      "port": 8091
+      "port": 8093
     }
   ]
 }

@@ -19,6 +19,9 @@ dist/
 # Decks built in the browser's deck builder tab.
 saved_decks.json
 
+# Games the viewer kept, one JSON file each — `viewer/replays.js`.
+replays/
+
 # Training / evolution output.
 *.log
 *.err

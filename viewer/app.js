@@ -21,6 +21,7 @@ const state = {
   picked: [],           // indices chosen in a multi-card pick
   eventId: 0,           // last event batch played
   announced: false,     // win chime fired for this match
+  lastMatch: null,      // the body of the last local /api/new, for a rematch
   /* Online play. `mySeat` is which side of the table this browser sits on —
    * 0 for a local match, and whichever seat the room handed out otherwise. It
    * is the only thing that decides which mat is drawn at the bottom and which
@@ -64,7 +65,11 @@ function seatLabel(seat, snap) {
     const name = (room.seats[seat] || {}).name || `seat ${seat}`;
     return seat === state.mySeat && snap && snap.seat !== null ? `${name} (you)` : name;
   }
-  return `seat ${seat} · ${prettyPilot(snap && snap.pilots ? snap.pilots[seat] : "")}`;
+  // In a replay every seat's pilot is "replay", which says nothing about the
+  // game being watched — so name whoever actually played it.
+  const pilots = (snap && snap.replay && snap.replay.pilots)
+    || (snap && snap.pilots) || [];
+  return `seat ${seat} · ${prettyPilot(pilots[seat] || "")}`;
 }
 
 /* Seat the viewer at the bottom of the table.
@@ -344,6 +349,15 @@ function cardNode(card, opts = {}) {
     // The same click on either side of the table. Your own cards are also
     // dragged to play them; a drag that goes nowhere lands here too.
     node.addEventListener("click", () => cardClick(opts.uid, node));
+    /* A question that names this card is answered by pointing at it — the
+     * cheapest click on the table, and the one a misclick hurts most. When
+     * `Confirm` wants that one held, the press starts here and the click above
+     * finds the answer already spent. */
+    node.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const direct = directOption(opts.uid);
+      if (direct) Confirm.press(event, node, direct, () => answer(direct.index));
+    });
     /* The marker `renderTray` reads to decide whether a move has somewhere to
      * be clicked. It goes on here, next to the handler, because the two have to
      * agree: a card drawn face-up on top of a pile carries a uid and answers
@@ -465,6 +479,60 @@ function stack(label, count, opts = {}) {
   return node;
 }
 
+/* ------------------------------------------------------------ support step */
+/* The one phase the player is asked to leave deliberately.
+ *
+ * The engine has no `support` phase to stop in — placing a support card is a
+ * main-phase action capped at one per turn (see `phaseTrack` below). That is
+ * fine for a bot and wrong for a person: the free support card is the easiest
+ * thing in the game to forget, and a pulsing dot in the round track was only
+ * ever a hint you could play straight past. So the viewer puts the step back on
+ * top of the same action list. While it is open the turn's moves are narrowed
+ * to "place a card as support", and the way out is to place one or to say you
+ * are not going to — after which the full move list returns for the rest of the
+ * turn. Nothing about it reaches the engine: the actions offered are the ones
+ * the engine already offered, in a different order of asking, so a bot seat, a
+ * replay and self-play all see exactly the game they saw before.
+ *
+ * Passing is per turn and per browser. `key` is the turn it was answered for,
+ * so the next turn re-opens the step without anything having to reset it.
+ */
+const supportStep = { key: null, passed: false };
+
+const SUPPORT_PROMPT = "Support phase — place 1 card from your hand as support, "
+                     + "or pass to your main phase.";
+
+function supportStepSync(snap) {
+  const key = snap && snap.players ? snap.turn + ":" + snap.turnPlayer : null;
+  if (supportStep.key !== key) { supportStep.key = key; supportStep.passed = false; }
+}
+
+/** Is the support step still open on the question currently on screen? */
+function inSupportStep(snap) {
+  const pending = snap && snap.pending;
+  if (!pending || !pending.turnAction || pending.waiting || state.animating) return false;
+  if (supportStep.passed) return false;
+  const player = (snap.players || [])[pending.seat];
+  if (!player || player.supportedThisTurn) return false;
+  // A hand that cannot support — empty, or every card already spoken for by
+  // the engine — has no step to stop in.
+  return (pending.options || []).some((opt) => opt.kind === "PlaceSupport");
+}
+
+/** The moves the board should offer right now, narrowed by the support step. */
+function narrow(snap, options) {
+  return inSupportStep(snap)
+    ? (options || []).filter((opt) => opt.kind === "PlaceSupport")
+    : (options || []);
+}
+
+/** Give up this turn's support card and open the rest of the turn. */
+function passSupportStep() {
+  supportStep.passed = true;
+  closeCardMenu();
+  if (state.snap) render(state.snap);
+}
+
 /* The round, as a track above the break area.
  *
  * Driven by more than `snap.phase`, because the engine only ever *reports*
@@ -498,9 +566,12 @@ function phaseTrack(seat, snap) {
       if (key === "draw" && openerSkips) { cls = "phase skipped"; note = "skipped"; }
     } else if (key === "support") {
       if (player.supportedThisTurn) { cls += " used"; note = "done"; }
+      else if (inSupportStep(snap)) { cls += " now"; note = "now"; }
+      else if (supportStep.passed) { cls = "phase skipped"; note = "passed"; }
       else { cls += " available"; note = "ready"; }
     } else if (key === "main") {
-      cls += snap.phase === "main" ? " now" : " done";
+      if (inSupportStep(snap)) { cls += " todo"; }
+      else cls += snap.phase === "main" ? " now" : " done";
     } else {
       cls += " todo";
     }
@@ -527,7 +598,10 @@ function renderSide(seat, snap) {
     bar.appendChild(h("span", "who", seatLabel(seat, snap)));
   } else {
     bar.appendChild(h("span", "who", "Seat " + seat));
-    bar.appendChild(h("span", "pill" + (isHuman ? " human" : ""), prettyPilot(snap.pilots[seat])));
+    // A replayed seat is labelled with whoever played it, not with the fact
+    // that it is being read off a file — the header already says that.
+    const pilot = (snap.replay && snap.replay.pilots ? snap.replay.pilots : snap.pilots)[seat];
+    bar.appendChild(h("span", "pill" + (isHuman ? " human" : ""), prettyPilot(pilot)));
   }
   bar.appendChild(h("span", "deckname", snap.decks[seat]));
 
@@ -576,12 +650,15 @@ function renderSide(seat, snap) {
       onClick: () => openBrowser(seat, "extra"),
     }));
   }
-  right.appendChild(stack("trash", p.trashCount, {
+  const trashStack = stack("trash", p.trashCount, {
     faceUp: true,
     top: p.trash[p.trash.length - 1],
     title: "Click to search the trash",
     onClick: p.trashCount ? () => openBrowser(seat, "trash") : null,
-  }));
+  });
+  // Named so a discarded card knows where to fly, the same way the deck is.
+  trashStack.dataset.zone = "trash";
+  right.appendChild(trashStack);
 
   mat.appendChild(left);
   mat.appendChild(battle);
@@ -633,7 +710,7 @@ function homelessOptions(snap) {
   if (!pending || state.animating || pending.waiting) return [];
   // These two have already claimed their own place on screen, decline included.
   if (pending.centre || pending.pick) return [];
-  return pending.options.filter((opt) => {
+  return narrow(snap, pending.options).filter((opt) => {
     if (opt.subject === undefined) return true;
     return !document.querySelector(`.card.pickable[data-uid="${opt.subject}"]`);
   });
@@ -646,8 +723,19 @@ function renderTray(snap) {
   const homeless = homelessOptions(snap);
   const declines = !!(pending && pending.optional && !pending.centre && !pending.pick
                       && !state.animating && !pending.waiting);
-  if (!homeless.length && !declines) { host.classList.add("hidden"); return; }
+  const supporting = inSupportStep(snap);
+  if (!homeless.length && !declines && !supporting) { host.classList.add("hidden"); return; }
   host.classList.remove("hidden");
+
+  // The support step's own way out. It sits where End turn sits, because it is
+  // the same shape of move — the button that says "I am done with this part of
+  // the turn" — and while the step is open End turn is not on offer.
+  if (supporting) {
+    const skip = h("button", "tray-btn support", "Pass to main phase");
+    skip.title = "Keep this turn's support card in hand and move on.";
+    skip.onclick = passSupportStep;
+    host.appendChild(skip);
+  }
 
   // End turn goes last and looks different: it is the one that gives up the
   // rest of your turn, and it should not sit first among the things you can
@@ -659,12 +747,14 @@ function renderTray(snap) {
                   opt.kind === "EndTurn" ? "End turn" : opt.label);
     btn.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
     btn.onmouseleave = () => { highlight(null); hidePreview(); };
-    btn.onclick = () => answer(opt.index);
+    // End turn and Pass are the two moves in the tray that cannot be walked
+    // back, so they are the two that ask to be held. `Confirm` decides.
+    Confirm.wire(btn, opt, () => answer(opt.index));
     host.appendChild(btn);
   });
   if (declines) {
     const no = h("button", "tray-btn end", "Decline");
-    no.onclick = () => answer(null);
+    Confirm.wire(no, "decline", () => answer(null));
     host.appendChild(no);
   }
 }
@@ -684,9 +774,20 @@ function renderBanner(snap) {
       : `${seatLabel(snap.winner, snap)} wins — ${snap.winReason}`;
     return;
   }
+  // A replay ends either because the recording ran out — a game saved while it
+  // was still being played — or because this build no longer plays the game
+  // that was recorded. Both are the end of the show and both say which.
+  if (snap.replay && snap.replay.note) {
+    banner.classList.add("win");
+    banner.textContent = (snap.replay.desync
+      ? "replay stopped — this build has diverged from it: "
+      : "end of the recording — ") + snap.replay.note;
+    return;
+  }
   if (snap.pending) {
     banner.classList.add("on");
-    setText(banner, `${seatLabel(snap.pending.seat, snap)}: ${snap.pending.prompt}`);
+    const line = inSupportStep(snap) ? SUPPORT_PROMPT : snap.pending.prompt;
+    setText(banner, `${seatLabel(snap.pending.seat, snap)}: ${line}`);
     return;
   }
   banner.textContent = snap.paused ? "paused" : "…";
@@ -694,11 +795,19 @@ function renderBanner(snap) {
 
 function renderTurnline(snap) {
   if (!snap.players) { el("#turnline").textContent = "no match yet — hit New match"; return; }
-  const who = snap.online
-    ? `<b>${seatLabel(snap.turnPlayer, snap)}</b>`
+  // In a replay both pilots read "replay", which the line already says at the
+  // end — naming it twice per turn is noise.
+  const who = snap.online || snap.replay
+    ? `<b>${snap.replay ? "seat " + snap.turnPlayer : seatLabel(snap.turnPlayer, snap)}</b>`
     : `<b>seat ${snap.turnPlayer}</b> (${prettyPilot(snap.pilots[snap.turnPlayer])})`;
+  // Watching one back rather than playing it: say so, and say how far in.
+  // The seed belongs to a game you might want to play again; a replay is
+  // already exactly the game it is, and the line is tight enough as it is.
+  const tail = snap.replay
+    ? ` · <b>replay</b> ${snap.replay.at}/${snap.replay.total}`
+    : ` · seed ${snap.seed}`;
   el("#turnline").innerHTML =
-    `turn <b>${snap.turn}</b> · ${who} · phase <b>${snap.phase}</b> · seed ${snap.seed}`;
+    `turn <b>${snap.turn}</b> · ${who} · phase <b>${snap.phase}</b>${tail}`;
 }
 
 /* ---------------------------------------------------------- the play-out */
@@ -711,6 +820,8 @@ const FLIP_MS = 2400;     // how long a revealed card stays on screen
 const FAINT_MS = 300;
 const DRAW_MS = 220;      // between one card leaving the deck and the next
 const DRAW_FLIGHT = 700;  // how long a card takes to reach the hand
+const DISCARD_MS = 260;      // between one discarded card and the next
+const DISCARD_FLIGHT = 1000; // hand -> trash, face up the whole way
 const DAMAGE_MS = 250;    // between one hit registering and the next
 const DAMAGE_HOLD = 1000; // how long the number floats
 const SKILL_MS = 400;     // between one skill popping up and the next
@@ -718,8 +829,10 @@ const SKILL_HOLD = 1500;  // how long the confirmation stays on screen
 const BREAK_MS = 1500;    // how long a breaking Cookie stays on screen
 const TRAP_MS = 1000;     // before whatever the card did starts happening
 const TRAP_HOLD = 2200;   // how long a sprung trap or item owns the middle
-const SUMMON_MS = 350;    // between one Cookie landing on the board and the next
-const SUMMON_HOLD = 1000; // how long the dust hangs in the air
+const SUMMON_RISE = 620;   // the arriving Cookie owns the middle of the board
+const SUMMON_DIVE = 460;  // and then falls into its slot
+const SUMMON_MS = SUMMON_RISE + SUMMON_DIVE;  // between one arrival and the next
+const SUMMON_HOLD = SUMMON_MS + 900;          // how long the dust hangs in the air
 
 const MAX_REVEALS = 6;    // the most cards one scene turns over on screen
 
@@ -739,6 +852,8 @@ function playEvents(events) {
   let swingLand = null;   // when the current attack connects
   let hitStart = null;    // when the first card of the current hit turned
   let revealsClear = 0;   // when the last revealed card leaves the screen
+  const summons = [0, 0];  // arrivals per seat, to tell their slots apart
+  let discards = 0;   // cards already on their way to a trash, to fan them out
   const holds = (start, hold) => { end = Math.max(end, start + hold); };
   const shown = events.filter((e) => e.type === "reveal").slice(0, MAX_REVEALS);
   if (shown.length) renderReveals(shown);
@@ -750,6 +865,12 @@ function playEvents(events) {
         for (let i = 0; i < n; i++) playDraw(event, clock + i * DRAW_MS);
         holds(clock, (n - 1) * DRAW_MS + DRAW_FLIGHT);
         clock += n * DRAW_MS;
+        break;
+      }
+      case "discard": {
+        playDiscard(event, clock, discards++);
+        holds(clock, DISCARD_FLIGHT);
+        clock += DISCARD_MS;
         break;
       }
       case "skill":
@@ -766,7 +887,7 @@ function playEvents(events) {
         clock += TRAP_MS;
         break;
       case "summon":
-        playSummon(event, clock);
+        playSummon(event, clock, summons[event.owner]++);
         holds(clock, SUMMON_HOLD);
         clock += SUMMON_MS;
         break;
@@ -963,73 +1084,215 @@ function playHeal(event, delay = 0) {
   }, delay);
 }
 
-/* A Cookie arriving on the board. It lands rather than appears: the card drops
- * in with a squash, the slot flashes in the Cookie's own colour, and a burst of
- * dust in that colour throws out from under it. Every zone a Cookie can arrive
- * from — hand, trash, break area, support, the EXTRA deck — gets the same beat,
- * because from the other side of the table they all mean the same thing. */
+/* A Cookie arriving on the board. It is the only way anyone ever gets a Cookie,
+ * so it gets the biggest beat on the table: the card comes up large in the
+ * middle of the board, holds long enough to be read, then dives into the slot
+ * it is about to fill and slams into it — spheres in the Cookie's own colour
+ * thrown off its edges, and dust dragged out along the table.
+ * Every zone a Cookie can arrive from — hand, trash, break area, support, the
+ * EXTRA deck — gets the same beat, because from the other side of the table
+ * they all mean the same thing. */
 const DUST = {
   RED: "#ef5b52", BLUE: "#4aa8ff", GREEN: "#4fc275", YELLOW: "#f0c33c",
   PURPLE: "#b07bff", BLACK: "#8a90a3", PURE: "#e8eefc", "": "#cdd5e3",
 };
 
-function playSummon(event, delay = 0) {
+/** Where the arriving Cookie is going to be.
+ *
+ * The board on screen is deliberately still the pre-summon one while the scene
+ * plays (see `playThenCommit`), so the Cookie has no box yet — it is about to
+ * fill the first free slot in its owner's battle area. `seq` walks those slots
+ * so two Cookies arriving in one action land in the two they will occupy.
+ */
+function summonSlot(event, seq) {
+  const side = `#side-${event.owner}`;
+  const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
+  if (host) return host;
+  const empty = document.querySelectorAll(`${side} .zone.battle .slot.empty`);
+  return empty[Math.min(seq, empty.length - 1)]
+    || document.querySelector(`${side} .zone.battle`);
+}
+
+function playSummon(event, delay = 0, seq = 0) {
   setTimeout(() => {
-    const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
-    Sfx.play("place");
-    const anchor = host || document.querySelector(`#side-${event.owner} .zone.battle`);
-    if (!anchor) return;
+    const table = el("#table");
+    const anchor = summonSlot(event, seq);
+    if (!table || !anchor) return;
     const colour = DUST[(event.color || "").toUpperCase()] || DUST[""];
-    if (host) {
-      host.style.setProperty("--dust", colour);
-      host.classList.add("landing");
-      setTimeout(() => host.classList.remove("landing"), 700);
-    }
+    Sfx.play("summon");
 
-    const bounds = el("#table").getBoundingClientRect();
-    const at = anchor.getBoundingClientRect();
-    const cx = at.left + at.width / 2 - bounds.left;
-    const cy = at.top + at.height / 2 - bounds.top;
+    // The part of the table that is actually on screen — same reasoning as the
+    // trap spotlight: the window's centre can be behind the side panel.
+    const box = table.getBoundingClientRect();
+    const top = Math.max(box.top, 0);
+    const bottom = Math.min(box.bottom, window.innerHeight);
+    const to = anchor.getBoundingClientRect();
+    if (!to.width || !to.height) return;
 
-    // Dust from under the card: thrown out and slightly up, then dragged down.
-    // Sizes and angles are jittered because a ring of identical dots reads as a
-    // loading spinner rather than as something hitting a table.
-    // A ring of light thrown out along the table, under the dust.
-    const ring = h("div", "dustring");
-    ring.style.left = cx + "px";
-    ring.style.top = cy + at.height * 0.36 + "px";
-    ring.style.width = at.width * 1.5 + "px";
-    ring.style.height = at.width * 0.5 + "px";
-    ring.style.borderColor = colour;
-    ring.dataset.born = performance.now();
-    el("#fx").appendChild(ring);
-    setTimeout(() => ring.remove(), 900);
+    // Sized off the card box rather than off the anchor: the anchor is a slot
+    // when there is one to land in, but the fallback is the whole battle area,
+    // and a card stretched to *that* shape is a letterboxed crop of the art.
+    const slot = cardBox();
+    // As big as the board can hold without the card running off the top.
+    const height = Math.min(slot.h * 3, (bottom - top) * 0.66);
+    const width = height * (slot.w / slot.h);
+    const cx = box.left + box.width / 2;
+    const cy = (top + bottom) / 2;
 
-    for (let i = 0; i < 26; i++) {
-      const bit = h("div", "dust");
-      const size = 4 + Math.random() * 7;
-      const angle = Math.PI * (0.08 + Math.random() * 0.84);   // outward, mostly sideways
-      const reach = at.width * (0.55 + Math.random() * 1.05);
-      const dx = Math.cos(angle) * reach * (Math.random() < 0.5 ? -1 : 1);
-      const dy = -Math.sin(angle) * reach * 0.42;
-      bit.style.width = size + "px";
-      bit.style.height = size + "px";
-      bit.style.left = cx + "px";
-      bit.style.top = cy + at.height * 0.34 + "px";
-      bit.style.background = colour;
-      bit.dataset.born = performance.now();
-      el("#fx").appendChild(bit);
-      bit.animate([
-        { transform: "translate(-50%, -50%) scale(.6)", opacity: 0 },
-        { transform: `translate(calc(-50% + ${dx * 0.55}px), calc(-50% + ${dy}px)) scale(1)`,
-          opacity: 1, offset: 0.28 },
-        { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${-dy * 0.5 + at.height * 0.3}px)) scale(.35)`,
-          opacity: 0 },
-      ], { duration: 620 + Math.random() * 340, easing: "cubic-bezier(.15,.7,.35,1)" })
-        .finished.then(() => bit.remove()).catch(() => bit.remove());
-      setTimeout(() => bit.remove(), 1100);
-    }
+    const node = h("div", "summonpop");
+    node.style.setProperty("--dust", colour);
+    node.style.width = width + "px";
+    node.style.height = height + "px";
+    node.style.left = cx + "px";
+    node.style.top = cy + "px";
+    node.style.marginLeft = -width / 2 + "px";
+    node.style.marginTop = -height / 2 + "px";
+    const img = h("img");
+    img.src = event.card.img;
+    img.onerror = () => {
+      img.remove();
+      node.insertBefore(h("div", "fallback", event.card.name), node.firstChild);
+    };
+    node.appendChild(img);
+    node.appendChild(h("div", "summonname", event.card.name));
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+
+    // Rise, hold, then an accelerating dive into the slot: the card is at
+    // exactly slot size and slot position when it stops, so the real board
+    // rendering underneath it at the end of the scene is a clean handoff.
+    const dx = (to.left + to.width / 2) - cx;
+    const dy = (to.top + to.height / 2) - cy;
+    const shrink = slot.w / width;
+    const total = SUMMON_RISE + SUMMON_DIVE;
+    const rise = SUMMON_RISE / total;
+    node.animate([
+      { transform: "translate(0,0) scale(.25) rotate(-9deg)", opacity: 0,
+        offset: 0, easing: "cubic-bezier(.12,.85,.25,1)" },
+      { transform: "translate(0,0) scale(1.08) rotate(2deg)", opacity: 1,
+        offset: rise * 0.32, easing: "ease-out" },
+      { transform: "translate(0,0) scale(1) rotate(0deg)", opacity: 1,
+        offset: rise * 0.5 },
+      { transform: "translate(0,0) scale(1.03) rotate(0deg)", opacity: 1,
+        offset: rise, easing: "cubic-bezier(.45,.05,.75,.55)" },
+      { transform: `translate(${dx}px, ${dy}px) scale(${shrink}) rotate(0deg)`,
+        opacity: 1, offset: 1 },
+    ], { duration: total, fill: "forwards" });
+
+    // The herald is binned by `commit`, once the real card is on the board.
+    // This is only the backstop for a scene that never commits.
+    setTimeout(() => node.remove(), total + 5000);
+    setTimeout(() => summonImpact(event, anchor, colour), total);
   }, delay);
+}
+
+/** The moment the card hits the table. */
+function summonImpact(event, anchor, colour) {
+  Sfx.play("impact");
+  const host = document.querySelector(`[data-cookie="${event.cookie}"]`);
+  if (host) {
+    host.style.setProperty("--dust", colour);
+    host.classList.add("landing");
+    setTimeout(() => host.classList.remove("landing"), 700);
+  }
+  // A card-sized box centred on wherever the Cookie landed — the same box the
+  // herald stopped in, so the burst comes off its edges and not off the slot's.
+  const at = anchor.getBoundingClientRect();
+  const slot = cardBox();
+  const mid = { x: at.left + at.width / 2, y: at.top + at.height / 2 };
+  const to = {
+    left: mid.x - slot.w / 2, right: mid.x + slot.w / 2,
+    top: mid.y - slot.h / 2, bottom: mid.y + slot.h / 2,
+    width: slot.w, height: slot.h,
+  };
+  const bounds = el("#table").getBoundingClientRect();
+  const cx = to.left + to.width / 2 - bounds.left;
+  const cy = to.top + to.height / 2 - bounds.top;
+
+  edgeSparks(to, colour);
+
+  // Dust from under the card: thrown out and slightly up, then dragged down.
+  // Sizes and angles are jittered because a ring of identical dots reads as a
+  // loading spinner rather than as something hitting a table.
+  for (let i = 0; i < 26; i++) {
+    const bit = h("div", "dust");
+    const size = 4 + Math.random() * 7;
+    const angle = Math.PI * (0.08 + Math.random() * 0.84);   // outward, mostly sideways
+    const reach = to.width * (0.55 + Math.random() * 1.05);
+    const dx = Math.cos(angle) * reach * (Math.random() < 0.5 ? -1 : 1);
+    const dy = -Math.sin(angle) * reach * 0.42;
+    bit.style.width = size + "px";
+    bit.style.height = size + "px";
+    bit.style.left = cx + "px";
+    bit.style.top = cy + to.height * 0.34 + "px";
+    bit.style.background = colour;
+    bit.dataset.born = performance.now();
+    el("#fx").appendChild(bit);
+    bit.animate([
+      { transform: "translate(-50%, -50%) scale(.6)", opacity: 0 },
+      { transform: `translate(calc(-50% + ${dx * 0.55}px), calc(-50% + ${dy}px)) scale(1)`,
+        opacity: 1, offset: 0.28 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${-dy * 0.5 + to.height * 0.3}px)) scale(.35)`,
+        opacity: 0 },
+    ], { duration: 620 + Math.random() * 340, easing: "cubic-bezier(.15,.7,.35,1)" })
+      .finished.then(() => bit.remove()).catch(() => bit.remove());
+    setTimeout(() => bit.remove(), 1100);
+  }
+}
+
+/** Spheres knocked off the card's outline.
+ *
+ * Spawned at points *on* the perimeter and pushed straight out of the edge they
+ * came from, rather than fired from the centre: the burst has to read as the
+ * card's own edges shedding, so a sphere off the top must go up even though the
+ * centre is directly below it. Coordinates are viewport ones, to match the
+ * fixed-position card they are being thrown off.
+ */
+function edgeSparks(rect, colour, count = 34) {
+  const perimeter = 2 * (rect.width + rect.height);
+  for (let i = 0; i < count; i++) {
+    let along = Math.random() * perimeter;
+    let px, py, nx, ny;
+    if (along < rect.width) {
+      px = rect.left + along; py = rect.top; nx = 0; ny = -1;
+    } else if ((along -= rect.width) < rect.height) {
+      px = rect.right; py = rect.top + along; nx = 1; ny = 0;
+    } else if ((along -= rect.height) < rect.width) {
+      px = rect.right - along; py = rect.bottom; nx = 0; ny = 1;
+    } else {
+      along -= rect.width;
+      px = rect.left; py = rect.bottom - along; nx = -1; ny = 0;
+    }
+    // A little sideways spread on the normal, so the edges do not all fire in
+    // four straight lines.
+    const spread = (Math.random() - 0.5) * 1.3;
+    let vx = nx + (-ny) * spread;
+    let vy = ny + nx * spread;
+    const len = Math.hypot(vx, vy) || 1;
+    vx /= len; vy /= len;
+
+    const size = 5 + Math.random() * 10;
+    const reach = rect.width * (0.5 + Math.random() * 1.5);
+    const drop = rect.height * (0.3 + Math.random() * 0.5);   // gravity, at the end
+
+    const bit = h("div", "spark");
+    bit.style.color = colour;
+    bit.style.width = size + "px";
+    bit.style.height = size + "px";
+    bit.style.left = px + "px";
+    bit.style.top = py + "px";
+    bit.dataset.born = performance.now();
+    el("#fx").appendChild(bit);
+    bit.animate([
+      { transform: "translate(-50%, -50%) scale(.2)", opacity: 0 },
+      { transform: `translate(calc(-50% + ${vx * reach * 0.5}px), calc(-50% + ${vy * reach * 0.5}px)) scale(1)`,
+        opacity: 1, offset: 0.22 },
+      { transform: `translate(calc(-50% + ${vx * reach}px), calc(-50% + ${vy * reach + drop}px)) scale(.25)`,
+        opacity: 0 },
+    ], { duration: 560 + Math.random() * 420, easing: "cubic-bezier(.12,.75,.3,1)" })
+      .finished.then(() => bit.remove()).catch(() => bit.remove());
+    setTimeout(() => bit.remove(), 1200);
+  }
 }
 
 /* A drawn card, travelling from the deck to the hand. It stays face down the
@@ -1065,6 +1328,65 @@ function playDraw(event, delay = 0) {
     ], { duration: DRAW_FLIGHT, easing: "linear" });
     flight.finished.then(() => node.remove()).catch(() => node.remove());
     setTimeout(() => node.remove(), DRAW_FLIGHT + 400);
+  }, delay);
+}
+
+/* A card being discarded — almost always a cost.
+ *
+ * Both players watch this one. Paying `<Discard a card>` is invisible from the
+ * other side of the table: a hand gets shorter, a pile gets taller, and the
+ * only person who knew a price was paid is the person who paid it. So the card
+ * leaves the hand face up, crosses the mat, and lands on the trash where
+ * anyone can go and read it.
+ *
+ * `nth` fans a multi-card cost out so three cards do not fly the same line.
+ */
+function playDiscard(event, delay = 0, nth = 0) {
+  setTimeout(() => {
+    const side = `#side-${event.owner}`;
+    const uid = event.card && event.card.uid;
+    // The card is already out of the hand by the time this plays, so the hand
+    // row is the origin; the card's own slot only exists on a lucky frame.
+    const from = (uid !== undefined
+        && document.querySelector(`${side} .card[data-uid="${uid}"]`))
+      || document.querySelector(`${side} .hand`);
+    const to = document.querySelector(`${side} .stack[data-zone="trash"] .stackart`);
+    Sfx.play("discard");
+    if (!from || !to) return;
+    const bounds = el("#table").getBoundingClientRect();
+    const a = from.getBoundingClientRect();
+    const b = to.getBoundingClientRect();
+    const node = h("div", "discarded");
+    node.appendChild(cardNode(event.card, { mid: true }));
+    node.appendChild(h("div", "discardtag", "discarded"));
+    node.dataset.born = performance.now();
+    el("#fx").appendChild(node);
+
+    // Placed after appending so the card's real size comes from the stylesheet
+    // rather than being repeated here.
+    const box = node.getBoundingClientRect();
+    const spread = (nth % 3 - 1) * 26;
+    const x0 = a.left + a.width / 2 - bounds.left - box.width / 2 + spread;
+    const y0 = a.top - bounds.top;
+    node.style.left = x0 + "px";
+    node.style.top = y0 + "px";
+
+    const dx = b.left + b.width / 2 - bounds.left - box.width / 2 - x0;
+    const dy = b.top + b.height / 2 - bounds.top - box.height / 2 - y0;
+    const flight = node.animate([
+      { transform: "translate(0,0) scale(.9)", opacity: 0, easing: "ease-out" },
+      // It hangs for a beat where it can be read before it is thrown away —
+      // the whole point is that the *opponent* gets to see what was paid.
+      { transform: `translate(${dx * 0.16}px, ${dy * 0.16}px) scale(1.12) rotate(-3deg)`,
+        opacity: 1, offset: 0.16, easing: "ease-out" },
+      { transform: `translate(${dx * 0.22}px, ${dy * 0.22}px) scale(1.12) rotate(-3deg)`,
+        opacity: 1, offset: 0.5, easing: "ease-in" },
+      { transform: `translate(${dx}px, ${dy}px) scale(.62) rotate(9deg)`,
+        opacity: 1, offset: 0.92 },
+      { transform: `translate(${dx}px, ${dy}px) scale(.58) rotate(9deg)`, opacity: 0 },
+    ], { duration: DISCARD_FLIGHT, easing: "linear" });
+    flight.finished.then(() => node.remove()).catch(() => node.remove());
+    setTimeout(() => node.remove(), DISCARD_FLIGHT + 400);
   }, delay);
 }
 
@@ -1450,11 +1772,11 @@ function renderPicker(snap) {
    * one — confirming with nothing picked is its no. */
   if (pending.optional && !upTo) {
     const no = h("button", "ghost", "Decline");
-    no.onclick = () => {
+    Confirm.wire(no, "decline", () => {
       state.picked = [];
       bar.classList.add("hidden");
       answer(null);
-    };
+    });
     foot.appendChild(no);
   }
   foot.appendChild(confirm);
@@ -1503,7 +1825,10 @@ function renderCentre(snap) {
     const icon = THROW_ICONS[opt.label];
     if (icon) btn.appendChild(h("span", "big", icon));
     btn.appendChild(h("span", "label", lookOnly ? "OK" : opt.label));
-    btn.onclick = () => answer(opt.index);
+    // A toss, a mulligan and a paid <...> cost are all one button in the
+    // middle of the table. None of them is a move you can take back, but they
+    // are read before they are pressed, so only "every move" holds them.
+    Confirm.wire(btn, opt, () => answer(opt.index));
     row.appendChild(btn);
   });
   /* A yes/no is only half a question without the no. Declining lives on the
@@ -1513,7 +1838,7 @@ function renderCentre(snap) {
   if (style === "yesno" && pending.optional && !lookOnly) {
     const no = h("button", "centre-btn no");
     no.appendChild(h("span", "label", "No"));
-    no.onclick = () => answer(null);
+    Confirm.wire(no, "decline", () => answer(null));
     row.appendChild(no);
   }
   bar.appendChild(row);
@@ -1535,7 +1860,14 @@ function renderOptions(snap) {
   box.innerHTML = "";
   const pending = snap.pending;
   const lastLine = (snap.log || []).slice(-1)[0] || "";
-  setText(el("#prompt"), pending ? pending.prompt : (snap.over ? "Game over" : "Bots playing…"));
+  const prompt = inSupportStep(snap) ? SUPPORT_PROMPT : (pending ? pending.prompt : null);
+  // Nobody is being asked anything during a replay — both seats are reading
+  // from the file — so "Bots playing" would be a lie about a game that has
+  // already been played.
+  const idle = snap.replay
+    ? (snap.replay.note ? "Replay ended" : "Replaying…")
+    : "Bots playing…";
+  setText(el("#prompt"), prompt || (snap.over ? "Game over" : idle));
   el("#prompt-who").textContent = pending ? seatLabel(pending.seat, snap) : lastLine;
 
   const say = (text, cls) => box.appendChild(h("div", "filterbar" + (cls ? " " + cls : ""), text));
@@ -1624,8 +1956,18 @@ function cardClick(uid, node) {
   // A drag that ends on top of its own card fires a click too. That was a
   // drag, and it has already been answered or cancelled.
   if (Date.now() - lastDragEnd < 250) return;
+  // The tail of a completed hold, which has already answered.
+  if (Confirm.consumed()) return;
   const direct = directOption(uid);
-  if (direct) { closeCardMenu(); answer(direct.index); return; }
+  if (direct) {
+    // Held rather than clicked: the press handler on the card owns this one,
+    // and a click that got here is a click that let go too early. Saying so
+    // beats opening a menu nobody asked for.
+    if (Confirm.needsHold(direct)) { Confirm.hint("hold to " + Confirm.name(direct)); return; }
+    closeCardMenu();
+    answer(direct.index);
+    return;
+  }
   // No moves is not "nothing happens": a menu left open over the last card has
   // to shut, which `openCardMenu` does before it decides there is nothing to
   // show. Hovering the card has already put it in the panel, so a dead card
@@ -1684,11 +2026,7 @@ function openCardMenu(uid, node) {
     // you are about to hit, which is the one you want to read before swinging.
     row.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
     row.onmouseleave = () => { highlight(null); hidePreview(); };
-    row.onclick = (event) => {
-      event.stopPropagation();
-      closeCardMenu();
-      answer(opt.index);
-    };
+    Confirm.wire(row, opt, () => { closeCardMenu(); answer(opt.index); });
     menu.appendChild(row);
   });
 
@@ -1720,7 +2058,8 @@ document.addEventListener("keydown", (event) => {
 
 function pendingOptions() {
   const snap = state.snap;
-  return snap && snap.pending && !state.animating ? snap.pending.options : [];
+  if (!snap || !snap.pending || state.animating) return [];
+  return narrow(snap, snap.pending.options);
 }
 
 /* What the cards on screen can do right now, at two different volumes.
@@ -1900,6 +2239,20 @@ async function answer(index) {
   // The list on screen belongs to the question that is being animated, not the
   // one the server is asking now; an index from it would answer the wrong thing.
   if (state.busy || state.animating) return;
+  // A click already travelling when the board redrew under it lands on
+  // whatever moved into that spot. Nobody reads a question and answers it in a
+  // quarter of a second, so an answer this early is a misclick, not a move.
+  if (!Confirm.settled()) {
+    Confirm.hint("the board just changed — take that again");
+    return;
+  }
+  // What was chosen, before it is spent: the guided game watches for the verbs
+  // it is teaching, and the option list is gone by the time the answer lands.
+  if (typeof Tut !== "undefined" && Tut.on && index !== null && state.snap
+      && state.snap.pending) {
+    Tut.answered((state.snap.pending.options || [])
+      .find((o) => o.index === index));
+  }
   state.busy = true;
   el("#options").innerHTML = "";
   try {
@@ -1994,6 +2347,10 @@ function renderLog(snap) {
 /* ------------------------------------------------------------------- poll */
 function render(snap) {
   state.snap = snap;
+  // Which question is on screen, and since when: both the settle guard and the
+  // holds are scoped to one question, so a new one cancels and re-arms them.
+  Confirm.question(snap.pending ? snap.pending.id : null);
+  supportStepSync(snap);
   if (!snap.players) {
     renderTurnline(snap);
     renderOptions(snap);
@@ -2022,6 +2379,12 @@ function render(snap) {
     // the player who asked for it goes through the reset above.
     state.announced = false;
   }
+  // The guided game reads the same snapshot everything else does; it is loaded
+  // after this file, so it is checked for rather than assumed.
+  if (typeof Tut !== "undefined" && Tut.on) Tut.sync(snap);
+  // Asked again here as well as in `poll`: the last scene of a match plays out
+  // after its snapshot arrived, and the end-of-match card waits for it.
+  if (typeof Title !== "undefined") Title.sync(snap);
   el("#btn-pause").textContent = snap.paused ? "Resume" : "Pause";
   // Spectator's tool only: there is nothing to reveal in a match you are playing.
   const playing = (snap.humanSeats || []).length > 0;
@@ -2048,6 +2411,10 @@ function commit(snap) {
   state.version = snap.version;
   state.pendingId = snap.pending ? snap.pending.id : null;
   render(snap);
+  // The arriving Cookie's card is parked on its slot on `fill: forwards`, so
+  // the real one has to be under it before it goes — bin it after the render,
+  // not before, or the slot flashes empty between the two.
+  el("#fx").querySelectorAll(".summonpop").forEach((node) => node.remove());
 }
 
 /* The board is deliberately a beat behind the server while a scene is playing.
@@ -2094,6 +2461,11 @@ async function poll() {
     const query = params.toString();
     const snap = await api("/api/state" + (query ? "?" + query : ""));
     if (snap.gone) { roomIsGone(); return; }
+    // The title screen and the end-of-match prompt are hung off the snapshot
+    // here rather than off `render`, because the two states they care about —
+    // no match at all, and a room's lobby — both return before any drawing.
+    // It is loaded after this file, so it is checked for rather than assumed.
+    if (typeof Title !== "undefined") Title.sync(snap);
     if (state.room) {
       state.lobby = snap.room || null;
       // A refresh with a stale token comes back as a spectator; say so rather
@@ -2144,6 +2516,39 @@ soundBox.onchange = () => {
   if (soundBox.checked) Sfx.play("place");   // confirm it is actually audible
 };
 
+/* How much friction a move that cannot be taken back should carry. Purely a
+ * preference of this browser's owner — the match neither knows nor cares. */
+const confirmBox = el("#confirm-level");
+const holdBox = el("#hold-ms");
+confirmBox.value = Confirm.level;
+confirmBox.onchange = () => {
+  Confirm.level = confirmBox.value;
+  syncHoldBox();
+  if (state.snap) render(state.snap);   // the affordances change with it
+};
+
+/* How long a held move takes to commit. The list is presets, not the range the
+ * setting accepts, so a value set another way — an older list, a console, a
+ * hand-edited localStorage — is shown rather than silently rounded away. */
+holdBox.onchange = () => {
+  Confirm.holdMs = holdBox.value;
+  syncHoldBox();
+};
+
+function syncHoldBox() {
+  const ms = Confirm.holdMs;
+  if (![...holdBox.options].some((o) => Number(o.value) === ms)) {
+    const own = new Option((ms / 1000).toFixed(2).replace(/0$/, "") + "s", String(ms));
+    holdBox.appendChild(own);
+  }
+  holdBox.value = String(ms);
+  // Nothing is held when nothing asks to be, so the length has nothing to say.
+  const idle = Confirm.level === "off";
+  holdBox.disabled = idle;
+  el("#hold-label").classList.toggle("disabled", idle);
+}
+syncHoldBox();
+
 /* Purely a view preference, so it lives in the browser rather than the match. */
 const flipOpp = el("#flipopp");
 flipOpp.checked = localStorage.getItem("flipOpponent") !== "0";
@@ -2182,11 +2587,13 @@ document.addEventListener("keydown", (e) => {
   if (e.key >= "1" && e.key <= "9") {
     const host = el("#cardmenu") || el("#endturn");
     const btn = host.querySelectorAll("button")[Number(e.key) - 1];
-    if (btn) btn.click();
+    // Not `btn.click()`: a move that wants to be held is held on the keyboard
+    // too, by keeping the number key down.
+    Confirm.tap(btn, e.key);
   } else if (e.key === "0") {
     const buttons = el("#endturn").querySelectorAll("button.tray-btn");
     const last = buttons[buttons.length - 1];
-    if (last && last.textContent.includes("Decline")) last.click();
+    if (last && last.textContent.includes("Decline")) Confirm.tap(last, e.key);
   } else if (e.key === " ") {
     e.preventDefault();
     el("#btn-pause").click();
@@ -2278,6 +2685,17 @@ function updateHint() {
       : "You play one seat; the bot answers for the other.";
 }
 
+/* Forget the game that was on screen, so a new one is not drawn over its
+ * corpse: the version goes back to "never polled", which makes the first
+ * snapshot arrive as a state to adopt rather than a scene to animate. Shared
+ * by the New match button and by starting a replay. */
+function resetForNewMatch() {
+  state.version = -1;
+  state.pendingId = null;
+  state.eventId = 0;
+  state.announced = false;
+}
+
 el("#btn-new").onclick = () => el("#setup").showModal();
 el("#setup-form").addEventListener("submit", async (e) => {
   if (e.submitter && e.submitter.value === "cancel") return;
@@ -2292,10 +2710,10 @@ el("#setup-form").addEventListener("submit", async (e) => {
   };
   const res = await api("/api/new", body);
   if (res.error) { alert(res.error); return; }
-  state.version = -1;
-  state.pendingId = null;
-  state.eventId = 0;
-  state.announced = false;
+  // What "New match" on the end-of-game card repeats: the same two seats and
+  // decks, on a fresh shuffle.
+  state.lastMatch = body;
+  resetForNewMatch();
   poll();
 });
 
@@ -2454,7 +2872,7 @@ async function leaveRoom() {
   Seat.forget(room);
   clearRoom();
   el("#turnline").textContent = "idle";
-  el("#setup").showModal();
+  if (typeof Title !== "undefined") Title.show(); else el("#setup").showModal();
 }
 el("#btn-leave").onclick = leaveRoom;
 el("#btn-rematch").onclick = async () => {

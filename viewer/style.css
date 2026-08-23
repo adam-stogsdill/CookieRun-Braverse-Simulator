@@ -976,20 +976,61 @@ body.online #reveal-label { display: none; }
   filter: brightness(1.25);
   box-shadow: 0 0 8px 2px currentColor, 0 0 3px #fff inset;
 }
-/* The shockwave along the table, flattened into perspective. */
-.dustring {
-  position: absolute; z-index: 32; pointer-events: none;
-  transform: translate(-50%, -50%);
-  border: 2px solid; border-radius: 50%;
-  opacity: 0;
-  animation: dustring 900ms cubic-bezier(.1,.75,.3,1) forwards;
+/* The herald: the Cookie's own card owns the middle of the board for a beat,
+   then dives into its slot. It is sized and flown in JS — from the centre of
+   the *visible* board to the empty slot it is about to fill — because both
+   ends of that trip depend on the layout, not on a fixed distance. It is left
+   in place on `fill: forwards` so the real card renders underneath it and the
+   handoff is invisible; `commit` bins it. */
+.summonpop {
+  position: fixed; z-index: 73; pointer-events: none;
+  color: var(--dust, #cdd5e3);
 }
-@keyframes dustring {
-  0%   { transform: translate(-50%, -50%) scale(.25); opacity: 0; }
-  18%  { opacity: .85; }
-  100% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
+.summonpop img, .summonpop .fallback {
+  width: 100%; height: 100%; object-fit: cover; border-radius: 10px; display: block;
+  background: var(--felt, #12161f);
+  animation: summon-charge 950ms ease-out;
+}
+@keyframes summon-charge {
+  0%   { box-shadow: 0 0 0 2px currentColor, 0 0 10px 2px currentColor,
+                     0 20px 60px rgba(0,0,0,.8);
+         filter: brightness(1.6) saturate(1.2); }
+  40%  { box-shadow: 0 0 0 3px currentColor, 0 0 60px 14px currentColor,
+                     0 20px 60px rgba(0,0,0,.8);
+         filter: brightness(1.18) saturate(1.15); }
+  72%  { box-shadow: 0 0 0 3px currentColor, 0 0 44px 8px currentColor,
+                     0 20px 60px rgba(0,0,0,.8);
+         filter: brightness(1.1); }
+  100% { box-shadow: 0 0 0 1px currentColor, 0 0 8px 1px currentColor,
+                     0 8px 20px rgba(0,0,0,.6);
+         filter: none; }
+}
+/* The name rides under the card while it is up and is gone before it lands —
+   at slot size the band would be wider than the card it belongs to. */
+.summonname {
+  position: absolute; left: 50%; bottom: -30px; transform: translateX(-50%);
+  white-space: nowrap; font-size: 15px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: #f4f8ff;
+  text-shadow: 0 0 12px currentColor, 0 2px 6px rgba(0,0,0,.9);
+  animation: summon-name 700ms ease-out forwards;
+}
+@keyframes summon-name {
+  0%   { opacity: 0; transform: translate(-50%, 10px); }
+  22%  { opacity: 1; transform: translate(-50%, 0); }
+  70%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -6px); }
 }
 
+/* Impact: spheres in the Cookie's own colour thrown off the card's edges. They
+   are spawned along the outline rather than from the centre, so the burst reads
+   as the card itself hitting the table. */
+.spark {
+  position: fixed; z-index: 34; pointer-events: none;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 28%,
+              rgba(255,255,255,.95) 0%, currentColor 58%, rgba(0,0,0,.35) 100%);
+  box-shadow: 0 0 10px 2px currentColor;
+}
 /* ---------------------------------------------------------- the card picker */
 /* Choosing cards to discard: the hand is the control, not a list on the far
    side of the screen. Toggle up to the number asked for, then confirm. */
@@ -1068,6 +1109,19 @@ body.online #reveal-label { display: none; }
 /* a card travelling from the deck to the hand */
 .drawn { position: absolute; z-index: 31; pointer-events: none; }
 .drawn .card { box-shadow: 0 12px 28px rgba(0,0,0,.6); }
+
+/* A card being paid away. It flies face up and over everything, because the
+   point of the animation is that the *opponent* reads what the cost was. */
+.discarded { position: absolute; z-index: 34; pointer-events: none; }
+.discarded .card { box-shadow: 0 14px 30px rgba(0,0,0,.65); }
+.discarded .discardtag {
+  position: absolute; left: 50%; bottom: -8px; transform: translateX(-50%);
+  font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; white-space: nowrap;
+  background: rgba(20, 6, 6, .9); color: #ffd9d0;
+  border: 1px solid rgba(255, 120, 90, .55);
+  box-shadow: 0 3px 10px rgba(0,0,0,.5);
+}
 .check.disabled { opacity: .4; cursor: not-allowed; }
 .check.disabled input { cursor: not-allowed; }
 
@@ -1123,6 +1177,15 @@ body.online #reveal-label { display: none; }
   background: #313a4f; border-color: var(--line); color: var(--ink);
 }
 .tray-btn:hover { border-color: var(--accent); background: #3a4460; color: #fff; }
+/* Leaving the support step. Quieter than a move you could make, louder than
+   End turn: it is the answer to a question the board is holding you on, and it
+   is the only button in the tray while the step is open. */
+.tray-btn.support {
+  background: rgba(240, 169, 43, .12); border-color: rgba(240, 169, 43, .55);
+  color: var(--accent);
+}
+.tray-btn.support:hover { background: rgba(240, 169, 43, .22); color: #fff; }
+
 /* End turn and Pass give the rest of your turn away; they read quieter than
    the things you can still choose to do. */
 .tray-btn.end { background: #2a3142; color: var(--dim); font-weight: 500; }
@@ -1215,4 +1278,90 @@ body.online #reveal-label { display: none; }
   0%   { transform: translate(-50%, -40%) scale(.7); opacity: 0; }
   25%  { transform: translate(-50%, -75%) scale(1.12); opacity: 1; }
   100% { transform: translate(-50%, -150%) scale(.95); opacity: 0; }
+}
+
+/* ------------------------------------------------ hold to commit (confirm.js) */
+/* A control that wants to be held says so before you press it: a dashed edge,
+   and the verb in the tooltip. Quiet enough to ignore once you know the game,
+   loud enough that the first refused click is not a mystery. */
+.needhold { border-style: dashed !important; }
+.tray-btn.needhold::after {
+  content: "hold";
+  margin-left: 6px;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: .7;
+}
+/* The menu row stacks its two lines, so the tag sits in the corner rather
+   than becoming a third line of its own. */
+.cardmenu-row.needhold::after {
+  content: "hold";
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  opacity: .7;
+}
+.cardmenu-row.needhold { padding-right: 40px; }
+.needhold.holding { border-style: solid !important; border-color: var(--accent); }
+.card.holding { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The ring itself, drawn over the pointer so it is where you are looking. */
+.holdring {
+  position: fixed;
+  z-index: 90;
+  width: 52px; height: 52px;
+  margin: -26px 0 0 -26px;
+  pointer-events: none;
+  transition: opacity .18s ease, transform .18s ease;
+}
+.holdring .track {
+  fill: rgba(16, 19, 26, .55);
+  stroke: rgba(232, 236, 245, .18);
+  stroke-width: 4;
+}
+.holdring .fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 26px 26px;
+}
+.holdring.full { opacity: 0; transform: scale(1.35); }
+.holdring.full .fill { stroke: var(--good); }
+
+/* Why nothing happened. One line, bottom middle, gone in a second and a half. */
+#hintline {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translate(-50%, 8px);
+  z-index: 95;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(28, 32, 43, .95);
+  color: var(--ink);
+  font-size: 12px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .16s ease, transform .16s ease;
+}
+#hintline.on { opacity: 1; transform: translate(-50%, 0); }
+
+.controls .check.pick { gap: 4px; }
+.controls .check.pick select {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 4px;
+  font: inherit;
+  font-size: 11px;
 }

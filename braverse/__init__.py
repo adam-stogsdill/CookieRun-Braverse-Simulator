@@ -9,6 +9,11 @@
     final = game.play_out()
 """
 
+# Kept in step with "Current Version" at the top of README.md. Written into
+# every replay file, so a recording that will not play back can say which build
+# made it.
+__version__ = "0.2.26"
+
 from .agents import HeuristicAgent, RandomAgent, SeatedAgent
 from .cards import CardDB, CardDef, default_db, load_cards
 from .config import DEFAULT as DEFAULT_RULES, RulesConfig
@@ -46,6 +51,7 @@ def _compile_pool() -> int:
 COMPILED_CARDS = _compile_pool()
 
 __all__ = [
+    "__version__",
     "Game", "GameState", "PlayerState", "Cookie",
     "HeuristicAgent", "RandomAgent", "SeatedAgent",
     "CardDB", "CardDef", "default_db", "load_cards",

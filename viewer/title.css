@@ -1,0 +1,156 @@
+/* The title screen and the end-of-match prompt.
+ *
+ * Both are overlays over the ordinary table rather than separate pages: the
+ * viewer has exactly one board and one poll loop, and a second page would mean
+ * a second copy of both. The title covers everything and is dismissed by
+ * starting something; the end-of-match card sits over the middle of the board
+ * and deliberately does *not* cover it, because the first thing anyone wants
+ * after a game ends is to look at how it ended. */
+
+#title {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  background:
+    radial-gradient(circle at 50% 24%, rgba(240, 169, 43, .16) 0, transparent 55%),
+    radial-gradient(circle at 50% 110%, rgba(74, 168, 255, .14) 0, transparent 60%),
+    linear-gradient(180deg, var(--bg2), var(--bg));
+}
+#title.hidden { display: none; }
+
+/* Placeholder wordmark: type only, no art. It is here so the screen reads as a
+   front door rather than an empty board, and so the real logo has one obvious
+   place to land later. */
+.title-mark {
+  text-align: center;
+  line-height: 1;
+}
+.title-mark .big {
+  font-size: clamp(38px, 7vw, 76px);
+  font-weight: 800;
+  letter-spacing: -.02em;
+  color: var(--ink);
+}
+.title-mark .big span { color: var(--accent); }
+.title-mark .sub {
+  margin-top: 12px;
+  font-size: 13px;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.title-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 88vw);
+}
+.title-menu button {
+  display: block;
+  width: 100%;
+  padding: 14px 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .12s, transform .12s, background .12s;
+}
+.title-menu button:hover {
+  border-color: var(--accent);
+  background: #222736;
+  transform: translateY(-1px);
+}
+.title-menu button b {
+  display: block;
+  font-size: 16px;
+  font-weight: 700;
+}
+.title-menu button i {
+  display: block;
+  margin-top: 3px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.title-minor {
+  display: flex;
+  gap: 18px;
+}
+.title-minor button {
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.title-minor button:hover { color: var(--ink); }
+
+.title-foot {
+  position: absolute;
+  bottom: 16px;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* ------------------------------------------------------- end of a match */
+#gameover {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The board underneath is the point — only the card itself takes clicks. */
+  pointer-events: none;
+}
+#gameover.hidden { display: none; }
+
+.over-card {
+  pointer-events: auto;
+  width: min(360px, 86vw);
+  padding: 20px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(28, 32, 43, .97);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, .55);
+}
+.over-card h2 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--accent);
+}
+.over-card h2.lost { color: var(--bad); }
+.over-card h2.drawn { color: var(--dim); }
+.over-card .why {
+  margin: 6px 0 16px;
+  font-size: 13px;
+  color: var(--dim);
+}
+.over-card .row {
+  display: flex;
+  gap: 8px;
+}
+.over-card .row button { flex: 1; }
+.over-card .look {
+  margin-top: 10px;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.over-card .look:hover { color: var(--ink); }

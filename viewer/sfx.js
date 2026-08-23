@@ -105,6 +105,14 @@ const Sfx = (() => {
       tone({ duration: 0.34, from: 150, to: 42, gain: 0.45, type: "sine" });
       burst({ at: 0.1, duration: 0.3, from: 900, to: 160, q: 0.5, gain: 0.2 });
     },
+    // a Cookie being called in: a rising swell under a shimmer, timed to run
+    // out as the card starts its dive, so `impact` lands in silence
+    summon() {
+      tone({ duration: 0.6, from: 160, to: 520, gain: 0.18, type: "triangle" });
+      tone({ at: 0.06, duration: 0.55, from: 320, to: 780, gain: 0.1, type: "sine" });
+      burst({ at: 0.1, duration: 0.5, from: 600, to: 3600, q: 0.8, gain: 0.12,
+              type: "bandpass" });
+    },
     // your Cookie hitting the board
     place() {
       burst({ duration: 0.07, from: 1400, to: 500, q: 0.9, gain: 0.28 });
@@ -114,6 +122,12 @@ const Sfx = (() => {
     draw() {
       burst({ duration: 0.13, from: 900, to: 3000, q: 0.6, gain: 0.16 });
       burst({ at: 0.1, duration: 0.05, from: 4200, to: 2000, q: 2.2, gain: 0.1 });
+    },
+    // a card paid away: a paper slide, then the soft slap of the trash pile
+    discard() {
+      burst({ duration: 0.16, from: 2600, to: 700, q: 0.7, gain: 0.16 });
+      burst({ at: 0.82, duration: 0.07, from: 1200, to: 380, q: 1.1, gain: 0.24 });
+      tone({ at: 0.82, duration: 0.16, from: 200, to: 70, gain: 0.2, type: "triangle" });
     },
     // effect damage: a thin electric tick, nothing like the impact thud
     zap() {

@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import inspect
+import re
 import time
 
 import pytest
 
 from braverse import default_db
-from play_server import (MAX_SCENE_PAUSE, Match, MatchConfig, available_decks,
-                         available_pilots, scene_seconds)
+from play_server import (MAX_SCENE_PAUSE, VIEWER, Handler, Match,
+                         MatchConfig, available_decks, available_pilots,
+                         scene_seconds)
 
 
 def wait_for(predicate, timeout: float = 20.0, interval: float = 0.02):
@@ -578,6 +581,52 @@ def test_a_draw_is_a_card_that_came_off_the_deck():
     assert Match._draw_events(None, before) == []
 
 
+def discard_snapshot(hand_uids, trash_uids, hand_types=None):
+    """Two-player snapshot skeleton for the discard diff; seat 0 is paying."""
+    types = hand_types or {}
+    return {"players": [
+        {"hand": [card_stub(u, types.get(u, "COOKIE")) for u in hand_uids],
+         "trash": [card_stub(u, types.get(u, "COOKIE")) for u in trash_uids]},
+        {"hand": [], "trash": []},
+    ]}
+
+
+def test_a_discard_is_animated_for_both_players():
+    """Paying a cost is otherwise silent, so the card flies where both can see."""
+    before = discard_snapshot([1, 2, 3], [])
+
+    paid = Match._discard_events(before, discard_snapshot([1], [2, 3]), [])
+    assert [e["type"] for e in paid] == ["discard", "discard"]
+    assert [e["card"]["uid"] for e in paid] == [2, 3]
+    assert all(e["owner"] == 0 for e in paid)
+
+    # Identity is sent: the trash it lands in is a zone either player may read.
+    assert paid[0]["card"]["name"] == "Blue Whale Cookie"
+
+    # A card leaving hand for anywhere but the trash is not a discard, and a
+    # card reaching the trash from anywhere but a hand is not one either.
+    assert Match._discard_events(before, discard_snapshot([1], [])) == []
+    assert Match._discard_events(before, discard_snapshot([1, 2, 3], [9])) == []
+    assert Match._discard_events(None, before) == []
+
+
+def test_a_played_card_is_not_replayed_as_a_discard():
+    """An Item or a Trap travels hand-to-trash too, and already owns the middle
+    of the board for two seconds; sending it again would play the cost of a
+    card that *was* the play."""
+    before = discard_snapshot([1, 2], [], {1: "ITEM"})
+    after = discard_snapshot([], [1, 2], {1: "ITEM"})
+
+    # An Item is matched off by uid, which `_note_skill` knows.
+    item = [{"type": "item", "owner": 0, "card": card_stub(1, "ITEM")}]
+    assert [e["card"]["uid"] for e in Match._discard_events(before, after, item)] == [2]
+
+    # A trap is recognised off the log and carries no uid, so its card id is
+    # what matches — and only once, so a second copy still animates.
+    trap = [{"type": "trap", "owner": 0, "card": {"id": "ST9-003"}}]
+    assert [e["card"]["uid"] for e in Match._discard_events(before, after, trap)] == [2]
+
+
 def test_a_draw_event_carries_no_card_identity():
     """A drawn card is secret; the animation only needs a count."""
     drew = Match._draw_events(hand_snapshot([1], 30), hand_snapshot([1, 2], 29))
@@ -664,3 +713,19 @@ def test_damage_reaches_the_browser_typed_and_exactly_once():
     assert recorded, "no damage in a whole match?"
     assert {source for source, _, _ in recorded} <= {"attack", "effect"}
     assert any(source == "attack" for source, _, _ in recorded)
+
+
+def test_every_asset_the_page_asks_for_is_served():
+    """A viewer file the page loads but `do_GET` does not list is a 404.
+
+    The allowlist is written out by hand — it is what stops the server handing
+    out arbitrary paths — so the failure mode of adding a file to the viewer is
+    a script tag that silently fetches nothing. Read both and compare.
+    """
+    page = (VIEWER / "index.html").read_text()
+    wanted = set(re.findall(r'(?:src|href)="(/[^"]+)"', page))
+    wanted = {p for p in wanted if not p.startswith("/card_images/")}
+    source = inspect.getsource(Handler.do_GET)
+    served = set(re.findall(r'"(/[a-z0-9_.-]+\.(?:js|css))"', source))
+    missing = sorted(p for p in wanted if p not in served)
+    assert not missing, f"not in the do_GET allowlist: {missing}"

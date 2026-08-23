@@ -1,0 +1,59 @@
+/* The guided first game. Four panels and a ring, never a click-catcher: the
+   card menu is parked on <body> outside whatever is lit up, so anything here
+   that swallowed a pointer would eat the very move it just asked for. */
+.tut-veil { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+.tut-veil.hidden { display: none; }
+.tut-panel {
+  position: fixed;
+  background: rgba(8, 10, 15, .66);
+  transition: all .16s ease;
+}
+.tut-ring {
+  position: fixed;
+  border-radius: 12px;
+  box-shadow: 0 0 0 2px var(--accent), 0 0 26px rgba(240, 169, 43, .35);
+  transition: all .16s ease;
+}
+
+.tut-card {
+  position: fixed;
+  z-index: 84;            /* under the card menu (85): a menu must stay on top */
+  width: 330px; max-width: calc(100vw - 24px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .6);
+  padding: 12px 14px 10px;
+  font-size: 13px; line-height: 1.5;
+}
+.tut-card.hidden { display: none; }
+.tut-card.aside { border-left-color: var(--accent2); }
+
+.tut-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.tut-head h3 { margin: 0; font-size: 14.5px; }
+.tut-step {
+  font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--dim);
+}
+.tut-card.aside .tut-step { color: var(--accent2); }
+.tut-body { color: var(--ink); }
+.tut-body b { color: var(--accent); font-weight: 600; }
+
+.tut-foot {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+.tut-hint { flex: 1; font-size: 11px; color: var(--dim); font-style: italic; }
+.tut-foot .hidden { display: none; }
+
+/* The one-time nudge on a first visit. */
+#btn-learn.nudge {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: tut-pulse 2.4s ease-in-out infinite;
+}
+@keyframes tut-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 169, 43, 0); }
+  50%      { box-shadow: 0 0 0 3px rgba(240, 169, 43, .22); }
+}

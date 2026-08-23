@@ -28,6 +28,7 @@ import json
 import mimetypes
 import os
 import random
+import re
 import secrets
 import socket
 import sys
@@ -41,9 +42,10 @@ from typing import Any, Optional, Sequence
 
 from braverse.deckfile import DECK_DIR, read_decklist
 from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
-                      HeuristicAgent, RandomAgent, SeatedAgent, default_db,
-                      implemented_pool, validate)
+                      HeuristicAgent, RandomAgent, SeatedAgent, __version__,
+                      default_db, implemented_pool, validate)
 from braverse import actions as A
+from braverse import replay as RP
 from braverse.engine import BankedUntap, OPENING_COOKIE_PROMPT
 from braverse.enums import CardType, Marker
 from braverse.rps import CHOICES, THROWS, decide_first_player
@@ -64,13 +66,13 @@ SIDE = (Path(sys.executable).resolve().parent
 # face up, and the Cookie it broke all finish on screen before the next move
 # starts. Kept in step with the timings in viewer/app.js.
 EVENT_SECONDS = {"attack": 0.9, "reveal": 0.7, "faint": 0.3, "skill": 0.4,
-                 "draw": 0.22, "damage": 0.25, "heal": 0.25,
-                 "trap": 1.0, "item": 1.0, "summon": 0.35}
+                 "draw": 0.22, "damage": 0.25, "heal": 0.25, "discard": 0.26,
+                 "trap": 1.0, "item": 1.0, "summon": 1.08}
 # What is still on screen after an event of its kind *starts*.
 # A revealed card is held face up to be read, and a broken Cookie falls apart.
 TAIL_SECONDS = {"attack": 0.9, "reveal": 2.4, "faint": 1.5, "skill": 1.5,
-                "draw": 0.7, "damage": 0.9, "heal": 0.9, "trap": 2.2,
-                "item": 2.2, "summon": 1.0}
+                "draw": 0.7, "damage": 0.9, "heal": 0.9, "discard": 1.0,
+                "trap": 2.2, "item": 2.2, "summon": 1.98}
 MAX_REVEALS = 6          # the browser animates no more than this many
 MAX_SCENE_PAUSE = 9.0
 
@@ -260,6 +262,70 @@ def clean_card_list(raw: Any) -> list[str]:
     if not isinstance(raw, list):
         return []
     return [str(c) for c in raw[:MAX_DECK_CARDS]]
+
+
+# ---------------------------------------------------------------------------
+# saved replays
+# ---------------------------------------------------------------------------
+# A replay is the decisions both seats took, not a film of the board: the
+# engine is deterministic, so re-running it over the same decks, seed and
+# answers reproduces the game exactly (see `braverse/replay.py`). They live
+# beside the script in `replays/`, one JSON file each, next to the deck store
+# and falling back the same way when that directory is read-only.
+REPLAY_DIR_NAME = "replays"
+REPLAY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,118}\.json")
+MAX_REPLAY_LIST = 400      # how many the browser is shown, newest first
+MAX_BODY = 8 << 20         # an uploaded replay is a few tens of KB; cap the rest
+
+
+def replay_store() -> Path:
+    base = SIDE if os.access(SIDE, os.W_OK) else Path.home() / ".braverse"
+    path = base / REPLAY_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def safe_replay_name(raw: Any) -> str:
+    """A file name out of a request, or "" for anything that is not one.
+
+    Refused rather than scrubbed: stripping the bad characters out of
+    `sub/dir.json` leaves `subdir.json`, which is a *different, real* file, and
+    a route that quietly reads or deletes some other replay than the one it was
+    asked about is worse than one that says no. So the name has to already be
+    the shape this server writes — plain characters, no path, no leading dot,
+    ending `.json`.
+    """
+    name = str(raw or "")
+    if not REPLAY_NAME.fullmatch(name) or ".." in name:
+        return ""
+    return name
+
+
+def replay_files() -> list[Path]:
+    """Every saved replay, newest first."""
+    try:
+        found = [p for p in replay_store().glob("*.json") if p.is_file()]
+    except OSError:
+        return []
+    found.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return found[:MAX_REPLAY_LIST]
+
+
+def replay_summary(path: Path) -> Optional[dict]:
+    """One row of the replay list, or None for a file that is not one of ours."""
+    try:
+        recording = RP.Recording.load(path)
+    except RP.ReplayError:
+        return None
+    return {"name": path.name, "size": path.stat().st_size, **recording.summary()}
+
+
+def replay_filename(decks: Sequence[str], when: float) -> str:
+    """`20260823-140512-st9_sea_fairy-vs-st8_wind_archer.json`."""
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(when))
+    tag = "-vs-".join("".join(ch for ch in str(name) if ch.isalnum() or ch in "-_")[:28]
+                      or "deck" for name in list(decks)[:2])
+    return f"{stamp}-{tag}.json"
 
 
 def available_pilots() -> list[str]:
@@ -732,7 +798,8 @@ class HumanController:
             return None
         db = self.match.db
         payload = [action_json(db, state, i, a) for i, a in enumerate(options)]
-        index = self.match.ask(self.seat, "Your move", payload, optional=False)
+        index = self.match.ask(self.seat, "Your move", payload, optional=False,
+                               turn_action=True)
         return options[index] if index is not None else None
 
     def choose(self, state: GameState, prompt: str, options: Sequence, *, optional: bool):
@@ -823,6 +890,11 @@ class MatchConfig:
     paused: bool = False
     reveal: bool = False   # show both hands even in a human game
     online: bool = False   # two browsers, one seat each: hide per viewer
+    record: bool = True    # keep the finished game in `replays/`
+    # A game every seat's answers were already written down for. Set means this
+    # match is watching one back rather than playing a new one; the decks, the
+    # seed and every decision come out of the recording instead of the menu.
+    replay: Optional[RP.Recording] = None
 
 
 class Match:
@@ -852,14 +924,39 @@ class Match:
         self._log_mark = 0        # log lines already turned into events
         self._event_mark = 0      # structured engine records already consumed
 
-        decks = available_decklists()
-        self.deck_lists = [list(decks[name][0]) for name in config.decks]
-        self.extra_lists = [list(decks[name][1]) for name in config.decks]
-        seed = config.seed if config.seed is not None else random.randrange(1 << 30)
-        self.seed = seed
-        self.controllers = [
-            make_pilot(config.pilots[i], i, db, seed + 100 * i, self) for i in range(2)
-        ]
+        # Watching one back and playing a new one are the same run: the same
+        # engine over the same decks and seed, with seats that answer from the
+        # recording instead of thinking. Everything downstream of here — the
+        # snapshots, the events, pause, step and speed — cannot tell them apart,
+        # which is the point.
+        self.replay = config.replay
+        self.cursor: Optional[RP.Cursor] = None
+        self.recorder: Optional[RP.DecisionLog] = None
+        self.replay_note = ""        # why a replay stopped, once it has
+        self.replay_desync = False
+        self.saved_as = ""           # the file this match was last written to
+        if self.replay is not None:
+            self.deck_lists = self.replay.deck_lists
+            self.extra_lists = self.replay.extra_lists
+            seed = self.replay.seed
+            self.seed = seed
+            # Paced through the same gate a bot goes through, so a replay can be
+            # paused, stepped and slowed down with the controls already there.
+            self.controllers, self.cursor = RP.scripted(self.replay, pace=self.gate)
+        else:
+            decks = available_decklists()
+            self.deck_lists = [list(decks[name][0]) for name in config.decks]
+            self.extra_lists = [list(decks[name][1]) for name in config.decks]
+            seed = config.seed if config.seed is not None else random.randrange(1 << 30)
+            self.seed = seed
+            pilots = [make_pilot(config.pilots[i], i, db, seed + 100 * i, self)
+                      for i in range(2)]
+            # Recording wraps the seats rather than the engine, and passes every
+            # question and answer straight through: a recorded game is the same
+            # game. Costs a few hundred small integers over a whole match.
+            self.recorder = RP.DecisionLog(db=db)
+            self.controllers = [RP.record(c, i, self.recorder)
+                                for i, c in enumerate(pilots)]
         self.game = Game(self.deck_lists, self.controllers,
                          extra_decks=self.extra_lists, db=db, seed=seed)
         self.human_seats = [i for i, p in enumerate(config.pilots) if p == "human"]
@@ -899,8 +996,17 @@ class Match:
                 self._note_action(action)
                 game.step(action)
             self.publish()
+            self.autosave()
         except MatchAborted:
             return
+        except RP.ReplayFinished as exc:
+            # A game saved while it was still being played: it runs to the point
+            # it was saved at and stops there, which is not a fault.
+            self._replay_stopped(str(exc))
+        except RP.ReplayDesync as exc:
+            # This build no longer plays the game that was recorded. Say which
+            # decision diverged rather than showing a game that never happened.
+            self._replay_stopped(str(exc), bad=True)
         except Exception as exc:  # surface engine errors in the UI, not the console
             import traceback
             traceback.print_exc()
@@ -908,6 +1014,57 @@ class Match:
                 self.error = f"{type(exc).__name__}: {exc}"
                 self.version += 1
                 self.cond.notify_all()
+
+    # -- replays -----------------------------------------------------------
+    def _replay_stopped(self, note: str, *, bad: bool = False) -> None:
+        self.replay_note = note
+        self.replay_desync = bad
+        self.publish()
+
+    def recording(self) -> Optional[RP.Recording]:
+        """This match so far, as a replay. None while watching one back.
+
+        Answering mid-game is deliberate: a game saved at turn 4 replays the
+        first four turns and stops, which is what you want from a "save this,
+        something odd just happened" button.
+        """
+        if self.recorder is None:
+            return None
+        return self.recorder.finish(
+            self.game,
+            decks=[{"name": name, "cards": deck, "extra": extra}
+                   for name, deck, extra in zip(self.config.decks,
+                                                self.deck_lists,
+                                                self.extra_lists)],
+            pilots=self.config.pilots,
+            seed=self.seed,
+            app_version=__version__,
+        )
+
+    def save_replay(self) -> Path:
+        """Write this match to `replays/`. Raises OSError if it cannot."""
+        recording = self.recording()
+        if recording is None:
+            raise RP.ReplayError("a replay is not itself recorded")
+        path = replay_store() / replay_filename(self.config.decks, self.started)
+        recording.save(path)
+        self.saved_as = path.name
+        return path
+
+    def autosave(self) -> None:
+        """Keep every finished game, quietly.
+
+        A replay is worth having precisely for the game nobody thought to press
+        save on, and one game is a few tens of kilobytes. A game abandoned
+        half-way is not kept — `stop` never reaches here.
+        """
+        if self.recorder is None or not self.config.record:
+            return
+        try:
+            self.save_replay()
+        except (OSError, RP.ReplayError):
+            pass        # a read-only disk must not take the match down with it
+        self.publish()
 
     # -- events ----------------------------------------------------------
     def _note_action(self, action) -> None:
@@ -1105,6 +1262,58 @@ class Match:
         return events
 
     @staticmethod
+    def _discard_events(prev: Optional[dict], snap: dict, shown: Sequence = ()) -> list:
+        """Cards that went from a hand straight to the trash.
+
+        Paying a `<Discard a card>` cost is otherwise completely silent: the
+        hand quietly gets shorter and the trash quietly gets taller, and the
+        player who was *charged* is the only one who ever knew a price was
+        paid. So it is animated for both seats — and identity is safe to send,
+        because the trash it lands in is a public zone either player may read.
+
+        Read off a diff rather than recorded in the engine because a hand
+        empties into the trash from two dozen places — a cost, an opponent's
+        "discard 1", a compiled program — and every one of them is the same
+        beat on screen.
+
+        `shown` is the events already built for this scene. An Item or a Trap
+        also travels hand-to-trash, and both already own the middle of the
+        board for two seconds; sending them again as a discard would play the
+        cost of a card that *was* the play. They are matched off by uid where
+        one is known and by card id otherwise, since a trap is recognised from
+        the log and carries no uid.
+        """
+        if not prev:
+            return []
+        seen_uids = set()
+        seen_ids = []
+        for event in shown:
+            card = event.get("card")
+            if not card or event.get("type") not in ("item", "trap", "skill"):
+                continue
+            if card.get("uid") is not None:
+                seen_uids.add(card["uid"])
+            else:
+                seen_ids.append(card.get("id"))
+        events = []
+        for index, (was, now) in enumerate(zip(prev["players"], snap["players"])):
+            held = {c["uid"]: c for c in was["hand"]}
+            before = {c["uid"] for c in was["trash"]}
+            for card in now["trash"]:
+                uid = card["uid"]
+                if uid in before or uid not in held or uid in seen_uids:
+                    continue
+                if card.get("id") in seen_ids:
+                    seen_ids.remove(card["id"])
+                    continue
+                events.append({
+                    "type": "discard",
+                    "owner": index,
+                    "card": held[uid],
+                })
+        return events
+
+    @staticmethod
     def _faint_events(prev: Optional[dict], snap: dict) -> list:
         """Cookies that left the battle area — fainted, trashed or bounced."""
         if not prev:
@@ -1142,8 +1351,12 @@ class Match:
             # the engine's own record of what that did — damage, reveals and
             # heals interleaved exactly as they happened — then the two things
             # still read off a diff, which have no ordering of their own.
-            snap["events"] = (self._queued
-                              + self._trap_events(snap)
+            # The card that was played comes first, then the price it charged
+            # — a discard cost is paid on the way in, so it plays before the
+            # damage or the draw it bought.
+            played = self._queued + self._trap_events(snap)
+            snap["events"] = (played
+                              + self._discard_events(self._prev, snap, played)
                               + self._engine_events()
                               + self._draw_events(self._prev, snap)
                               + self._summon_events(self._prev, snap)
@@ -1159,6 +1372,17 @@ class Match:
         snap["decks"] = list(self.config.decks)
         snap["humanSeats"] = self.human_seats
         snap["firstPlayer"] = self.game.first_player
+        snap["savedAs"] = self.saved_as
+        if self.replay is not None and self.cursor is not None:
+            snap["replay"] = {
+                "at": self.cursor.at,
+                "total": len(self.cursor.decisions),
+                "note": self.replay_note,
+                "desync": self.replay_desync,
+                "recorded": self.replay.recorded,
+                "pilots": list(self.replay.pilots),
+                "appVersion": self.replay.app_version,
+            }
         with self.cond:
             self.snapshot = snap
             self.pending = pending
@@ -1196,7 +1420,7 @@ class Match:
     def ask(self, seat: int, prompt: str, options: list, *, optional: bool,
             count: int = 1, pick: Optional[dict] = None,
             centre: Optional[str] = None, up_to: bool = False,
-            shown: Optional[list] = None):
+            shown: Optional[list] = None, turn_action: bool = False):
         """Block the match thread until the browser answers.
 
         Returns an index, or a list of them when the question takes more than
@@ -1214,6 +1438,9 @@ class Match:
             "upTo": up_to,
             "pick": pick,
             "centre": centre,
+            # The turn's own action list, as opposed to a mid-effect question.
+            # The viewer needs to tell them apart to run its support step.
+            "turnAction": turn_action,
             # Drawn next to the answers but not answerable. See `shown_cards`.
             "shown": shown or [],
             "id": self.version + 1,
@@ -1669,7 +1896,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)
-        if not length:
+        if not length or length > MAX_BODY:
             return {}
         try:
             return json.loads(self.rfile.read(length) or b"{}")
@@ -1681,10 +1908,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path == "/":
             self._file(VIEWER / "index.html")
-        elif path in ("/app.js", "/sfx.js", "/style.css",
+        elif path in ("/app.js", "/sfx.js", "/confirm.js", "/style.css",
                       "/builder.js", "/builder.css",
                       "/table.js", "/table.css",
-                      "/showcase.js", "/showcase.css"):
+                      "/showcase.js", "/showcase.css",
+                      "/tutorial.js", "/tutorial.css",
+                      "/replays.js", "/replays.css",
+                      "/title.js", "/title.css"):
             self._file(VIEWER / path.lstrip("/"))
         elif path.startswith("/card_images/"):
             name = Path(path).name
@@ -1724,6 +1954,20 @@ class Handler(BaseHTTPRequestHandler):
             payload["list"] = deck
             payload["extraList"] = extra
             self._json(payload)
+        elif path == "/api/replays":
+            rows = [row for row in (replay_summary(p) for p in replay_files())
+                    if row is not None]
+            self._json({"replays": rows, "path": str(replay_store()),
+                        "local": self._is_local()})
+        elif path == "/api/replay":
+            name = safe_replay_name(self._query().get("name"))
+            path_ = replay_store() / name if name else None
+            if path_ is None or not path_.is_file():
+                self._json({"error": "no replay by that name"}, 404)
+                return
+            # Served as a download rather than a viewer route: a replay is a
+            # file someone hands to someone else with the bug report.
+            self._send(200, path_.read_bytes(), "application/json")
         elif path == "/api/cardnames":
             self._json({"cards": card_names(self.app.db)})
         elif path == "/api/pool":
@@ -1961,6 +2205,89 @@ class Handler(BaseHTTPRequestHandler):
             ok = match.answer(picked, seat=seat,
                               pending_id=int(pending_id) if pending_id is not None else None)
             self._json({"ok": ok})
+        elif path == "/api/replays/save":
+            # A game being played in a room is worth keeping too, and the
+            # person asking is one of the two playing it — the seat token is
+            # checked the same way answering a question is.
+            room, seat = self._seated(body)
+            match = room.match if (room is not None and seat is not None) \
+                else self.app.match
+            if match is None:
+                self._json({"error": "no match"}, 400)
+                return
+            try:
+                saved = match.save_replay()
+            except RP.ReplayError as exc:
+                self._json({"error": str(exc)}, 409)
+                return
+            except OSError as exc:
+                self._json({"error": f"could not write {replay_store()}: {exc}"}, 500)
+                return
+            match.publish()
+            self._json({"ok": True, "name": saved.name, "path": str(saved)})
+        elif path == "/api/replays/watch":
+            # Either a file on this machine or one dropped into the browser.
+            # The uploaded case is what makes a replay shareable: the file is
+            # the whole game, so it plays back anywhere this build runs.
+            blob = body.get("replay")
+            if blob is None:
+                name = safe_replay_name(body.get("name"))
+                path_ = replay_store() / name if name else None
+                if path_ is None or not path_.is_file():
+                    self._json({"error": "no replay by that name"}, 404)
+                    return
+                try:
+                    recording = RP.Recording.load(path_)
+                except RP.ReplayError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+            else:
+                try:
+                    recording = RP.Recording.from_json(blob)
+                except RP.ReplayError as exc:
+                    self._json({"error": str(exc)}, 400)
+                    return
+            unknown = sorted({c for deck in (*recording.deck_lists,
+                                             *recording.extra_lists)
+                              for c in deck if c not in self.app.db})
+            if unknown:
+                self._json({"error": "this replay uses cards this build does "
+                                     f"not have: {unknown[:5]}"}, 400)
+                return
+            config = MatchConfig(
+                decks=recording.deck_names,
+                # Neither seat is being played; both are reading from the file.
+                pilots=["replay", "replay"],
+                seed=recording.seed,
+                delay=float(body.get("delay", 0.7)),
+                paused=bool(body.get("paused", False)),
+                reveal=bool(body.get("reveal", True)),
+                record=False,
+                replay=recording,
+            )
+            try:
+                match = self.app.new_match(config)
+            except Exception as exc:
+                self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
+                return
+            self._json({"ok": True, "seed": match.seed,
+                        "decisions": len(recording.decisions)})
+        elif path == "/api/replays/delete":
+            if not self._is_local():
+                self._json({"error": "replays can only be deleted on the "
+                                     "machine running the server"}, 403)
+                return
+            name = safe_replay_name(body.get("name"))
+            path_ = replay_store() / name if name else None
+            if path_ is None or not path_.is_file():
+                self._json({"error": "no replay by that name"}, 404)
+                return
+            try:
+                path_.unlink()
+            except OSError as exc:
+                self._json({"error": f"could not delete {path_}: {exc}"}, 500)
+                return
+            self._json({"ok": True})
         elif path == "/api/control":
             if body.get("room"):
                 # Pause, step, speed and reveal are a spectator's controls over

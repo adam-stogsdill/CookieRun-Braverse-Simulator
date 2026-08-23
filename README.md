@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.22
+Current Version: 0.2.28
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -42,8 +42,11 @@ There are many things that are still needing to be updated and reworked, but I i
   - [What works](#what-works)
     - [A move you are offered is a move that does something](#a-move-you-are-offered-is-a-move-that-does-something)
   - [The visual player](#the-visual-player)
+    - [Learn: the guided first game](#learn-the-guided-first-game)
+    - [A misclick is not a move](#a-misclick-is-not-a-move)
     - [Playing someone else](#playing-someone-else)
     - [The deck builder tab](#the-deck-builder-tab)
+    - [Watching a game back](#watching-a-game-back)
   - [The effect compiler](#the-effect-compiler)
     - [The log says how much damage landed, and what dealt it](#the-log-says-how-much-damage-landed-and-what-dealt-it)
     - ["HP cannot reach 0" does not stop the damage](#hp-cannot-reach-0-does-not-stop-the-damage)
@@ -90,18 +93,20 @@ braverse/             the engine (library, UI-agnostic)
   deckgen.py          evolutionary deck generation
   decks.py            starter decklists + deck validation
   rps.py              the opening rock-paper-scissors for turn order
+  replay.py           recording a game as its decisions, and playing it back
   config.py           every tunable rule, cited to the PLAY GUIDE
 play_server.py        the visual player: play a bot, play a person, or watch two bots
 viewer/               its browser front end (no build step, no dependencies, no assets)
                         app.js/style.css the table, builder.* the deck builder,
-                        table.* the sleeve and playmat tab
+                        table.* the sleeve and playmat tab,
+                        replays.* the replay shelf
 selfplay.py           bulk self-play harness and win-rate report
 train_rl.py           train / evaluate the RL agent
 evolve_deck.py        evolve a decklist against a gauntlet
 coverage_report.py    which cards the engine can play, and what to build next
 coevolve.py           alternate deck evolution and agent training
 compare_decks.py      round-robin decks under a chosen pilot
-tests/                200 tests
+tests/                386 tests
 requirements-play.txt just play the game (numpy only)
 requirements.txt      the above plus RL, tests and tooling
 ```
@@ -405,9 +410,32 @@ and draws inside the turn machinery, and never enters `support` at all, since
 placing a support card is a main-phase action capped at one per turn rather than
 a phase you stop in. So Active and Draw show as already resolved (and Draw reads
 *skipped* for whoever opened, who forgoes their first draw), End as still to
-come, and Support carries the one thing you can still act on: it pulses **ready**
-until this turn's support card is placed, then settles to **done**. That is the
-nudge — forgetting the free support card is the easiest mistake in the game.
+come, and Support carries the one thing you can still act on.
+
+**The support step.** A pulsing dot was the first version of that nudge, and it
+was one you could play straight past — forgetting the free support card is the
+easiest mistake in the game, and a hint you are allowed to ignore is a hint most
+people do ignore. So the viewer puts the step back in and *stops* on it. Your
+turn opens with the move list narrowed to "place a card as support", the panel
+and banner asking for one, Support lit **now** and Main greyed out behind it. The
+way out is to place a card or to press **Pass to main phase**, after which the
+full turn returns and Support reads *passed* rather than *ready*. Placing one
+reads *done*, as before.
+
+None of that reaches the engine. The support step is a second question asked
+over the *same* action list `choose_action` already published — every option in
+it was legal a moment ago and the ones hidden come back untouched — so it is a
+viewer-side reordering of how a human is asked, not a rules change. Bot seats,
+`selfplay.py` and the training loops never see it, and self-play win rates are
+unmoved by it. The one thing the server contributes is a `turnAction` flag on
+the pending question, so the browser can tell the turn's own move list apart
+from a mid-effect question; passing is remembered per turn and per browser and
+resets itself when the turn number and turn player change.
+
+Passing is not binding on the engine, and deliberately so: if you pass and then
+change your mind, the card's menu still offers **Place as support** for the rest
+of your turn. The step is there to make the decision happen, not to take the
+move away.
 
 **Questions about cards are answered by pointing at cards.** When an effect
 asks which Cookie to damage or debuff, the candidates light up on the board and
@@ -639,6 +667,96 @@ before the browser polled it; and the obvious way to write the flip —
 stayed back-side up through the whole animation. It is a 2D squash-and-swap
 instead.
 
+### Learn: the guided first game
+
+**Learn** in the header deals a real game and talks you through it. Not a
+scripted board and not a slideshow: it POSTs the same `/api/new` the setup
+dialog does — the two starter lists, seat 0 human against the heuristic, on a
+fixed seed — and then watches the snapshot the viewer is already polling. Each
+step names a *moment* ("it is your main phase and you have not placed a support
+yet"), dims the board around the one zone it is about, and advances when the
+game reaches the next one.
+
+That the condition is on the board rather than on a script is the whole design.
+A tutorial that drives the game has to be right about what you will do next, and
+you will not do it: you will place the support before it asks, or attack with
+the other Cookie, or lose the toss. So the coach never makes a move and never
+blocks one — the veil is `pointer-events: none` throughout, because the card
+menu is parked on `<body>` outside whatever rectangle is lit up, and a tutorial
+that ate the click it had just asked for would be worse than none. Ignore it
+entirely and it will catch up with you.
+
+Two things keep it out of a corner it cannot get out of. A step hung off a
+question that may never be asked carries the evidence that its moment has been
+and gone — lose the toss and "you won the toss" recognises that the toss is
+settled and steps aside, rather than sitting there explaining a choice the bot
+is making. And a step waiting on the shuffle — a Cookie in hand, a turn with an
+attack in it — has a **patience** in turns, after which it gives up rather than
+holding the rest of the course behind it.
+
+Alongside the seventeen steps are four asides that fire the first time the game
+asks something a new player has not met: a block, a trap window, a card-picking
+strip, an optional `<...>` cost. They interrupt whatever step is up and hand it
+back afterwards, so an aside can never cost you your place.
+
+The whole thing is `viewer/tutorial.js` plus a stylesheet, and it touches
+`app.js` in exactly two places: one line at the end of `render` to hand it the
+snapshot, and one in `answer` to tell it which move you just chose — the option
+list is gone by the time the answer lands, and "did they attack?" is not a
+question the next board reliably answers. Since it is a viewer file, it is also
+one the server has to be told about; `tests/test_viewer.py` now reads
+`index.html` and `do_GET` and fails if a script tag names a path the allowlist
+does not serve.
+
+### A misclick is not a move
+
+There is no undo. The server owns the game, an answer sent is a move made, and
+the two cheapest clicks on the table — pointing at a Cookie to answer "which
+one?", and **End turn** — are also the two that hurt most when the pointer was
+somewhere else. The fix could not be a confirmation dialog on everything: a turn
+is a dozen answers, and a yes/no on each of them turns a game into paperwork.
+
+So the viewer protects the moves you cannot take back, and only those.
+`viewer/confirm.js` does two things:
+
+**A settle guard.** The board redraws under the pointer every time a question is
+answered, and a click already on its way lands on whatever moved into that spot.
+Any answer sent within a quarter second of a *new* question appearing is dropped
+with a one-line hint instead. It costs a correct click nothing, because nobody
+reads a question and answers it in 250ms.
+
+**Hold to commit.** Press and hold; a ring fills over the pointer and the move
+goes. A quick click does nothing at all — which is the whole point, since a
+misclick is exactly a quick click. No dialog, no focus taken, no second target
+to aim at, and the number of clicks in a turn is unchanged. The controls that
+want it say so before you press them: a dashed edge and a small `HOLD` tag.
+
+How long is a parameter, not a constant — the **hold** dropdown next to
+`confirm`, presets from 0.2s to 0.8s, default 0.35s, remembered per browser.
+The right number is a property of the hand on the mouse rather than of the
+game: long enough that a stray click never reaches it, short enough that a whole
+turn of them is not a wait. 0.35s is about twice a fast double-click gap, which
+is the accident it is there to absorb. `Confirm.holdMs` accepts anything from
+120ms to 1500ms and clamps the rest, so a value set outside the presets sticks
+and is shown as its own entry in the list rather than rounded away.
+
+Which moves hold is one function, `needsHold`, and nothing else decides it. On
+the default setting — the **confirm** dropdown in the header, `off` / `key
+moves` / `every move` — that is attacks, blocks, End turn, Pass, declining an
+optional effect, and answering a mid-effect question by pointing at a card.
+Plays, supports, traps and skills are left on one click, because they are
+already reached through a card's own menu or by dragging the card onto a zone:
+picking a card up, carrying it across the table and letting go is a held gesture
+already, and asking someone to then hold what they just dragged is the paperwork
+this was meant to avoid. `every move` extends the hold to those too, and to the
+toss and the mulligan; `off` restores the old one-click behaviour exactly.
+
+The keyboard shortcuts hold as well: the number keys point at a control rather
+than press it, so `1` on a control that wants a hold fills the ring while the
+key is down and cancels when it comes up. The guided first game reads the same
+setting and teaches whichever verb is live — "hold a Cookie in your hand" or
+"click" — so a first game never asks for a click the board will refuse.
+
 ### Playing someone else
 
 Start the server with `--lan` and hit **New match → Play someone**. Hosting
@@ -751,6 +869,62 @@ HP pile is stripped for *everyone*, including its owner and including under
 point. Public zones (trash, break area) are sent in full, which is what makes
 them searchable. The `reveal` toggle needs no replay, because the filter runs
 over a snapshot rather than being baked into it.
+
+### Watching a game back
+
+Every finished game is kept, and any of them can be watched again on the same
+board it was played on — with the same Pause, Step and speed controls, because
+it *is* the same board. The fourth tab in the header is the shelf they sit on.
+
+**A replay is not a recording of the screen.** It is the list of decisions both
+seats took — every answer, in the order the engine asked for them — plus the two
+decklists and the seed. Watching one runs the game again: `braverse/replay.py`
+hands the engine two seats that answer out of the file instead of thinking, and
+everything else is re-derived.
+
+That is the whole design, and it is worth being clear about why. The engine is
+already deterministic — all randomness goes through the seeded `state.rng`, and
+`game.clone()` being a real deep copy is the same property said another way — so
+a second run over the same decks, seed and answers reproduces the first *bit for
+bit*: the same shuffles, the same draws, the same prose log, the same
+`state.events` in the same order, which means the same animations. A replay is
+therefore perfect by construction rather than by how thorough the logging was,
+and a whole game is a few hundred small integers — about 15 KB, against the
+megabytes a frame store would cost. `tests/test_replay.py` pins the log and the
+event stream matching, event for event.
+
+The alternative — writing down board states — would have to keep pace with every
+mechanic anyone adds, and would be wrong in exactly the places the log is
+thinnest. This cannot quietly drift out of step with the engine; it can only
+fail loudly. Each decision carries a fingerprint of the options it was chosen
+from, and a replay whose options no longer match stops and names the decision
+that diverged:
+
+    replay stopped — this build has diverged from it: decision 47 of 104:
+    the same number of options, but not the same ones (Attack: Sea Fairy
+    Cookie → Muscle Cookie (3 dmg))
+
+which is a rules change or an edited card saying so, rather than a plausible
+game nobody played. The fingerprint is built from card *ids*, never uids: uids
+come off a process-global counter, so the second run numbers its cards from
+wherever the first left off, and a uid-based check would call every replay a
+desync.
+
+**Recording wraps the seats, not the engine.** It passes every question and
+answer straight through, so a recorded game is the same game — and it mirrors
+each controller's method surface exactly, because the engine takes a *different
+path* for a seat that can answer `wants_mulligan` than for one that cannot. A
+bot is never offered the opening redraw; a replay of a bot seat must not grow
+the ability to take one, or it would replay a hand that was never dealt.
+
+Games land in `replays/` beside the script (or beside the binary, falling back
+to `~/.braverse/` when that is read-only), one JSON file each, written through a
+temporary file. **Save the game in progress** writes one mid-game: it replays up
+to the point it was saved and stops there, which is what you want from a "save
+this, something odd just happened" button. The file is the whole game, so it is
+also the thing to attach to a bug report — **Download** it, and whoever receives
+it drops it onto their own replay tab and watches it without it ever touching
+their collection.
 
 ## The effect compiler
 

@@ -1,5 +1,122 @@
 # Changelog
 
+## 0.2.26
+
+- **New: a Replays tab, and every game you finish is kept.** Any of them can be
+  watched again on the real board — the same cards, the same animations, the
+  same log — with Pause, Step and the speed slider working on it exactly as
+  they do while two bots play.
+- What is saved is the list of decisions both seats took, not a video: watching
+  one plays the game again from the same decks, seed and answers, so it comes
+  out identical rather than approximately right. A whole game is about 15 KB.
+- **Save the game in progress** keeps a match that is still being played. It
+  replays up to the moment you saved it and then says so.
+- **Download** a replay and send it to someone: they drop the file onto their
+  own Replays tab and watch your game, without it being saved on their machine.
+- A replay from an older version that this one no longer plays the same way
+  stops and says which decision it disagreed about, instead of quietly showing
+  you a game that never happened.
+
+## 0.2.28
+
+- **There is a title screen now.** Opening the player lands on a front door
+  rather than an empty table: play a bot, watch two bots play each other, or
+  play someone on your network. Each one opens the usual New match dialog with
+  that mode already set, so decks and seeds are still yours to pick. The guided
+  first game and the deck builder are one click away from it too.
+- Refreshing in the middle of a game still comes back to the game, and a
+  `?room=` link still goes straight to the room — the menu only appears when
+  there is nothing to come back to.
+- **When a match ends you are asked what next**: a card over the board offers a
+  new match on the same two decks (fresh shuffle) or a trip back to the title
+  screen. *Stay and look at the board* puts it away so you can read how it
+  finished. In a room the new-match button is the rematch both players agree to.
+- Leaving a room now returns to the title screen instead of the New match
+  dialog.
+
+## 0.2.27
+
+- **Misclicks cost you a move less often.** The moves you cannot take back — an
+  attack, a block, End turn, Pass, declining an effect, and answering a question
+  by pointing at a card — are now *held* rather than clicked: press and hold for
+  a moment, a ring fills over the pointer, and the move goes. A quick click does
+  nothing but tell you to hold. Everything else still takes one click, so a turn
+  is no slower than it was.
+- Controls that want a hold say so up front: a dashed edge and a small "hold"
+  tag. The number-key shortcuts hold too — keep the key down.
+- **How long the hold takes is yours to set** — the *hold* dropdown beside
+  *confirm*, from 0.2s to 0.8s, default 0.35s. Slow hands and fast hands want
+  different numbers, so it is a setting rather than a decision.
+- **A click that lands while the board is still moving is ignored.** Answering a
+  question redraws the table under your pointer, and a click already on its way
+  used to land on whatever slid into that spot. Anything sent in the first
+  quarter second of a new question is dropped with a hint instead.
+- New **confirm** setting in the header: *key moves* (the above; the default),
+  *every move* if you want plays, supports and the mulligan held as well, or
+  *off* for the old one-click game. Your browser remembers it.
+- The guided first game teaches whichever one is turned on.
+
+## 0.2.26
+
+- **A discarded card now flies to the trash where both players can see it.** It
+  leaves the hand face up, hangs for a beat with a "discarded" tag on it, and
+  lands on the owner's trash pile. Paying a `<Discard a card>` cost used to be
+  completely silent — a hand quietly got shorter, a pile quietly got taller —
+  so the only person who knew a price had been paid was the person who paid it.
+- Every way a card reaches the trash from a hand plays it: a cost you chose to
+  pay, an opponent's "discard 1", or a card that made you throw something away.
+  Items and Traps keep their own spotlight instead, since they already show
+  themselves on the way through.
+
+## 0.2.25
+
+- **Your turn now stops on the support phase.** Instead of the free support card
+  being one option among twenty that you could scroll past and forget, the turn
+  opens by asking for it: your hand is the only thing you can act on, and the
+  prompt reads "place 1 card from your hand as support, or pass to your main
+  phase".
+- **Pass to main phase** sits in the middle of the table where End turn usually
+  is, and takes one click to move on with the card kept in hand. Place a support
+  instead and the step closes the same way — either way the rest of the turn
+  comes straight back.
+- The round track follows along: **Support** lights up as *now* while the step
+  is open, and settles to *done* when you place one or *passed* when you skip it.
+- Changed your mind after passing? The card's own menu still offers **Place as
+  support** for the rest of that turn — the step is a reminder, not a lock.
+
+## 0.2.24
+
+- **New: a Learn button that teaches you the game while you play it.** It deals
+  a real match against the bot and walks you through it — the toss, the
+  mulligan, your opening Cookie, what each part of the mat is for, then one
+  instruction at a time: place a support, put a second Cookie out, end the turn,
+  swing. Each step waits for you to actually do the thing rather than for a
+  Next button.
+- It never takes the controls off you. Nothing is blocked, nothing is played for
+  you, and doing something else instead is fine — the tutorial notices and moves
+  on with you. **Skip this** walks past any step, **End tutorial** closes it.
+- It also speaks up the first time the game asks something new: a block, a trap
+  window, a strip of cards to pick from, an optional cost in angle brackets.
+- It copes with a first game going its own way — losing the toss, or never
+  drawing a second Cookie — instead of getting stuck waiting for a moment that
+  is not coming.
+
+## 0.2.23
+
+- **A Cookie arriving on the board is now a real moment.** Its card comes up
+  large in the middle of the board, long enough to actually read the name and
+  the text, then dives into the slot it is about to fill and slams into it —
+  spheres in the Cookie's own colour thrown off the card's edges and dust
+  dragged out along the table. Every arrival gets it,
+  whether the Cookie came from your hand, the trash, the break area, the
+  support area or the 【EXTRA】 deck.
+- The card lands at exactly the size and place of the slot it is going into, so
+  it hands over to the real board without a blink.
+- A Cookie being called in has its own sound: a rising swell while the card is
+  up, and a thump when it lands.
+- Bots wait for the new animation to finish before moving again, so nothing is
+  played over the top of an arriving Cookie.
+
 ## 0.2.22
 
 - **The seven 【EXTRA】 cards now play their full text.** Last version gave them
