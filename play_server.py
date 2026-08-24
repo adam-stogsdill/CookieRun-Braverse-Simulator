@@ -68,6 +68,7 @@ from braverse.rps import CHOICES, THROWS, decide_first_player
 from braverse.state import CardInstance, Cookie, GameState
 
 import desktop
+import rendezvous as RZ
 import tunnel as TUN
 
 ROOT = Path(__file__).resolve().parent
@@ -75,6 +76,10 @@ VIEWER = ROOT / "viewer"
 IMAGES = ROOT / "card_images"
 CARD_DIR = "card_images"
 ICON_NAME = "ginger_brave_icon.ico"
+# The same face in the format each window backend can actually read: WinForms
+# takes a .ico and nothing else, every other backend wants a bitmap and draws
+# the .ico badly or not at all.
+ICON_PNG = "ginger_brave_icon.png"
 
 # Frozen by PyInstaller (see braverse.spec), ROOT is the throwaway directory the
 # bundle unpacks into — fine for the assets baked in, useless for the decklists
@@ -97,6 +102,17 @@ def card_image(name: str) -> Path:
     return mine if mine.is_file() else IMAGES / name
 
 WINDOWS = os.name == "nt"
+
+
+def window_icon() -> Optional[str]:
+    """The icon file a native window should wear, or None if it is missing.
+
+    A frozen build carries both next to the bundled assets (see
+    `braverse.spec`); a checkout has them at the top of the tree. Either way
+    this is the same picture the tab shows as its favicon.
+    """
+    found = ROOT / (ICON_NAME if WINDOWS else ICON_PNG)
+    return str(found) if found.is_file() else None
 
 
 
@@ -142,6 +158,46 @@ LAN_URLS: list[str] = []
 # the hostname requests arriving through it will carry.
 PUBLIC_URL = ""
 PUBLIC_HOST = ""
+# The listener the tunnel reaches and the tunnel itself, once either exists.
+# Module-level because `--online` is no longer the only thing that opens them:
+# hosting a peer game asks for a tunnel too (see `ensure_public`), and both
+# routes have to end up with the same one rather than a second of each.
+PUBLIC_SERVER = None
+PUBLIC_LINK = None
+PUBLIC_LOCK = threading.Lock()
+# Offers waiting to be collected by whoever was sent the code (rendezvous.py).
+SIGNAL_BOARD = RZ.Board()
+
+
+def ensure_public() -> str:
+    """The public address of this machine, opening a tunnel if there is none.
+
+    `--online` opens one at startup because a room is meant to be joinable for
+    the whole session. A peer game only needs one for the few seconds the two
+    browsers take to find each other, and asking someone to have remembered a
+    flag before they can play with a friend is a bad trade — so this exists,
+    and either route is satisfied by whichever ran first.
+
+    Raises `TUN.TunnelError` with something worth reading if the machine has no
+    tunnel client, which is the one case the caller has to explain rather than
+    retry.
+    """
+    global PUBLIC_URL, PUBLIC_HOST, PUBLIC_SERVER, PUBLIC_LINK
+    with PUBLIC_LOCK:
+        if PUBLIC_URL and PUBLIC_LINK is not None and PUBLIC_LINK.alive:
+            return PUBLIC_URL
+        if PUBLIC_URL and PUBLIC_LINK is None:
+            return PUBLIC_URL          # opened by main; not ours to second-guess
+        PublicHandler.app = Handler.app
+        server = PUBLIC_SERVER
+        if server is None:
+            server = Viewer(("127.0.0.1", 0), PublicHandler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        link = TUN.open_tunnel(server.server_address[1])
+        PUBLIC_SERVER, PUBLIC_LINK = server, link
+        PUBLIC_URL = link.url.rstrip("/") + "/"
+        PUBLIC_HOST = link.host
+        return PUBLIC_URL
 
 # What a stranger who followed an invite link may ask for.
 #
@@ -162,6 +218,12 @@ PUBLIC_ROUTES = frozenset({
     "/api/cardnames", "/api/card", "/api/pool",
     "/api/room/join", "/api/room/leave", "/api/room/rematch",
     "/api/choose",
+    # How a peer game is arranged: the joiner's *machine* collects the offer a
+    # code points at and hands its answer back. Both are reachable by anyone
+    # holding the code, which is the point of a code — and neither touches the
+    # game, only the few kilobytes two browsers need to find each other. Once
+    # they have, the tunnel is not in the picture at all.
+    "/api/signal/offer", "/api/signal/answer",
 })
 
 # Hostnames a request may claim to have been sent to. A browser tricked into
@@ -2790,6 +2852,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, b"bad path", "text/plain")
                 return
             self._file(card_image(name), cache=True)
+        elif path == "/api/signal/offer":
+            # Reached by the *other player's machine*, holding a code. Rate
+            # limited on its own account: a key is six characters out of an
+            # unambiguous alphabet, which is a billion, but a route a stranger
+            # can call in a loop should cost them something regardless.
+            if not JOIN_LIMIT.allow(self._client()):
+                self._json({"error": "too many requests; slow down"}, 429)
+                return
+            found = SIGNAL_BOARD.offer_for(self._query().get("key", ""))
+            if found is None:
+                # A wrong key and an expired game are the same answer, so a
+                # stranger cannot use this to learn which keys exist.
+                self._json({"error": "no game with that code"}, 404)
+                return
+            self._json({"offer": found.offer})
+        elif path == "/api/peer/answer":
+            # The host's own browser, waiting for the reply to be collected.
+            key = self._query().get("key", "")
+            self._json({"answer": SIGNAL_BOARD.take_answer(key)})
         elif path == "/api/peer/out":
             # Held rather than polled: a decision the other player is waiting
             # on must leave as soon as our seat produces it.
@@ -3140,6 +3221,64 @@ class Handler(BaseHTTPRequestHandler):
                     write_saved_decks(decks)
             except OSError as exc:
                 self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
+                return
+            self._json({"ok": True})
+        elif path == "/api/signal/answer":
+            # The other player's machine, handing back what it answered with.
+            key = str(body.get("key") or "")
+            answer = str(body.get("answer") or "")
+            if not answer or len(answer) > RZ.MAX_SIGNAL:
+                self._json({"error": "no answer in that"}, 400)
+                return
+            if not SIGNAL_BOARD.answer(key, answer):
+                self._json({"error": "no game with that code, or somebody "
+                                     "else already joined it"}, 404)
+                return
+            self._json({"ok": True})
+        elif path == "/api/peer/publish":
+            # Host: put our offer somewhere the code can point at, and hand
+            # back the code. Opening the tunnel is what can actually fail here,
+            # and it fails with advice rather than a stack trace.
+            offer = str(body.get("offer") or "")
+            if not offer or len(offer) > RZ.MAX_SIGNAL:
+                self._json({"error": "no offer in that"}, 400)
+                return
+            try:
+                public = ensure_public()
+            except TUN.TunnelError as exc:
+                # `INSTALL_HINT` is written for `--online` and talks about
+                # rooms, which is the wrong advice in front of someone who was
+                # trying to start a peer game. Same requirement, said for what
+                # they were actually doing.
+                missing = not TUN.available()
+                self._json({"error": TUN.PEER_HINT if missing else str(exc)}, 503)
+                return
+            key = SIGNAL_BOARD.publish(offer)
+            try:
+                code = RZ.format_code(public, key)
+            except RZ.RendezvousError as exc:
+                self._json({"error": str(exc)}, 500)
+                return
+            self._json({"code": code, "key": key})
+        elif path == "/api/peer/collect":
+            # Joiner: go and fetch the offer the code points at. Done here
+            # rather than in the browser because a browser reaching another
+            # machine's tunnel is a cross-origin request, and opening CORS for
+            # it would let any page anyone visits talk to this server.
+            try:
+                base, key = RZ.parse_code(str(body.get("code") or ""))
+                offer = RZ.fetch_offer(base, key)
+            except RZ.RendezvousError as exc:
+                self._json({"error": str(exc)}, 400)
+                return
+            self._json({"offer": offer, "key": key})
+        elif path == "/api/peer/reply":
+            # Joiner: hand our answer back to the machine that published.
+            try:
+                base, key = RZ.parse_code(str(body.get("code") or ""))
+                RZ.send_answer(base, key, str(body.get("answer") or ""))
+            except RZ.RendezvousError as exc:
+                self._json({"error": str(exc)}, 400)
                 return
             self._json({"ok": True})
         elif path == "/api/peer/new":
@@ -3553,7 +3692,8 @@ def main() -> None:
 
     if windowed:
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
-        backend = desktop.open_window(local, on_close=httpd.shutdown)
+        backend = desktop.open_window(local, on_close=httpd.shutdown,
+                                      icon=window_icon())
         if not backend:
             # Asked for a window on a machine that cannot draw one: say so
             # rather than serving a game nobody can see.

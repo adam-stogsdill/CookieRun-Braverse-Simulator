@@ -182,25 +182,19 @@
     </div>
 
     <div id="peer-step-host" class="peer-step hidden">
-      <label>1. Send this code to the other player
-        <textarea id="peer-offer" rows="3" readonly></textarea>
+      <label>Send this code to the other player
+        <input id="peer-code" readonly>
       </label>
       <button id="peer-copy" class="ghost" type="button">Copy</button>
-      <label>2. Paste the code they send back
-        <textarea id="peer-answer" rows="3" placeholder="their reply code"></textarea>
-      </label>
-      <button id="peer-accept" class="primary" type="button">Start the game</button>
+      <p class="peer-hint">They pick <b>I was sent a code</b> and type it in.
+        The game starts by itself — there is nothing to send back.</p>
     </div>
 
     <div id="peer-step-guest" class="peer-step hidden">
-      <label>1. Paste the code you were sent
-        <textarea id="peer-offer-in" rows="3" placeholder="their code"></textarea>
+      <label>The code you were sent
+        <input id="peer-code-in" placeholder="c.K7QP9X.four-word-address" autocomplete="off">
       </label>
-      <button id="peer-reply" class="primary" type="button">Make my reply code</button>
-      <label>2. Send this back to them
-        <textarea id="peer-answer-out" rows="3" readonly></textarea>
-      </label>
-      <button id="peer-copy-answer" class="ghost" type="button">Copy</button>
+      <button id="peer-go" class="primary" type="button">Join the game</button>
     </div>
 
     <div class="peer-foot">

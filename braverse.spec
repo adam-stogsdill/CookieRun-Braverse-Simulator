@@ -51,6 +51,10 @@ else:
 # in the installer as an .icns and lands on the .app bundle it creates. The
 # game also serves this file as its favicon (`/icon.ico`).
 ICON = ROOT / "ginger_brave_icon.ico"
+# The bitmap twin of it. A native window (`desktop.py`) draws its Dock tile and
+# taskbar button from a file, not from the favicon and not from the icon
+# compiled into the .exe, and only WinForms can read a .ico — so both travel.
+ICON_PNG = ROOT / "ginger_brave_icon.png"
 exe_icon = str(ICON) if (ICON.exists() and sys.platform == "win32") else None
 
 decklists = [(str(p), ".") for p in sorted(ROOT.glob("*.txt"))]
@@ -74,6 +78,7 @@ if STAGE == "game":
             (str(ROOT / "viewer"), "viewer"),
             (str(ROOT / "braverse_cards.csv"), "."),
             *([(str(ICON), ".")] if ICON.exists() else []),
+            *([(str(ICON_PNG), ".")] if ICON_PNG.exists() else []),
             *decklists,
             *images,
             *web_datas,

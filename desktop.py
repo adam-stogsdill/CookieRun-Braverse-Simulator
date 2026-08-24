@@ -47,11 +47,23 @@ def available() -> bool:
     return have_webview() or _chromium() is not None
 
 
-def run_webview(url: str, on_close: Optional[Callable[[], None]] = None) -> None:
+def run_webview(url: str, on_close: Optional[Callable[[], None]] = None,
+                icon: Optional[str] = None) -> None:
     """Open a native window on ``url`` and block until it is closed.
 
     Must be called from the main thread — every OS web view insists on it —
     which is why the caller serves HTTP on a thread instead.
+
+    ``icon`` is the face the *running* game wears — the Dock tile on macOS and
+    the taskbar button and title bar on Windows. It has to be passed here even
+    though the binary already carries the icon and the page already serves a
+    favicon: a web view is not a browser tab, so it never reads the favicon,
+    and a pywebview window builds its own NSApplication/Form, so it does not
+    inherit the icon compiled into the executable either. Without this the
+    game launches from a shortcut that has the right icon and then shows a
+    generic one the whole time it is open. pywebview documents `icon` as
+    GTK/QT-only; it is honoured on the Cocoa and WinForms backends too, and a
+    backend that ignores it is no worse than not passing it.
     """
     import webview
 
@@ -60,7 +72,12 @@ def run_webview(url: str, on_close: Optional[Callable[[], None]] = None) -> None
     )
     if on_close is not None:
         window.events.closed += lambda: on_close()
-    webview.start()
+    # `start(icon=...)` only exists in pywebview 4+; an older copy takes the
+    # window and no icon rather than none of it.
+    try:
+        webview.start(icon=icon) if icon else webview.start()
+    except TypeError:
+        webview.start()
 
 
 # Where a Chromium-family browser lives, per platform. Windows is a product of
@@ -164,16 +181,19 @@ def close_window() -> None:
         _proc.terminate()
 
 
-def open_window(url: str, on_close: Optional[Callable[[], None]] = None) -> str:
+def open_window(url: str, on_close: Optional[Callable[[], None]] = None,
+                icon: Optional[str] = None) -> str:
     """Show ``url`` in a window, blocking until it closes.
 
     Returns which backend was used: ``"webview"``, ``"app"``, or ``""`` when
     the machine has neither and the caller should keep serving to a browser.
-    ``on_close`` runs once the window is gone, either way.
+    ``on_close`` runs once the window is gone, either way. ``icon`` is the
+    game's face for the native window; the browser window below takes it from
+    the page's favicon and needs nothing here.
     """
     if have_webview():
         try:
-            run_webview(url, on_close)
+            run_webview(url, on_close, icon)
             return "webview"
         except Exception as exc:
             # pywebview *imports* on any platform but only *runs* where its

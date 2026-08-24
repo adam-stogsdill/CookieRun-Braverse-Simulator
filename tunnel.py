@@ -45,6 +45,19 @@ from urllib.parse import urlsplit
 # takes a couple of seconds to pick an edge; ngrok is usually quicker.
 STARTUP_TIMEOUT = 30.0
 
+# The same requirement, said for the other thing that needs a tunnel. Playing
+# someone directly needs a client on *one* machine only — whoever starts the
+# game — which is worth saying, because "you both need to install something"
+# would be a much bigger ask and is not the ask.
+PEER_HINT = (
+    "playing someone directly needs a tunnel client on this computer, so the "
+    "other player has somewhere to collect the invitation from. Only you need "
+    "it; they need nothing.\n"
+    "    cloudflared   brew install cloudflared      (no account needed)\n"
+    "    ngrok         brew install ngrok            (free account, one-time "
+    "`ngrok config add-authtoken …`)"
+)
+
 INSTALL_HINT = (
     "no tunnel client found — --online needs one of:\n"
     "    cloudflared   brew install cloudflared      (no account needed)\n"

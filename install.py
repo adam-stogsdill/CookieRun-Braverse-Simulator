@@ -322,6 +322,10 @@ def windows_shortcut_script(installed: Path, link: Path) -> str:
         # keeps its decks and profiles beside the *executable* — so this line
         # is not cosmetic, it is where a shortcut-launched game saves things.
         f"$s.WorkingDirectory = '{installed.parent}'\n"
+        # A .lnk shows the target's icon on its own, until something in the
+        # shell's cache says otherwise — naming it costs a line and takes that
+        # "until" away.
+        f"$s.IconLocation = '{installed},0'\n"
         f"$s.Description = '{APP_NAME}'\n"
         "$s.Save()\n"
     )
@@ -398,6 +402,10 @@ def macos_app(installed: Path, where: Path | None = None) -> list[Path]:
         resources = app / "Contents" / "Resources"
         resources.mkdir(parents=True, exist_ok=True)
         shutil.copy2(art, resources / ICON_NAME)
+        # copy2 keeps the mode, and a file unpacked from a frozen installer is
+        # 0600 — readable by whoever installed and by nobody else, which is a
+        # bundle with no icon for the second account on the machine.
+        (resources / ICON_NAME).chmod(0o644)
         icon_key = f"\n  <key>CFBundleIconFile</key><string>{ICON_NAME}</string>"
     write_text(app / "Contents" / "Info.plist",
                MAC_PLIST.format(app=APP_NAME, icon=icon_key))
@@ -406,6 +414,11 @@ def macos_app(installed: Path, where: Path | None = None) -> list[Path]:
     # executable, and a bundle launched from the Dock starts at /.
     write_text(launcher, f'#!/bin/sh\ncd "{installed.parent}"\nexec "{installed}" "$@"\n')
     launcher.chmod(0o755)
+    # Finder caches a bundle's icon against the bundle's own modification date,
+    # and writing files *inside* it does not move that date — so re-installing
+    # over an .app that once had no icon leaves the old blank one on screen
+    # until something else touches it. Touching it is the whole fix.
+    os.utime(app, None)
     return [app]
 
 

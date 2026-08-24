@@ -191,6 +191,21 @@ def check_lean(py: Path) -> None:
 
 
 ICON = "ginger_brave_icon.ico"
+ICON_PNG = "ginger_brave_icon.png"
+
+
+def image_size(path: Path) -> tuple[int, int] | None:
+    """`(width, height)` of an image, via the `sips` every Mac has."""
+    out = subprocess.run(["sips", "-g", "pixelWidth", "-g", "pixelHeight",
+                          str(path)], capture_output=True, text=True).stdout
+    dims = {}
+    for line in out.splitlines():
+        key, _, value = line.strip().partition(": ")
+        if key in ("pixelWidth", "pixelHeight") and value.isdigit():
+            dims[key] = int(value)
+    if len(dims) != 2:
+        return None
+    return dims["pixelWidth"], dims["pixelHeight"]
 
 
 def macos_icns(work: Path) -> Path | None:
@@ -199,11 +214,12 @@ def macos_icns(work: Path) -> Path | None:
     Not a nicety: a one-file binary on macOS is drawn with a generic icon
     whatever is inside it, so the `.app` the installer creates is the only
     thing that can wear the game's face — and `iconutil` will only build one
-    from a folder of *square* PNGs. The source here is 32x29, so it is padded
-    square and scaled up; a bigger square source would look better and nothing
-    else would have to change.
+    from a folder of *square* PNGs — which is what `ginger_brave_icon.png` is,
+    the square 512px twin of the 32x29 .ico kept beside it.
     """
-    source = ROOT / ICON
+    source = ROOT / ICON_PNG
+    if not source.exists():           # older checkout: fall back to the .ico
+        source = ROOT / ICON
     if platform.system() != "Darwin" or not source.exists():
         return None
     if not shutil.which("sips") or not shutil.which("iconutil"):
@@ -216,11 +232,14 @@ def macos_icns(work: Path) -> Path | None:
     iconset.mkdir(parents=True)
     square = work / "square.png"
     quiet = {"capture_output": True}
-    # Two steps, because `sips` reads the .ico but pads and scales separately:
-    # -p sets the canvas (transparent), -z resizes into it.
+    # Two steps, because `sips` reads the source but pads and scales
+    # separately: -p sets the canvas (transparent), -z resizes into it. The
+    # pad is a no-op on an already-square source and the whole of what makes a
+    # non-square one usable, so it runs either way.
     subprocess.run(["sips", "-s", "format", "png", str(source),
                     "--out", str(square)], **quiet)
-    subprocess.run(["sips", "-p", "32", "32", str(square),
+    side = max(image_size(square) or (32, 32))
+    subprocess.run(["sips", "-p", str(side), str(side), str(square),
                     "--out", str(square)], **quiet)
     for size in (16, 32, 64, 128, 256, 512, 1024):
         subprocess.run(["sips", "-z", str(size), str(size), str(square),

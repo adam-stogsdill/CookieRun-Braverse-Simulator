@@ -3,8 +3,8 @@
  * A room (see `Room` in play_server.py) puts one machine in charge of the game
  * and has the other talk to it over HTTP. This is the other arrangement
  * entirely: both people run the engine, an RTCDataChannel carries the
- * decisions between them, and nobody hosts anything. No port is opened, no
- * tunnel is dialled, and no address of yours is handed to a stranger.
+ * decisions between them, and nobody hosts anything. No port is opened on the
+ * router, and the game itself never travels through anyone else's machine.
  *
  * This file is only the wire. It never reads a decision and never decides
  * anything about the game — it moves opaque messages between the data channel
@@ -20,10 +20,13 @@
  * playing — this one is safe against the network, which is a different and
  * smaller claim, and the UI says so rather than letting anyone assume more.
  *
- * Signalling is done by hand: the two of you swap a code over whatever you
- * already trust to talk to each other. That is not a limitation worked around,
- * it is the feature — a signalling server would be one more thing to run, to
- * trust, and to keep online, and the exchange happens exactly once per game. */
+ * Arranging the game is the one part that cannot be peer-to-peer, because two
+ * browsers that have never met cannot describe themselves to each other out of
+ * nothing. The host therefore publishes its offer behind its own tunnel and
+ * the code says where to collect it — see `rendezvous.py`. That lasts only the
+ * seconds it takes the two browsers to find each other; from then on the
+ * tunnel is not in the picture, and could be shut down without the game
+ * noticing. The player never sees a session description at all. */
 
 /* Public STUN, needed only to discover how this machine looks from outside a
  * NAT. It carries no game data and learns nothing but that an address asked.
@@ -31,19 +34,13 @@
  * to reach it is not fatal here. */
 const PEER_ICE = [{ urls: "stun:stun.l.google.com:19302" }];
 
-/* Said the same way wherever a code turns out not to have arrived whole, since
- * the remedy is always the same and never the one the raw error suggests. */
-const PEER_INCOMPLETE =
-  "that code did not arrive in one piece — copy it with the Copy button and "
-  + "paste the whole thing, all of it on one line";
-
 const Peer = {
-  INCOMPLETE: PEER_INCOMPLETE,
   pc: null,
   channel: null,
   seat: null,
   on: false,
   status: "",
+  key: "",            // the rendezvous key our offer was published under
   playing: false,     // the engine has a match, not just a lobby waiting
   watching: null,     // the setting-up watchdog, while there is no pump yet
   inbox: [],          // messages from the channel, waiting to be posted inward
@@ -86,98 +83,14 @@ const Peer = {
     }
   },
 
-  /* -- signalling codes ------------------------------------------------- */
-
-  /** A description as a code short enough to paste into a chat window.
-   *
-   * Raw SDP is a few kilobytes of text, which is a miserable thing to send
-   * someone. Gzip takes it to a few hundred bytes where the browser has
-   * `CompressionStream`, and where it does not the code is merely long rather
-   * than broken — worth the branch, since being unable to start a game at all
-   * would be the alternative. */
-  async encode(description) {
-    const json = JSON.stringify({ t: description.type, s: description.sdp });
-    const bytes = new TextEncoder().encode(json);
-    const packed = await Peer.gzip(bytes);
-    return (packed ? "z" : "p") + Peer.base64(packed || bytes);
-  },
-
-  /** A code back into a description, saying plainly when it is not one.
-   *
-   * Every failure here is one of two things and they need different advice:
-   * the text is not a code at all, or it is a code that did not arrive whole.
-   * The second is much the commoner — these are ~700 characters in a
-   * three-row box, so a drag-select takes a fragment, and chat clients
-   * helpfully truncate long strings — and it used to surface as
-   * `TypeError: Failed to fetch`, because a corrupt gzip stream errors the
-   * body and `Response.arrayBuffer` reports that the way it reports a dead
-   * network. Three words, no relation to the actual problem, and they sent
-   * people looking at their server instead of their clipboard. */
-  async decode(code) {
-    const body = String(code || "").trim().replace(/\s+/g, "");
-    if (!body) throw new Error("no code was pasted");
-    if (!"zp".includes(body[0]) || body.length < 24) {
-      throw new Error("that does not look like a game code — it should be one "
-                      + "long unbroken line starting with z");
-    }
-    let bytes;
-    try {
-      bytes = Peer.unbase64(body.slice(1));
-    } catch (err) {
-      throw new Error(Peer.INCOMPLETE);
-    }
-    let raw;
-    try {
-      raw = body[0] === "z" ? await Peer.gunzip(bytes) : bytes;
-    } catch (err) {
-      throw new Error(Peer.INCOMPLETE);
-    }
-    let blob;
-    try {
-      blob = JSON.parse(new TextDecoder().decode(raw));
-    } catch (err) {
-      throw new Error(Peer.INCOMPLETE);
-    }
-    if (!blob || !blob.s) throw new Error(Peer.INCOMPLETE);
-    return { type: blob.t, sdp: blob.s };
-  },
-
-  async gzip(bytes) {
-    if (typeof CompressionStream === "undefined") return null;
-    try {
-      const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream("gzip"));
-      return new Uint8Array(await new Response(stream).arrayBuffer());
-    } catch (err) { return null; }
-  },
-
-  async gunzip(bytes) {
-    if (typeof DecompressionStream === "undefined") {
-      throw new Error("this browser cannot read a compressed code");
-    }
-    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
-  },
-
-  base64(bytes) {
-    let out = "";
-    for (const byte of bytes) out += String.fromCharCode(byte);
-    return btoa(out).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  },
-
-  unbase64(text) {
-    const padded = text.replace(/-/g, "+").replace(/_/g, "/");
-    const raw = atob(padded + "=".repeat((4 - padded.length % 4) % 4));
-    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
-  },
-
   /* -- the connection --------------------------------------------------- */
 
   /** Wait until every candidate is in the description we are about to show.
    *
    * The alternative — trickle ICE — means a second channel to carry the later
-   * candidates on, and there is no second channel here: the whole exchange is
-   * one code, pasted once. Gathering fully up front is what makes that
-   * possible, at the cost of a couple of seconds before the code appears. */
+   * candidates on, and there is no second channel here: the offer is published
+   * once, whole. Gathering fully up front is what makes that possible, at the
+   * cost of a couple of seconds before the code appears. */
   settled(pc) {
     if (pc.iceGatheringState === "complete") return Promise.resolve();
     return new Promise((resolve) => {
@@ -202,7 +115,6 @@ const Peer = {
     return pc;
   },
 
-  /** Everything that makes the channel usable once it is open. */
   /** Wire up a channel — however far along it already is.
    *
    * The `open` event is not something to wait for, because it may already have
@@ -289,49 +201,90 @@ const Peer = {
 
   /* -- starting a game --------------------------------------------------- */
 
-  /** Host: build the offer code, and hold it out to be pasted elsewhere. */
+  /** Host: publish an offer behind this machine's tunnel, and name the code.
+   *
+   * The player never sees a session description. The tunnel is opened on
+   * demand — no flag to have remembered — and torn down as far as the game is
+   * concerned the moment the two browsers are talking, because gameplay does
+   * not go through it. All the code carries is where to collect the offer.
+   */
   async host(deck, name) {
     const started = await Peer.reach("/api/peer/new", { host: true, deck, name });
     if (started.error) { Peer.fail(started.error); return null; }
     Peer.begin(0);
     const pc = Peer.fresh();
-    // The host opens the channel; the joiner picks it up from `ondatachannel`.
     // Ordered and reliable are the defaults and are load-bearing — `netplay`
-    // is counting decisions, so a dropped or reordered message is a desync.
+    // counts decisions, so a dropped or reordered message is a desync.
     Peer.adopt(pc.createDataChannel("braverse", { ordered: true }));
     await pc.setLocalDescription(await pc.createOffer());
     await Peer.settled(pc);
-    return Peer.encode(pc.localDescription);
+
+    const put = await Peer.reach("/api/peer/publish",
+                                 { offer: JSON.stringify(pc.localDescription) });
+    if (put.error) { Peer.fail(put.error); return null; }
+    Peer.key = put.key;
+    Peer.waitForJoiner();
+    return put.code;
   },
 
-  /** Host: take the joiner's answer code and the game is on. */
-  async accept(code) {
-    if (!Peer.pc) throw new Error("start a game first");
-    await Peer.pc.setRemoteDescription(await Peer.decode(code));
+  /** Watch for the other player collecting the offer and answering it.
+   *
+   * A poll rather than anything cleverer: this runs for the seconds or minutes
+   * between sending a code and someone acting on it, exactly once per game,
+   * and stops the moment an answer lands. */
+  async waitForJoiner() {
+    while (Peer.on && Peer.pc && !Peer.pc.currentRemoteDescription) {
+      let got;
+      try {
+        got = await Peer.reach(`/api/peer/answer?key=${encodeURIComponent(Peer.key)}`);
+      } catch (err) {
+        Peer.fail(err.message || String(err));
+        return;
+      }
+      if (got && got.answer) {
+        try {
+          await Peer.pc.setRemoteDescription(JSON.parse(got.answer));
+          Peer.note("connecting…");
+        } catch (err) {
+          Peer.fail("the other player's reply did not make sense");
+        }
+        return;
+      }
+      await new Promise((done) => setTimeout(done, 1500));
+    }
   },
 
-  /** Joiner: take the host's offer code, and give back an answer code. */
+  /** Joiner: one code in, and the rest happens without them.
+   *
+   * Our own machine collects the offer and hands back the answer, so nothing
+   * has to come back to the person who sent the code. */
   async join(code, deck, name) {
-    const offer = await Peer.decode(code);      // before anything is committed
+    const got = await Peer.reach("/api/peer/collect", { code });
+    if (got.error) { Peer.fail(got.error); return false; }
+
     const started = await Peer.reach("/api/peer/new", { host: false, deck, name });
-    if (started.error) { Peer.fail(started.error); return null; }
+    if (started.error) { Peer.fail(started.error); return false; }
     Peer.begin(1);
     const pc = Peer.fresh();
     pc.addEventListener("datachannel", (event) => Peer.adopt(event.channel));
-    await pc.setRemoteDescription(offer);
+    await pc.setRemoteDescription(JSON.parse(got.offer));
     await pc.setLocalDescription(await pc.createAnswer());
     await Peer.settled(pc);
-    return Peer.encode(pc.localDescription);
+
+    const sent = await Peer.reach("/api/peer/reply",
+                                  { code, answer: JSON.stringify(pc.localDescription) });
+    if (sent.error) { Peer.fail(sent.error); return false; }
+    Peer.note("connecting…");
+    return true;
   },
 
-  /* Watch the local engine while the codes are being swapped.
+  /* Watch the local engine while the two browsers are still finding each other.
    *
    * Until the channel opens there is no pump, so nothing is reading what the
-   * engine has to say — and the setting-up phase is exactly when it has
-   * something worth saying: a deck that will not load, a peer on another
-   * build, a handshake that gave up. Without this the dialog sits on a
-   * cheerful stale line while the game behind it is already dead, which is a
-   * worse failure than the failure. Stops as soon as the pump takes over. */
+   * engine has to say — and that is exactly when it has something worth
+   * saying: a deck that will not load, a peer on another build, a handshake
+   * that gave up. Without this the dialog sits on a cheerful stale line while
+   * the game behind it is already dead. Stops as soon as the pump takes over. */
   watch() {
     if (Peer.watching) return;
     Peer.watching = setInterval(async () => {
@@ -480,7 +433,7 @@ const PeerUI = {
    * are and only a genuine decode failure gets the blame. */
   blame(err, what) {
     const message = String((err && err.message) || err);
-    return /cannot reach|answered \d|understands|one piece|look like a game code|no code was/.test(message)
+    return /cannot reach|answered \d|understands|look like a game code|not there any more|could not reach the other/.test(message)
       ? message : `${what} — ${message}`;
   },
 
@@ -508,59 +461,35 @@ const PeerUI = {
               + "press " + (navigator.platform.startsWith("Mac") ? "⌘C" : "Ctrl+C"));
   },
 
-  /** Tell someone their code is short *before* they click the button.
-   *
-   * A code that did not survive the trip is the commonest failure here, and
-   * finding out at paste time beats finding out after a round trip through a
-   * chat window. Cheap: decoding is local and takes no connection. */
-  async check(sel) {
-    const value = el(sel).value.trim();
-    if (!value) { Peer.note(""); return; }
-    try {
-      await Peer.decode(value);
-      Peer.note("that code looks complete");
-    } catch (err) {
-      Peer.note(String(err.message || err));
-    }
-  },
-
   async beHost() {
     PeerUI.showStep("host");
-    Peer.note("building your code…");
+    Peer.note("opening a way in for them…");
     try {
       const code = await Peer.host(PeerUI.deck(), PeerUI.name());
-      if (code === null) return;                 // `Peer.host` said why
-      el("#peer-offer").value = code;
-      Peer.note("send that code over, then paste their reply");
+      if (code === null) return;                 // `Peer.host` already said why
+      el("#peer-code").value = code;
+      PeerUI.copy("#peer-code");
+      Peer.note("send them that code — the game starts when they use it");
     } catch (err) {
       Peer.fail(PeerUI.blame(err, "could not start a game"));
     }
   },
 
-  async accept() {
-    try {
-      await Peer.accept(el("#peer-answer").value);
-      Peer.note("connecting…");
-    } catch (err) {
-      Peer.fail(PeerUI.blame(err, "that reply code did not work"));
-    }
-  },
-
   beGuest() {
     PeerUI.showStep("guest");
-    Peer.note("paste the code you were sent");
+    Peer.note("type the code you were sent");
+    const box = el("#peer-code-in");
+    if (box) { box.focus(); box.select(); }
   },
 
-  async reply() {
-    Peer.note("building your reply…");
+  async go() {
+    const code = el("#peer-code-in").value.trim();
+    if (!code) { Peer.fail("no code was typed"); return; }
+    Peer.note("finding that game…");
     try {
-      const code = await Peer.join(el("#peer-offer-in").value,
-                                   PeerUI.deck(), PeerUI.name());
-      if (code === null) return;
-      el("#peer-answer-out").value = code;
-      Peer.note("send that back, and the game starts on its own");
+      await Peer.join(code, PeerUI.deck(), PeerUI.name());
     } catch (err) {
-      Peer.fail(PeerUI.blame(err, "that code did not work"));
+      Peer.fail(PeerUI.blame(err, "could not join that game"));
     }
   },
 };
@@ -570,14 +499,15 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("#title-peer", () => PeerUI.open());
   bind("#peer-be-host", () => PeerUI.beHost());
   bind("#peer-be-guest", () => PeerUI.beGuest());
-  bind("#peer-accept", () => PeerUI.accept());
-  bind("#peer-reply", () => PeerUI.reply());
-  bind("#peer-copy", () => PeerUI.copy("#peer-offer"));
-  for (const sel of ["#peer-answer", "#peer-offer-in"]) {
-    const box = el(sel);
-    if (box) box.addEventListener("input", () => PeerUI.check(sel));
+  bind("#peer-go", () => PeerUI.go());
+  bind("#peer-copy", () => PeerUI.copy("#peer-code"));
+  // Enter is what someone does after typing a code into a single box.
+  const typed = el("#peer-code-in");
+  if (typed) {
+    typed.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); PeerUI.go(); }
+    });
   }
-  bind("#peer-copy-answer", () => PeerUI.copy("#peer-answer-out"));
   /* Closing the dialog on a game that never connected has to put the player
    * back somewhere they can play from.
    *

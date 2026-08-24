@@ -1439,18 +1439,27 @@ body.online #settings-watch { display: none; }
 #peerplay .peer-roles button { flex: 1; }
 #peerplay .peer-step { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
 #peerplay .peer-step.hidden { display: none; }
-#peerplay textarea {
-  width: 100%; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace;
-  font-size: 11px; line-height: 1.4; word-break: break-all;
+/* One line, and a code is meant to be read off the screen and typed by hand
+ * on the other machine — so it is set big and monospaced rather than squeezed. */
+#peerplay input#peer-code, #peerplay input#peer-code-in {
+  width: 100%; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 15px; letter-spacing: .3px;
   background: var(--bg); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+  border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
 }
+#peerplay input#peer-code { color: var(--accent, #f0b429); }
+#peerplay .peer-hint { margin: 8px 0 0; font-size: 11px; color: var(--dim); line-height: 1.5; }
 #peerplay .peer-step button { margin-bottom: 10px; }
 #peerplay .peer-foot {
   display: flex; align-items: center; gap: 10px;
   margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
 }
-#peerplay .peer-status { flex: 1; font-size: 11px; color: var(--dim); min-height: 14px; }
+/* Some of what lands here is several lines — an install hint, for one — and a
+ * single-line box would show the first line and swallow the instructions. */
+#peerplay .peer-status {
+  flex: 1; font-size: 11px; color: var(--dim); min-height: 14px;
+  white-space: pre-line; line-height: 1.5;
+}
 /* A handshake that failed must not read like one still in progress. */
 #peerplay .peer-status.bad { color: var(--bad); }
 

@@ -314,3 +314,118 @@ def test_no_peer_route_is_reachable_from_the_internet(path):
     """
     from play_server import PUBLIC_ROUTES
     assert path not in PUBLIC_ROUTES
+
+
+# ---------------------------------------------------------------------------
+# arranging a game from one short code
+# ---------------------------------------------------------------------------
+# `rendezvous.py` covers the code format; what is left is the exchange those
+# codes arrange — the routes the *other player's machine* calls, which are the
+# only ones on this server a stranger is meant to reach.
+import rendezvous as RZ                                   # noqa: E402
+import play_server as PS                                  # noqa: E402
+
+
+@pytest.fixture
+def board():
+    """A clean board of published offers around each test."""
+    PS.SIGNAL_BOARD = RZ.Board()
+    yield PS.SIGNAL_BOARD
+    PS.SIGNAL_BOARD = RZ.Board()
+
+
+def test_the_offer_a_code_points_at_can_be_collected(base, board):
+    key = board.publish("v=0 the offer")
+    status, got = call(base, f"/api/signal/offer?key={key}")
+    assert status == 200 and got["offer"] == "v=0 the offer"
+
+
+def test_the_answer_finds_its_way_back_over_http(base, board):
+    key = board.publish("v=0 offer")
+    status, got = call(base, "/api/signal/answer",
+                       {"key": key, "answer": "v=0 answer"})
+    assert status == 200 and got.get("ok")
+    assert board.take_answer(key) == "v=0 answer"
+
+
+def test_the_host_polls_for_the_answer_on_its_own_route(base, board):
+    key = board.publish("v=0 offer")
+    assert call(base, f"/api/peer/answer?key={key}")[1]["answer"] == ""
+    board.answer(key, "v=0 answer")
+    assert call(base, f"/api/peer/answer?key={key}")[1]["answer"] == "v=0 answer"
+
+
+def test_a_wrong_key_is_indistinguishable_from_an_expired_game(base, board):
+    board.publish("v=0 offer")
+    status, got = call(base, "/api/signal/offer?key=ZZZZZZ")
+    assert status == 404 and "no game with that code" in got["error"]
+
+
+def test_a_second_joiner_cannot_take_a_seat_already_answered(base, board):
+    key = board.publish("v=0 offer")
+    assert call(base, "/api/signal/answer", {"key": key, "answer": "first"})[1].get("ok")
+    status, got = call(base, "/api/signal/answer", {"key": key, "answer": "second"})
+    assert status == 404 and got.get("error")
+    assert board.take_answer(key) == "first"
+
+
+def test_an_empty_answer_is_not_an_answer(base, board):
+    key = board.publish("v=0 offer")
+    assert call(base, "/api/signal/answer", {"key": key, "answer": ""})[0] == 400
+
+
+def test_an_absurdly_large_signal_is_refused(base, board):
+    key = board.publish("v=0 offer")
+    huge = "x" * (RZ.MAX_SIGNAL + 1)
+    assert call(base, "/api/signal/answer", {"key": key, "answer": huge})[0] == 400
+    assert call(base, "/api/peer/publish", {"offer": huge})[0] == 400
+
+
+def test_publishing_without_a_tunnel_client_says_how_to_get_one(base, board, monkeypatch):
+    """The one failure a player has to act on, so it cannot be a stack trace."""
+    monkeypatch.setattr(PS, "ensure_public",
+                        lambda: (_ for _ in ()).throw(TUN_ERROR))
+    status, got = call(base, "/api/peer/publish", {"offer": "v=0"})
+    assert status == 503
+    assert "cloudflared" in got["error"]
+
+
+TUN_ERROR = __import__("tunnel").TunnelError(__import__("tunnel").INSTALL_HINT)
+
+
+def test_a_joiner_collects_and_replies_through_its_own_machine(base, board, monkeypatch):
+    """The joiner's server is the one that talks to the host, never the browser.
+
+    A browser reaching another machine's tunnel is a cross-origin request, and
+    opening CORS wide enough for it would let any page anyone visits talk to
+    this server. So `collect` and `reply` are server-side, and this drives them
+    with the far machine's HTTP standing in for a tunnel.
+    """
+    key = board.publish("v=0 the offer")
+    monkeypatch.setattr(RZ, "parse_code", lambda code: (base, key))
+
+    status, got = call(base, "/api/peer/collect", {"code": "c.KEY.whatever"})
+    assert status == 200 and got["offer"] == "v=0 the offer"
+
+    status, got = call(base, "/api/peer/reply",
+                       {"code": "c.KEY.whatever", "answer": "v=0 the answer"})
+    assert status == 200 and got.get("ok")
+    assert board.take_answer(key) == "v=0 the answer"
+
+
+def test_a_mistyped_code_is_explained_rather_than_fetched(base, board):
+    status, got = call(base, "/api/peer/collect", {"code": "not a code"})
+    assert status == 400 and "game code" in got["error"]
+
+
+@pytest.mark.parametrize("path", ["/api/signal/offer", "/api/signal/answer"])
+def test_the_signalling_routes_are_the_ones_a_stranger_may_reach(path):
+    """Everything else about a peer game stays off the internet."""
+    assert path in PS.PUBLIC_ROUTES
+
+
+@pytest.mark.parametrize("path", ["/api/peer/publish", "/api/peer/collect",
+                                  "/api/peer/reply", "/api/peer/answer"])
+def test_our_own_half_of_the_arrangement_is_not_public(path):
+    """These spend this machine: they open tunnels and dial out to others."""
+    assert path not in PS.PUBLIC_ROUTES

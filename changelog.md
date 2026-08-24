@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.43
+
+- **The game wears its own icon while it is running.** The window in the
+  taskbar on Windows and in the Dock on macOS now shows Ginger Brave instead of
+  a blank placeholder — the icon was on the shortcut, but the window itself had
+  never been told about it.
+- **The icon is sharp at every size.** It is now drawn from a square,
+  multi-resolution source, so the Start Menu, the Dock and the browser tab stop
+  showing a stretched 32-pixel version of it.
+- **Re-installing over an older copy no longer keeps the old blank icon** on
+  macOS, and the Windows shortcut names the icon rather than hoping the shell
+  finds it.
+
 ## 0.2.42
 
 - **The log names every card by its card number.** Lines now read "Peppermint

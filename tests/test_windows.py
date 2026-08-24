@@ -147,6 +147,38 @@ def test_close_window_is_safe_with_no_window():
     desktop.close_window()     # must not raise on a process with no window
 
 
+def test_the_native_window_is_given_the_game_s_icon(monkeypatch):
+    """A web view reads no favicon and inherits nothing from the .exe.
+
+    Without this the game is launched from a shortcut wearing the right icon
+    and then sits in the taskbar or the Dock wearing a generic one — which is
+    what a player reports as "the icon is missing".
+    """
+    passed = {}
+    monkeypatch.setattr(desktop, "have_webview", lambda: True)
+    monkeypatch.setattr(desktop, "run_webview",
+                        lambda url, on_close=None, icon=None: passed.update(icon=icon))
+    assert desktop.open_window("http://127.0.0.1:1/", None, "/tmp/x.png") == "webview"
+    assert passed["icon"] == "/tmp/x.png"
+
+
+def test_the_window_icon_is_a_format_the_backend_can_read(monkeypatch):
+    """WinForms takes a .ico and every other backend takes a bitmap."""
+    root = Path(play_server.__file__).resolve().parent
+    assert (root / play_server.ICON_NAME).is_file()
+    assert (root / play_server.ICON_PNG).is_file()
+
+    monkeypatch.setattr(play_server, "WINDOWS", True)
+    assert play_server.window_icon().endswith(".ico")
+    monkeypatch.setattr(play_server, "WINDOWS", False)
+    assert play_server.window_icon().endswith(".png")
+
+
+def test_a_missing_icon_file_is_not_an_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(play_server, "ROOT", tmp_path)
+    assert play_server.window_icon() is None
+
+
 # --- the command-line scripts ---------------------------------------------
 def test_every_script_retunes_its_output():
     """A script that prints card text must survive a cp1252 stdout.
