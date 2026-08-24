@@ -24,6 +24,12 @@
   but the time — you are back at the menu and can start something else. Closing
   it on a game that *is* under way just gets you back to the board, which is
   still there.
+- The connection panel now gets out of the way by itself once the game starts,
+  and a code that did not survive the trip says so — "that code did not arrive
+  in one piece" rather than an error about the network, which is what a
+  half-copied code used to look like. Pasting one tells you straight away
+  whether it is complete, and **Copy** takes the whole thing even where the
+  clipboard is not available.
 - Closing the tab now tells the other player, instead of leaving them waiting on
   a seat that will never move again.
 - **There is a profile now, and it is yours alone.** The chip in the corner of

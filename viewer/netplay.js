@@ -31,7 +31,14 @@
  * to reach it is not fatal here. */
 const PEER_ICE = [{ urls: "stun:stun.l.google.com:19302" }];
 
+/* Said the same way wherever a code turns out not to have arrived whole, since
+ * the remedy is always the same and never the one the raw error suggests. */
+const PEER_INCOMPLETE =
+  "that code did not arrive in one piece — copy it with the Copy button and "
+  + "paste the whole thing, all of it on one line";
+
 const Peer = {
+  INCOMPLETE: PEER_INCOMPLETE,
   pc: null,
   channel: null,
   seat: null,
@@ -95,13 +102,43 @@ const Peer = {
     return (packed ? "z" : "p") + Peer.base64(packed || bytes);
   },
 
+  /** A code back into a description, saying plainly when it is not one.
+   *
+   * Every failure here is one of two things and they need different advice:
+   * the text is not a code at all, or it is a code that did not arrive whole.
+   * The second is much the commoner — these are ~700 characters in a
+   * three-row box, so a drag-select takes a fragment, and chat clients
+   * helpfully truncate long strings — and it used to surface as
+   * `TypeError: Failed to fetch`, because a corrupt gzip stream errors the
+   * body and `Response.arrayBuffer` reports that the way it reports a dead
+   * network. Three words, no relation to the actual problem, and they sent
+   * people looking at their server instead of their clipboard. */
   async decode(code) {
-    const body = code.trim().replace(/\s+/g, "");
-    if (!body) throw new Error("that code is empty");
-    const bytes = Peer.unbase64(body.slice(1));
-    const raw = body[0] === "z" ? await Peer.gunzip(bytes) : bytes;
-    const blob = JSON.parse(new TextDecoder().decode(raw));
-    if (!blob || !blob.s) throw new Error("that does not look like a code");
+    const body = String(code || "").trim().replace(/\s+/g, "");
+    if (!body) throw new Error("no code was pasted");
+    if (!"zp".includes(body[0]) || body.length < 24) {
+      throw new Error("that does not look like a game code — it should be one "
+                      + "long unbroken line starting with z");
+    }
+    let bytes;
+    try {
+      bytes = Peer.unbase64(body.slice(1));
+    } catch (err) {
+      throw new Error(Peer.INCOMPLETE);
+    }
+    let raw;
+    try {
+      raw = body[0] === "z" ? await Peer.gunzip(bytes) : bytes;
+    } catch (err) {
+      throw new Error(Peer.INCOMPLETE);
+    }
+    let blob;
+    try {
+      blob = JSON.parse(new TextDecoder().decode(raw));
+    } catch (err) {
+      throw new Error(Peer.INCOMPLETE);
+    }
+    if (!blob || !blob.s) throw new Error(Peer.INCOMPLETE);
     return { type: blob.t, sdp: blob.s };
   },
 
@@ -166,6 +203,20 @@ const Peer = {
   },
 
   /** Everything that makes the channel usable once it is open. */
+  /** Wire up a channel — however far along it already is.
+   *
+   * The `open` event is not something to wait for, because it may already have
+   * happened. The joiner takes its channel from `ondatachannel`, and that
+   * fires with the channel *already open* often enough to be the normal case
+   * rather than a race worth ignoring — at which point an `open` listener is
+   * waiting for an event that will never come again.
+   *
+   * That was a real bug, and an unusually quiet one: the joiner's engine sends
+   * its `hello` the moment the seat is created, so it is already sitting in
+   * the outbox. Without a pump it stays there. The host's own channel opens
+   * perfectly, reports "connected", and then waits forever for a message that
+   * never left the other machine — so the side that *looks* broken is the side
+   * that is working. Hence starting the pump on state, not on an event. */
   adopt(channel) {
     Peer.channel = channel;
     channel.addEventListener("message", (event) => {
@@ -176,11 +227,16 @@ const Peer = {
       }
       Peer.flush();
     });
-    channel.addEventListener("open", () => {
-      Peer.note("connected");
-      Peer.pump();
-    });
+    channel.addEventListener("open", () => Peer.live());
     channel.addEventListener("close", () => Peer.note("the other player left"));
+    if (channel.readyState === "open") Peer.live();
+  },
+
+  /** The channel is usable: say so once, and start carrying messages. */
+  live() {
+    if (Peer.channel && Peer.channel.readyState !== "open") return;
+    if (!Peer.playing) Peer.note("connected");
+    Peer.pump();
   },
 
   /* -- the pump --------------------------------------------------------- */
@@ -310,6 +366,13 @@ const Peer = {
     else if (status.state === "playing" && !Peer.playing) {
       Peer.playing = true;
       Peer.note("playing");
+      // The game is on and the board is behind this: nothing on the dialog is
+      // of any further use, and leaving it up over a live match was the other
+      // half of "it connected but nothing happened". Closing it here rather
+      // than in the UI layer because this is the only place that learns the
+      // match actually started.
+      const dialog = el("#peerplay");
+      if (dialog && dialog.open) dialog.close();
     }
   },
 
@@ -417,7 +480,7 @@ const PeerUI = {
    * are and only a genuine decode failure gets the blame. */
   blame(err, what) {
     const message = String((err && err.message) || err);
-    return /cannot reach|answered \d|understands/.test(message)
+    return /cannot reach|answered \d|understands|one piece|look like a game code|no code was/.test(message)
       ? message : `${what} — ${message}`;
   },
 
@@ -426,9 +489,39 @@ const PeerUI = {
    * The code is always on screen to be selected by hand. */
   async copy(sel) {
     const box = el(sel);
+    box.focus();
     box.select();
-    try { await navigator.clipboard.writeText(box.value); Peer.note("copied"); }
-    catch (err) { Peer.note("select the code and copy it"); }
+    box.setSelectionRange(0, box.value.length);   // Safari needs telling twice
+    try {
+      await navigator.clipboard.writeText(box.value);
+      Peer.note(`copied all ${box.value.length} characters — paste the lot`);
+      return;
+    } catch (err) { /* needs a secure context, which localhost is only sometimes */ }
+    try {
+      if (document.execCommand("copy")) {
+        Peer.note(`copied all ${box.value.length} characters — paste the lot`);
+        return;
+      }
+    } catch (err) { /* fall through to doing it by hand */ }
+    // The whole value is selected either way, so the manual route is one key.
+    Peer.note("could not copy for you — the whole code is selected, "
+              + "press " + (navigator.platform.startsWith("Mac") ? "⌘C" : "Ctrl+C"));
+  },
+
+  /** Tell someone their code is short *before* they click the button.
+   *
+   * A code that did not survive the trip is the commonest failure here, and
+   * finding out at paste time beats finding out after a round trip through a
+   * chat window. Cheap: decoding is local and takes no connection. */
+  async check(sel) {
+    const value = el(sel).value.trim();
+    if (!value) { Peer.note(""); return; }
+    try {
+      await Peer.decode(value);
+      Peer.note("that code looks complete");
+    } catch (err) {
+      Peer.note(String(err.message || err));
+    }
   },
 
   async beHost() {
@@ -480,6 +573,10 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("#peer-accept", () => PeerUI.accept());
   bind("#peer-reply", () => PeerUI.reply());
   bind("#peer-copy", () => PeerUI.copy("#peer-offer"));
+  for (const sel of ["#peer-answer", "#peer-offer-in"]) {
+    const box = el(sel);
+    if (box) box.addEventListener("input", () => PeerUI.check(sel));
+  }
   bind("#peer-copy-answer", () => PeerUI.copy("#peer-answer-out"));
   /* Closing the dialog on a game that never connected has to put the player
    * back somewhere they can play from.

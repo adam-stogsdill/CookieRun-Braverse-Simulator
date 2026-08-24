@@ -1293,6 +1293,15 @@ class Match:
     def _run(self) -> None:
         game = self.game
         try:
+            if self.config.peer is not None:
+                # A peer seat has a board to look at before it has anything to
+                # do. Both engines open on the toss, and whichever seat is not
+                # throwing first blocks on the wire inside `decide_first_player`
+                # — which is correct, but without a snapshot already published
+                # it means staring at an empty page with the title screen gone
+                # and no indication that anything is happening. Publishing here
+                # costs one version and gives that seat its table.
+                self.publish()
             # The guide opens with rock-paper-scissors and the winner chooses
             # who starts. It runs here rather than in `Game.setup` so bulk
             # self-play is not made to play it a million times.

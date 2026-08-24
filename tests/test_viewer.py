@@ -729,3 +729,45 @@ def test_every_asset_the_page_asks_for_is_served():
     served = set(re.findall(r'"(/[a-z0-9_.-]+\.(?:js|css))"', source))
     missing = sorted(p for p in wanted if p not in served)
     assert not missing, f"not in the do_GET allowlist: {missing}"
+
+
+def test_a_dialog_is_not_forced_visible_after_it_closes():
+    """An id rule setting `display` on a <dialog> must be scoped to `[open]`.
+
+    A <dialog> is hidden by the user agent's own `dialog:not([open])
+    { display: none }`, and *any* id selector outranks it. So a rule as
+    innocuous as `#mydialog { display: flex }` — the natural way to lay out a
+    dialog's contents — leaves the panel painted over the board forever after
+    it closes, while `.open` cheerfully reports false and every close handler
+    runs exactly as written. Nothing in JavaScript can be checked to catch it,
+    which is why it is checked here.
+    """
+    page = (VIEWER / "index.html").read_text()
+    dialogs = set(re.findall(r'<dialog[^>]*\bid="([^"]+)"', page))
+    assert dialogs, "no <dialog> in the page — has the markup moved?"
+
+    offenders = []
+    for css in VIEWER.glob("*.css"):
+        # Comments first: this file's own comments quote CSS containing braces,
+        # and a naive rule split would take those for rules and lose the real
+        # ones after them — which is exactly how the first version of this test
+        # passed against the bug it was written for.
+        text = re.sub(r'/\*.*?\*/', '', css.read_text(), flags=re.S)
+        for selector, body in re.findall(r'([^{}]+)\{([^{}]*)\}', text):
+            selector = selector.strip()
+            if "display" not in body:
+                continue
+            for name in dialogs:
+                # The rule has to target the dialog element itself; a selector
+                # that reaches *inside* it is styling children and is fine.
+                for part in (p.strip() for p in selector.split(",")):
+                    if not re.match(rf'^#{re.escape(name)}(?![\w-])', part):
+                        continue
+                    rest = part[len(name) + 1:]
+                    if rest.strip() and not rest.lstrip().startswith(("[", ":")):
+                        continue        # a descendant, not the dialog
+                    if "[open]" not in part:
+                        offenders.append(f"{css.name}: {part} {{{body.strip()}}}")
+    assert not offenders, (
+        "these set `display` on a closed dialog and will leave it on screen:\n  "
+        + "\n  ".join(offenders))

@@ -1387,7 +1387,12 @@ body.online #settings-watch { display: none; }
 /* Both panes open at once would be taller than a laptop screen, and the code
  * boxes are the part that must stay reachable — so the body scrolls and the
  * status line and Close stay pinned where they can always be found. */
-#peerplay { display: flex; flex-direction: column; max-height: 88vh; }
+/* `[open]` is load-bearing, not decoration. A <dialog> is hidden by the UA
+ * rule `dialog:not([open]) { display: none }`, and an id selector outranks it —
+ * so `#peerplay { display: flex }` leaves the panel painted over the board
+ * after it has closed, with `.open` reporting false the whole time. Scoping it
+ * to the open state lets the UA hide it again. */
+#peerplay[open] { display: flex; flex-direction: column; max-height: 88vh; }
 #peerplay .peer-form {
   display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
 }
