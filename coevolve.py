@@ -32,6 +32,7 @@ from braverse.deckfile import DECK_DIR, run_tag, write_archetypes
 from braverse.deckgen import (DeckEvolver, DeckGenConfig, describe,
                               implemented_pool, set_pool)
 from braverse.rl import TrainConfig, Trainer
+from braverse.console import utf8_output
 
 
 def _pilot_from_net(net, db):
@@ -48,6 +49,7 @@ def _pilot_from_net(net, db):
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--rounds", type=int, default=60)
     parser.add_argument("--pilot", choices=("rl", "both"), default="both",
@@ -260,7 +262,8 @@ def main() -> None:
             "champions": champions,
         })
         # Written every round: a crash at 4am must not lose the whole night.
-        Path(args.out).write_text(json.dumps(history, indent=1))
+        Path(args.out).write_text(json.dumps(history, indent=1),
+                              encoding="utf-8")
 
     if not history:
         print("no rounds completed")

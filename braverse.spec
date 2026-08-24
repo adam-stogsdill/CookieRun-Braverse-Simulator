@@ -27,6 +27,15 @@ if len(images) < 2000:
 
 decklists = [(str(p), ".") for p in sorted(ROOT.glob("*.txt"))]
 
+# Optional: if pywebview is installed at build time, carry it so the binary
+# opens a native window. Without it the binary still runs — `desktop.py` falls
+# back to a chromeless Chrome/Edge window, then to a browser tab.
+try:
+    from PyInstaller.utils.hooks import collect_all
+    web_datas, web_binaries, web_hidden = collect_all("webview")
+except Exception:
+    web_datas, web_binaries, web_hidden = [], [], []
+
 a = Analysis(
     ["play_server.py"],
     pathex=[str(ROOT)],
@@ -35,8 +44,10 @@ a = Analysis(
         (str(ROOT / "braverse_cards.csv"), "."),
         *decklists,
         *images,
+        *web_datas,
     ],
-    hiddenimports=[],
+    binaries=web_binaries,
+    hiddenimports=web_hidden,
     excludes=["torch", "tqdm", "pytest", "PIL", "tkinter", "matplotlib"],
     noarchive=False,
 )

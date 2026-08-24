@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.28
+Current Version: 0.2.33
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -47,6 +47,7 @@ There are many things that are still needing to be updated and reworked, but I i
     - [Playing someone else](#playing-someone-else)
     - [The deck builder tab](#the-deck-builder-tab)
     - [Watching a game back](#watching-a-game-back)
+    - [Your profile, and what it keeps](#your-profile-and-what-it-keeps)
   - [The effect compiler](#the-effect-compiler)
     - [The log says how much damage landed, and what dealt it](#the-log-says-how-much-damage-landed-and-what-dealt-it)
     - ["HP cannot reach 0" does not stop the damage](#hp-cannot-reach-0-does-not-stop-the-damage)
@@ -152,7 +153,10 @@ pip install -r requirements-play.txt
 python play_server.py
 ```
 
-That covers the whole game: the engine, the browser player against the
+That opens the game in its own window if it can (see
+[Its own window](#its-own-window)) and in a browser tab otherwise.
+
+That covers the whole game: the engine, the player against the
 `heuristic` and `random` bots, `selfplay.py`, `evolve_deck.py`,
 `compare_decks.py` and `coverage_report.py`. The only dependency is `numpy`,
 which `braverse.features` imports. The browser front end has no build step and
@@ -341,11 +345,95 @@ that line falls.
 ```bash
 python play_server.py            # --port 8080 --no-browser
 python play_server.py --lan      # also reachable from the rest of the network
+python play_server.py --browser  # a browser tab instead of a window
 ```
 
-Stop it with ctrl-c. It also shuts down on SIGHUP and SIGTERM, so closing the
+Stop it with ctrl-c, or by closing the window. It also shuts down on SIGHUP and SIGTERM, so closing the
 terminal takes the server with it rather than leaving something holding port
 8080; if the port is busy anyway it names the PID still on it.
+
+### Its own window
+
+It plays as a desktop game, not a tab: no address bar, no tabs, and closing the
+window ends the process. Under it nothing changed — the same local HTTP server
+and the same `viewer/` — because that server is also what makes two people on
+one network play each other, and a window that spoke some other protocol would
+have meant two front ends to keep in step.
+
+`desktop.py` picks who draws the window, best first:
+
+- **pywebview** (`pip install pywebview`), a real native window drawn by the
+  OS web view: WebKit on macOS, WebView2 on Windows, WebKitGTK on Linux.
+- **Chrome, Edge, Brave or Chromium in app mode** (`--app=`), if one is
+  installed. Same chromeless window without the extra install. It gets a
+  profile directory of its own under the user cache, because launching Chrome
+  while Chrome is already running otherwise just hands the URL to the running
+  copy and exits — which would look like the window shutting the game down the
+  instant it opened.
+
+Neither available means a browser tab, as before. `--window` insists on a real
+window and says what to install rather than falling back; `--browser` forces the
+tab, which is what you want when debugging the front end, since devtools come
+with it. `--no-browser` still serves and opens nothing — that is the mode the
+preview harness and `--lan` hosting use.
+
+The window owns the main thread — every OS web view requires that — so in this
+mode the HTTP server runs on a thread and the window is what the process waits
+on. ctrl-c closes the window too, rather than leaving one showing a board whose
+server has gone.
+
+### Windows
+
+Everything runs on Windows, macOS and Linux from the same checkout — the engine
+was always pure Python, and the parts that were not portable were the edges
+where the *player* touches the operating system:
+
+- **Signals.** Windows has no `SIGHUP`, and asking `signal` for it by name is an
+  AttributeError before the first card is dealt. The shutdown handler now
+  installs whatever signals the platform actually defines, `SIGBREAK` included.
+- **Content types.** `mimetypes` reads the registry on Windows, which routinely
+  calls `.js` `text/plain` — served under that type the front end is a blank
+  page with no clue why. The types for everything in `viewer/` are now ours, and
+  a test fails if a file appears there with an extension not in the table.
+- **Text files.** The default encoding on Windows is cp1252, which cannot
+  represent card names, `【 】`, or the em dashes the server prints. Every
+  decklist, replay and save file is read and written as UTF-8, and written with
+  LF endings, so a deck built on Windows is byte-identical to one built on a Mac
+  and can be mailed to either. Redirected output is retuned to UTF-8 too
+  (`braverse/console.py`, called from every script's `main`), since
+  `play_server.py > log.txt` — or an overnight `coevolve.py` run writing a log —
+  would otherwise die on the first card name it printed.
+- **Ports.** `SO_REUSEADDR` on Windows does not mean "reuse after TIME_WAIT", it
+  means "bind a port someone else is already listening on", which would split
+  requests between two servers; it is off there, so a busy port says so. The
+  "who has the port" message reads `netstat -ano` instead of `lsof` and offers
+  `taskkill` instead of `kill`.
+- **Writable directories.** `os.access(dir, W_OK)` is always true on Windows, so
+  a copy installed under Program Files looked writable and then failed when it
+  tried to save. Replays and saved decks now probe by creating a file, and fall
+  back to `%USERPROFILE%\.braverse` when they cannot.
+- **The window.** pywebview uses WebView2, which ships with Windows 10 and 11.
+  Failing that, Chrome, Edge, Brave and Chromium are looked for under both
+  install roots — per-machine under Program Files and per-user under
+  `%LOCALAPPDATA%`, both of which are ordinary depending on who ran the
+  installer.
+
+```powershell
+py -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-play.txt
+pip install pywebview        # optional: a native window instead of a tab
+py play_server.py
+```
+
+`pyinstaller braverse.spec` builds `dist\braverse.exe` there, the same way it
+builds a binary on macOS.
+
+`tests/test_windows.py` covers each of these by faking the platform, so a Mac or
+Linux `pytest -q` still catches a regression in the Windows path. What it cannot
+do is prove the whole game runs there — that needs a Windows machine. The
+`run_coevolve_*.sh` helper scripts are still shell scripts, and are for training
+runs, not for playing.
 
 A playmat with the printed card art. Cards in the battle area are drawn larger
 than the ones in a support row, because that is where the game is actually read;
@@ -671,8 +759,7 @@ instead.
 
 **Learn** in the header deals a real game and talks you through it. Not a
 scripted board and not a slideshow: it POSTs the same `/api/new` the setup
-dialog does — the two starter lists, seat 0 human against the heuristic, on a
-fixed seed — and then watches the snapshot the viewer is already polling. Each
+dialog does and then watches the snapshot the viewer is already polling. Each
 step names a *moment* ("it is your main phase and you have not placed a support
 yet"), dims the board around the one zone it is about, and advances when the
 game reaches the next one.
@@ -686,27 +773,80 @@ menu is parked on `<body>` outside whatever rectangle is lit up, and a tutorial
 that ate the click it had just asked for would be worse than none. Ignore it
 entirely and it will catch up with you.
 
-Two things keep it out of a corner it cannot get out of. A step hung off a
-question that may never be asked carries the evidence that its moment has been
-and gone — lose the toss and "you won the toss" recognises that the toss is
-settled and steps aside, rather than sitting there explaining a choice the bot
-is making. And a step waiting on the shuffle — a Cookie in hand, a turn with an
-attack in it — has a **patience** in turns, after which it gives up rather than
-holding the rest of the course behind it.
+#### The one thing it cannot leave to chance
+
+A course made of "wait for the player to do X" is only as good as X being
+*possible*. "Play a Cookie into the empty slot" is a lie if the shuffle dealt no
+second Cookie, and it does not matter how gracefully the step waits — the person
+reading it has been given an instruction they cannot follow. So the tutorial
+keeps the engine and replaces the two things that make a game unpredictable:
+
+- **The deal.** `Game` takes `shuffle=False` and deals off the top of the list
+  it was given. `braverse/tutorial.py` holds the lists, and they are the shipped
+  starter decks *reordered* rather than new ones — the scripted opening lifted
+  to the top and put back — so legality is by construction: a permutation of a
+  legal deck is a legal deck. The opening six are a Cookie to open with, two
+  Items to spend, the 【Blocker】 for the second slot, a Trap, and a cheap
+  attacker; and because a stacked deck redraws off the top, the *next* six are
+  the same hand in different cards, so someone who takes the free mulligan gets
+  a second teachable hand rather than whatever sorted by id.
+- **The opponent.** A controller like any other, with no RNG in it at all and a
+  policy written as an order of preference rather than a score. Two of its rules
+  are teaching decisions and not good play: it never lays more than **two
+  supports**, and it swings **once a turn**. In ST8 everything that hits for 3
+  costs three energy, so a bot that never reaches a third support cannot hit for
+  more than 2 whatever it draws. Uncapped it opened a Leek Cookie and had the
+  game by turn 9 against someone who was following the course. It also attacks
+  the *sturdiest* Cookie rather than the weakest, which is what keeps the block
+  lesson available: your 【Blocker】 is never itself the target, so stepping in
+  front of the attack is always a move that exists.
+
+Even the toss is settled without being rigged. The bot cycles its throw instead
+of repeating one — a fixed throw ties forever against a player who keeps
+throwing rock, and every tie is another unexplained "throw again" — and on the
+rounds it wins it chooses to go *second*. The course is written from the opening
+player's seat, and which way a coin landed is not something a tutorial should
+reorder itself around.
+
+Two more things keep it out of a corner. A step hung off a question that may
+never be asked carries the evidence that its moment has been and gone — lose the
+toss and "you won the toss" recognises that the toss is settled and steps aside.
+And a step waiting on something the deal cannot guarantee has a **patience** in
+turns, after which it gives up rather than holding the rest of the course behind
+it.
 
 Alongside the seventeen steps are four asides that fire the first time the game
 asks something a new player has not met: a block, a trap window, a card-picking
 strip, an optional `<...>` cost. They interrupt whatever step is up and hand it
 back afterwards, so an aside can never cost you your place.
 
-The whole thing is `viewer/tutorial.js` plus a stylesheet, and it touches
+#### Tested by playing it
+
+`tests/test_tutorial.py` walks the course's own path against a real `Game` and
+asserts every moment it waits for actually arrives, in order: a support to
+place, a Cookie for the empty slot, a turn that ends, an attack from the bot
+with both a block and a trap in the response window, an attack of your own you
+can pay for. It does it from each of the three opening throws, and again after
+taking the mulligan, and checks the game is still alive at the end and that the
+whole thing lands by turn 6 — a course that only completes on turn 20 is one
+nobody is still reading by the time it does.
+
+Three real faults came out of writing those tests, all of them ones a person
+would have hit: the stall above; a deck ordered by id that dealt the bot three
+Cookies it could not pay for once its cheap attacker died, leaving both players
+passing at each other until the decks ran out (the remainder is ordered
+cheapest-attack-first now); and a redraw that opened with the 【Blocker】 as its
+biggest body, so the bot attacked it every turn and the block never once came
+up.
+
+The browser half is `viewer/tutorial.js` plus a stylesheet, and it touches
 `app.js` in exactly two places: one line at the end of `render` to hand it the
 snapshot, and one in `answer` to tell it which move you just chose — the option
 list is gone by the time the answer lands, and "did they attack?" is not a
 question the next board reliably answers. Since it is a viewer file, it is also
-one the server has to be told about; `tests/test_viewer.py` now reads
-`index.html` and `do_GET` and fails if a script tag names a path the allowlist
-does not serve.
+one the server has to be told about; `tests/test_viewer.py` reads `index.html`
+and `do_GET` and fails if a script tag names a path the allowlist does not
+serve.
 
 ### A misclick is not a move
 
@@ -731,8 +871,8 @@ misclick is exactly a quick click. No dialog, no focus taken, no second target
 to aim at, and the number of clicks in a turn is unchanged. The controls that
 want it say so before you press them: a dashed edge and a small `HOLD` tag.
 
-How long is a parameter, not a constant — the **hold** dropdown next to
-`confirm`, presets from 0.2s to 0.8s, default 0.35s, remembered per browser.
+How long is a parameter, not a constant — the **hold** dropdown under
+*Misclick guard* in Settings, presets from 0.2s to 0.8s, default 0.35s, remembered per browser.
 The right number is a property of the hand on the mouse rather than of the
 game: long enough that a stray click never reaches it, short enough that a whole
 turn of them is not a wait. 0.35s is about twice a fast double-click gap, which
@@ -741,7 +881,7 @@ is the accident it is there to absorb. `Confirm.holdMs` accepts anything from
 and is shown as its own entry in the list rather than rounded away.
 
 Which moves hold is one function, `needsHold`, and nothing else decides it. On
-the default setting — the **confirm** dropdown in the header, `off` / `key
+the default setting — the **confirm** dropdown in Settings, `off` / `key
 moves` / `every move` — that is attacks, blocks, End turn, Pass, declining an
 optional effect, and answering a mid-effect question by pointing at a card.
 Plays, supports, traps and skills are left on one click, because they are
@@ -803,9 +943,82 @@ would simply be cheating.
 
 What this is not, yet: there is no matchmaking, no accounts, no ranking, and no
 clock on a decision, so a player who wanders off leaves the game sitting there
-until someone hits **Leave**. Decks come from the host machine's collection,
-not from the joiner's, which is the next thing to fix if this ever leaves the
-LAN.
+until someone hits **Leave**. Decks come from the host machine's collection
+rather than the joiner's, which is the sharpest edge left on the room mode.
+
+#### Off the network, with `--online`
+
+`--lan` only reaches machines on your network. `--online` puts the same room on
+a public `https://` address by running a tunnel client — `cloudflared`'s quick
+tunnel by preference, since it needs no account, and `ngrok` otherwise. The
+client dials *out*, so nothing is forwarded on the router, no port is opened,
+and TLS is the provider's problem rather than ours: a seat token never crosses
+the internet in the clear. `tunnel.py` has the details, and `available()`
+answers up front, so a machine with neither client installed prints how to get
+one and keeps serving locally instead of failing.
+
+The server then listens **twice**: the private port your own browser uses, and a
+second loopback port that the tunnel is pointed at. That split is the feature,
+not tidiness. A tunnel client connects from 127.0.0.1, so on a single port every
+stranger would look exactly like the person at the keyboard — and the routes
+that read and write this machine's decklists, replays and profiles are gated on
+precisely that. Two ports means `_is_local` stays honest and the public port can
+refuse by construction: `PUBLIC_ROUTES` is a short allowlist of what playing a
+room actually needs, and hosting a room is deliberately *not* in it, because a
+route that mints server-side state on request is not one to hand a stranger.
+Rate limits, a room `secret` beyond the guessable four-character code, and a
+check on the `Host` header a request claims to have been sent to fill in the
+rest.
+
+### Playing someone directly, with no host at all
+
+**New match → Play someone directly** is the other arrangement: both machines
+run the engine, and the only thing that crosses between them is the decisions.
+Nothing is hosted, no port is opened, no tunnel is dialled, and neither of you
+learns the other's address.
+
+That this is *possible* is a consequence of something the engine already had.
+All randomness goes through the seeded `state.rng`, which is what lets a replay
+store a whole game as nothing but the answers both seats gave and re-derive
+everything else (see [Watching a game back](#watching-a-game-back)). Read that
+backwards and it is a network protocol: two engines given the same decks, the
+same seed and the same decisions are not *approximately* the same game, they are
+bit-identical. So there is no board to synchronise and no authority to elect —
+each side answers its own seat, blocks on the wire for the other's, and the two
+walk forward in lockstep. A turn costs a few dozen bytes.
+
+`braverse/netplay.py` is the whole of it, and it is deliberately transport-blind:
+`Link` is two methods, satisfied by an `RTCDataChannel` in the browser and by a
+pair of queues in the tests, which is why the interesting half can be tested
+with no browser and no network anywhere in the picture.
+
+**A peer game is not private from your opponent, and cannot be.** Lockstep means
+both machines hold the entire `GameState` — your hand included — because both
+are running the rules; that is exactly what removes the server. The hiding is
+done by the renderer, which is on their computer too, so a modified client can
+read your hand. This is the honest trade for needing no host: **the room mode is
+the one that is safe against the person you are playing**, and a peer game is
+safe against the network, which is a smaller claim. The dialog says so in as
+many words rather than letting anyone pick it because it sounds more private.
+
+What it *does* guarantee is that the two games never quietly drift apart. Every
+decision travels with a fingerprint of the option list it was chosen from — the
+same `replay.fingerprint`, said in card ids because uids differ between runs —
+alongside a shared decision counter. A mismatched build, an edited card, a
+decklist off by one: each of them stops the match on the next message with a
+`Desync` naming the decision that diverged, instead of leaving two people
+playing subtly different games. Version and protocol are checked in the
+handshake for the same reason, before a card is dealt.
+
+Signalling is done by hand. One of you picks **I'll start** and gets a code; you
+send it over whatever you already use to talk to each other; they paste it, send
+back a reply code, and the game begins on its own. A signalling server would be
+one more thing to run, to trust and to keep online, for an exchange that happens
+once per game. The codes are gzipped where the browser has `CompressionStream`,
+which takes a few kilobytes of SDP down to a few hundred characters. The one
+outside party involved is a public STUN server, used only to discover how your
+machine looks from behind a NAT — it carries no game data, and two people on the
+same network do not need it at all.
 
 ### The deck builder tab
 
@@ -925,6 +1138,61 @@ this, something odd just happened" button. The file is the whole game, so it is
 also the thing to attach to a bug report — **Download** it, and whoever receives
 it drops it onto their own replay tab and watches it without it ever touching
 their collection.
+
+### Your profile, and what it keeps
+
+The chip in the corner of the title screen is a *profile*: one encrypted file on
+this machine holding the games you have played, how each of your decks has done,
+and a level that goes up as you play. There is no account and no server — the
+file never leaves the machine that wrote it, and nothing about this feature
+opens a port.
+
+**A profile is sealed, and you choose how hard.** Give it a passphrase and it is
+encrypted under that passphrase: `hashlib.scrypt` derives the key, and nothing
+without it opens the file — including this program, including you, if you forget
+it. Leave the passphrase blank and the file is still encrypted, under a random
+key kept in `.profile-key` beside the profiles at mode 0600; that keeps the
+record out of a synced folder, a backup or a support bundle, but not away from
+somebody sitting at this account. The two cases are labelled as what they are in
+the chooser rather than both being called "encrypted".
+
+The cipher is assembled from the standard library in `braverse/secretbox.py` —
+scrypt for the key, HMAC-SHA256 in counter mode for the keystream, a separate
+HMAC key for the tag, encrypt-then-MAC — because the engine's entire dependency
+budget is numpy and a table of win rates is not worth spending it on
+`cryptography`. The tag is checked before a byte is decrypted, so an edited file
+refuses to open rather than opening as something else.
+
+**One line of each file is deliberately readable.** The chooser has to draw the
+list of profiles *before* it knows any passphrase, so the name and the picture
+sit in a small cleartext header. Everything that makes it a record — the games,
+the decks, the win rates, the level — is inside the seal, and the header is
+authenticated along with it, so the name on the outside cannot be swapped for
+another.
+
+**XP is for playing people.** A game played is 1 XP and a win is 3 more, and
+*only* against another person; a bot pays nothing, and two bots playing each
+other pay nothing to anybody. Bot games are still recorded — they are games you
+played, and the deck's record should say so — they are just worth nothing, and
+each row on the list says which it was rather than leaving you to work out why a
+game paid nothing. A level costs `4 × level`, so the first one is a single won
+game. The guided first game is a lesson and is not recorded at all.
+
+**A finished game is banked on the match thread, as it ends** — not by the
+browser afterwards. A game you walked away from before the last card still
+counts, and nothing about which tab was on screen changes what the record says.
+
+**The last thirty games are kept, with their replays.** Star one and it is kept
+for good and stops counting against the thirty. A game that falls out of the
+window takes its replay file with it, because an entry whose log is gone is not
+something you can do anything with; **Delete** on a row does the same thing on
+purpose, and leaves the win itself alone — deleting a log is not a way to
+un-play a game. Every game on the list plays back through the same **Watch** the
+replay shelf uses.
+
+The picture is either a card's art — any card in `card_images/` — or an image of
+your own, shrunk to 128 px in the browser before it is stored, so a profile stays
+a few kilobytes rather than carrying a photo around inside it.
 
 ## The effect compiler
 

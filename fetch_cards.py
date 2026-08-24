@@ -27,6 +27,8 @@ import unicodedata
 import urllib.error
 import urllib.request
 
+from braverse.console import utf8_output
+
 API_URL = "https://api.dotgg.gg/cgfw/getcards?game=cookierun&mode=indexed"
 USER_AGENT = "braverse-sim-dataset/1.0 (personal deck-simulator project)"
 
@@ -116,6 +118,7 @@ def to_records(payload):
 
 
 def main():
+    utf8_output()   # a redirected stdout on Windows is cp1252
     ap = argparse.ArgumentParser()
     ap.add_argument("-o", "--out", default="braverse_cards.csv")
     ap.add_argument("--cookies-only", action="store_true",

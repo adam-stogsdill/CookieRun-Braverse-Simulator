@@ -29,16 +29,22 @@ const state = {
   mySeat: 0,
   room: null,           // room code, when playing someone over the network
   token: null,          // this seat's key to it
+  key: null,            // the room's own key, carried by the invite link
   lobby: null,          // room status while waiting for an opponent
+  /* A peer-to-peer game: no room, no host, and the other seat's every answer
+   * arriving over a data channel this browser is only relaying. `netplay.js`
+   * owns the connection; all this decides is which seat the server is asked
+   * about, since a peer server plays exactly one. */
+  peer: false,
 };
 
 /* The room outlives the tab: a refresh, or a laptop lid, must come back to the
  * same seat rather than to a spectator's view of your own game. */
 const Seat = {
   key: (room) => "braverse.seat." + room,
-  save(room, seat, token) {
+  save(room, seat, token, pass) {
     try {
-      localStorage.setItem(Seat.key(room), JSON.stringify({ seat, token }));
+      localStorage.setItem(Seat.key(room), JSON.stringify({ seat, token, pass }));
     } catch (err) { /* private browsing: the seat just will not survive a refresh */ }
   },
   load(room) {
@@ -2271,7 +2277,18 @@ async function answer(index) {
 
 /** What identifies this seat to the server, on every move it makes. */
 function roomAuth() {
-  return state.room ? { room: state.room, token: state.token } : {};
+  // A peer game has no room and no seat token: this server plays one seat, the
+  // one its handshake gave it, and the browser cannot ask to answer for the
+  // other machine even if it wanted to.
+  if (state.peer) return { peer: true };
+  if (!state.room) return {};
+  // `pass` is the room's key rather than this seat's: over the internet the
+  // four-character code is not enough to find a game, so it travels with every
+  // request the same way it travelled in the link. The server ignores it on a
+  // LAN, where the code was never the only thing standing in the way.
+  const auth = { room: state.room, token: state.token };
+  if (state.key) auth.pass = state.key;
+  return auth;
 }
 
 /* -------------------------------------------------------------------- log */
@@ -2453,9 +2470,11 @@ async function poll() {
      * otherwise hangs up quietly after its own timeout. `since` is dropped
      * while a scene is playing, so the queued state stays fresh. */
     const params = new URLSearchParams();
+    if (state.peer) params.set("peer", "1");
     if (state.room) {
       params.set("room", state.room);
       if (state.token) params.set("token", state.token);
+      if (state.key) params.set("pass", state.key);
     }
     if (state.version >= 0 && !state.animating) params.set("since", state.version);
     const query = params.toString();
@@ -2504,6 +2523,8 @@ el("#btn-pause").onclick = async () => {
   poll();
 };
 el("#btn-step").onclick = async () => { await api("/api/control", { step: true }); poll(); };
+/* Everything that is a preference rather than a move now lives behind this. */
+el("#btn-settings").onclick = () => el("#settings").showModal();
 el("#speed").oninput = (e) => {
   el("#speed-label").textContent = (e.target.value / 1000).toFixed(2) + "s";
 };
@@ -2579,7 +2600,7 @@ function isTyping(event) {
 
 document.addEventListener("keydown", (e) => {
   if (isTyping(e)) return;
-  if (el("#setup").open || el("#browser").open) return;
+  if (el("#setup").open || el("#browser").open || el("#settings").open) return;
   // The number keys used to index the move list. They index whatever is on
   // screen offering itself instead: the rows of an open card menu first — that
   // is the list you are looking at — and otherwise the tray in the middle of
@@ -2639,10 +2660,13 @@ async function loadConfig() {
   online.value = (state.config.decks[0] || {}).name || "";
   online.onchange = describeOnlineDeck;
   describeOnlineDeck();
-  el("#online-hint").textContent = (state.config.lan || []).length
-    ? "Someone on this network can join the room you host."
-    : "Only this machine can reach this server — restart it with --lan to play "
-      + "someone else.";
+  el("#online-hint").textContent = state.config.public
+    ? "Anyone you send the link to can join the room you host, wherever they are."
+    : (state.config.lan || []).length
+      ? "Someone on this network can join the room you host. Restart with "
+        + "--online to play someone further away."
+      : "Only this machine can reach this server — restart it with --lan, or "
+        + "--online to play someone anywhere.";
   const remembered = localStorage.getItem("braverse.name");
   if (remembered) el("#online-name").value = remembered;
   el("#online-name").onchange = (e) =>
@@ -2742,18 +2766,25 @@ function onlineError(message) {
 }
 
 function joinUrl(code) {
-  // Prefer the address the server says the network can reach it on: the host
-  // is very often on http://localhost, which is useless to send to anyone.
-  const lan = (state.config.lan || [])[0];
-  const origin = lan ? lan.replace(/\/$/, "") : location.origin;
-  return `${origin}/?room=${code}`;
+  // Prefer the address the server says can actually be reached from where the
+  // person you are inviting is sitting: the public one over a merely local one,
+  // and either over http://localhost, which is useless to send to anyone.
+  const reachable = state.config.public || (state.config.lan || [])[0];
+  const origin = reachable ? reachable.replace(/\/$/, "") : location.origin;
+  let url = `${origin}/?room=${code}`;
+  // The key makes the link the invitation, rather than the code being a guess
+  // anybody could make. Sent over the internet, the link is the whole secret —
+  // so a link is a thing to hand to one person, not to post.
+  if (state.key) url += `&pass=${encodeURIComponent(state.key)}`;
+  return url;
 }
 
 /** Take a seat: remember it, point the poll at it, and redraw from its side. */
-function takeSeat(code, seat, token) {
+function takeSeat(code, seat, token, pass) {
   state.room = code;
   state.token = token;
-  Seat.save(code, seat, token);
+  if (pass) state.key = pass;
+  Seat.save(code, seat, token, state.key);
   seatPerspective(seat);
   state.version = -1;
   state.pendingId = null;
@@ -2762,6 +2793,9 @@ function takeSeat(code, seat, token) {
   document.body.classList.add("online");
   const url = new URL(location.href);
   url.searchParams.set("room", code);
+  // Kept in the address bar so a refresh comes back to the same room even in a
+  // browser that will not keep localStorage for us.
+  if (state.key) url.searchParams.set("pass", state.key);
   history.replaceState(null, "", url);
   el("#setup").close();
   poll();
@@ -2774,7 +2808,7 @@ async function hostRoom() {
     name: el("#online-name").value,
   });
   if (res.error) { onlineError(res.error); return; }
-  takeSeat(res.room, res.seat, res.token);
+  takeSeat(res.room, res.seat, res.token, res.pass);
 }
 
 async function joinRoom(code) {
@@ -2783,11 +2817,14 @@ async function joinRoom(code) {
   if (wanted.length !== 4) { onlineError("a room code is four characters"); return; }
   const res = await api("/api/room/join", {
     room: wanted,
+    // Set when this browser arrived by an invite link; the server insists on it
+    // for a join that did not come from the machine running the game.
+    pass: state.key || undefined,
     deck: el("#online-deck").value,
     name: el("#online-name").value,
   });
   if (res.error) { onlineError(res.error); return; }
-  takeSeat(res.room, res.seat, res.token);
+  takeSeat(res.room, res.seat, res.token, res.pass);
 }
 
 el("#btn-host").onclick = hostRoom;
@@ -2802,7 +2839,9 @@ function renderLobby(snap) {
   el("#lobby-code").textContent = state.room;
   const url = joinUrl(state.room);
   if (el("#lobby-url").value !== url) el("#lobby-url").value = url;
-  el("#lobby-hint").textContent = (state.config.lan || []).length
+  el("#lobby-hint").textContent = state.config.public
+    ? "Send that link to one person: it carries the key to this room."
+    : (state.config.lan || []).length
     ? "They need to be on the same network as this machine."
     : "This server is only listening on this machine — restart it with --lan "
       + "for someone else to reach it.";
@@ -2886,11 +2925,15 @@ el("#btn-rematch").onclick = async () => {
 
 /** A link with ?room= in it, or a seat this browser held before a refresh. */
 async function resumeFromUrl() {
-  const code = new URLSearchParams(location.search).get("room");
+  const query = new URLSearchParams(location.search);
+  const code = query.get("room");
   if (!code) return false;
+  // Taken before anything is asked of the server: without it a request about
+  // this room is answered as though the room did not exist.
+  state.key = query.get("pass") || null;
   const held = Seat.load(code.toUpperCase());
   if (held) {
-    takeSeat(code.toUpperCase(), held.seat, held.token);
+    takeSeat(code.toUpperCase(), held.seat, held.token, held.pass);
     return true;
   }
   // No token for this room: it is someone else's invitation. Open the dialog

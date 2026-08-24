@@ -1,13 +1,22 @@
 /* A guided first match.
  *
- * The tutorial is not a scripted board. It starts a real game against the
- * heuristic bot — same engine, same rules, same seat 0 the setup dialog would
- * give you — and then watches the snapshot the rest of the viewer is already
- * polling. Every step names a moment ("it is your main phase and you have not
- * placed a support yet") and advances when the game reaches the next one, so a
- * player who ignores the instruction and does something else is never stuck
- * against a script that expected otherwise: they are stuck against the game,
- * which is the thing they came to learn.
+ * The tutorial is not a scripted board. It starts a real game — same engine,
+ * same rules, same seat 0 the setup dialog would give you — and then watches
+ * the snapshot the rest of the viewer is already polling. Every step names a
+ * moment ("it is your main phase and you have not placed a support yet") and
+ * advances when the game reaches the next one, so a player who ignores the
+ * instruction and does something else is never stuck against a script that
+ * expected otherwise: they are stuck against the game, which is the thing they
+ * came to learn.
+ *
+ * What the game *is* comes from `braverse/tutorial.py`, through the one flag
+ * this file sends: both decks are dealt stacked instead of shuffled, and the
+ * other seat is a scripted opponent that pulls its punches. That is not
+ * decoration. "Play a Cookie into the empty slot" is a lie if the shuffle dealt
+ * no second Cookie, and a bot that opens on a three-damage attack takes the
+ * board away while the reader is still on step six. `tests/test_tutorial.py`
+ * plays this course's own path against a real game and asserts every moment
+ * below actually arrives, in order.
  *
  * Nothing here can make a move. The coach dims the board around one zone and
  * says a sentence about it; the moves still come off the cards, through the
@@ -59,10 +68,17 @@ const T = {
  * behind it explaining a choice the bot is making. So a question-shaped step
  * carries the evidence that its moment has been and gone. */
 function whileAsked(test, past) {
+  const here = (s) => T.asked(s) && test(s);
   return {
-    ready: (s) => T.asked(s) && test(s),
-    done: (s) => !(T.asked(s) && test(s)),
-    skip: (s) => !(T.asked(s) && test(s)) && !!past && past(s),
+    ready: here,
+    /* Done when a *different* question is up, or when the evidence says the
+     * moment has passed — not merely when this one blinks out. Two things make
+     * the question come and go without being answered: a tied toss throws
+     * again, and the snapshot between one question and the next carries no
+     * pending at all. Advancing on either put the coach on "you won the toss"
+     * while the board was still asking for a throw. */
+    done: (s) => !here(s) && (T.asked(s) || (!!past && past(s))),
+    skip: (s) => !here(s) && !!past && past(s),
   };
 }
 
@@ -147,7 +163,8 @@ const STEPS = [
         + "in it and you win — and the same pile on your own side is how you "
         + "lose, so read both.",
     ready: (s) => T.myMove(s),
-    wait: "Waiting for your first turn.",
+    wait: "Your opponent is taking their turn — this carries on when it "
+        + "comes back to you.",
     next: "Got it",
   },
   {
@@ -276,7 +293,16 @@ const STEPS = [
     skip: () => Tut.attacked,
     done: () => Tut.attacked,
     patience: 3,
-    wait: "Waiting for a turn where you can attack.",
+    /* "Waiting…" is the wrong thing to say here, because the thing being
+     * waited for is usually the player's own next move. An attack has a cost,
+     * turn 1 spent one card on support, and one support does not pay for
+     * anything with two symbols on it — so the honest wait text is the
+     * instruction: place another one. */
+    wait: (s) => (T.mine(s).supportActive < 2
+      ? "An attack has a cost, and your Cookie's is more than one support can "
+        + "pay. <b>Place another card as support</b> — you may place one every "
+        + "turn — and the swing will be here."
+      : "Waiting for a turn where you can attack."),
     hint: "waiting for the swing",
   },
   {
@@ -304,10 +330,17 @@ const TIPS = [
     when: (s) => T.has(s, "Block"),
     anchor: ".side.me .zone.battle",
     title: "You can block this",
-    body: "A <b>Blocker</b> can step in front of the attack and take it "
-        + "instead. It costs that Cookie a <b>rest</b>, so it will not be "
-        + "attacking on your next turn — a block is a trade, not a freebie. "
-        + "Blocking also uses up your one response: no trap after it.",
+    // The price is printed per card and it is not one thing: most 【Blocker】s
+    // are energy — Mystic Opal Cookie, the one the tutorial deals you, blocks
+    // for {B} — and five in the pool rest themselves instead. Saying "it rests
+    // the Cookie" would be wrong about the very card this fires on.
+    body: () => "A <b>Blocker</b> can step in front of the attack and take it "
+        + "instead. It is never free: the price is printed on the Cookie — "
+        + "usually energy, so a support rests to pay for it, and on a few "
+        + "Cookies the <b>Blocker itself</b> rests and is not attacking next "
+        + "turn. Blocking also uses up your one response for this attack: no "
+        + "trap after it."
+        + (held({ kind: "Block" }) ? " Hold it to commit." : ""),
   },
   {
     id: "trap",
@@ -391,6 +424,12 @@ function ensureChrome() {
   tutEl("tut-quit").onclick = () => Tut.finish(true);
   tutEl("tut-next").onclick = () => { Tut.advance(); Tut.sync(state.snap); };
   tutEl("tut-skip").onclick = () => { Tut.advance(); Tut.sync(state.snap); };
+}
+
+/** Take the dimming off the board entirely, leaving the card. */
+function hideVeil() {
+  const veil = tutEl("tut-veil");
+  if (veil) veil.classList.add("hidden");
 }
 
 /** Cut a hole in the veil over `rect`, or dim everything when there is none. */
@@ -523,7 +562,13 @@ Object.assign(Tut, {
   sync(snap) {
     if (!Tut.on) return;
     if (!snap || !snap.players) return;
-    if (snap.over) { Tut.draw(STEPS[STEPS.length - 1], snap, {}); return; }
+    // A decided game has its own card in the middle of the screen (`#gameover`)
+    // and the board behind it is worth reading. Say the closing piece, but
+    // light nothing: a spotlight here would dim the one thing being read.
+    if (snap.over) {
+      Tut.draw(STEPS[STEPS.length - 1], snap, { over: true });
+      return;
+    }
 
     const tip = Tut.pickTip(snap);
     if (tip) { Tut.draw(tip, snap, { aside: true }); return; }
@@ -557,8 +602,9 @@ Object.assign(Tut, {
     tutEl("tut-step").textContent = opts.aside
       ? "tip" : `${at + 1} / ${STEPS.length}`;
     tutEl("tut-title").textContent = step.title;
+    const waiting = typeof step.wait === "function" ? step.wait(snap) : step.wait;
     const body = opts.waiting
-      ? (step.wait || "Coming up next — play on.")
+      ? (waiting || "Coming up next — play on.")
       : (typeof step.body === "function" ? step.body(snap) : step.body);
     tutEl("tut-body").innerHTML = body;
     pipify(tutEl("tut-body"));
@@ -580,9 +626,9 @@ Object.assign(Tut, {
 
     // What the follower should keep lit. A waiting step points at nothing —
     // the moment it describes has not arrived — so it dims the board whole.
-    Tut.lit = opts.waiting ? null : step.anchor;
+    Tut.lit = opts.waiting || opts.over ? null : step.anchor;
     const rect = anchorRect(Tut.lit);
-    spotlight(rect);
+    if (opts.over) hideVeil(); else spotlight(rect);
     placeCard(rect);
     Tut.lastKey = "";
   },
@@ -595,33 +641,28 @@ Object.assign(Tut, {
     Tut.frame = requestAnimationFrame(Tut.pump);
     const card = tutEl("tut-card");
     if (!card || card.classList.contains("hidden")) return;
-    const rect = anchorRect(Tut.lit);
+    const over = !!(state.snap && state.snap.over);
+    const rect = over ? null : anchorRect(Tut.lit);
     const key = rect ? [rect.top, rect.left, rect.width, rect.height]
       .map(Math.round).join(",") : "none";
     if (key === Tut.lastKey) return;
     Tut.lastKey = key;
-    spotlight(rect);
+    if (over) hideVeil(); else spotlight(rect);
     placeCard(rect);
   },
 });
 
 /* --------------------------------------------------------------- starting */
-/* The same POST the setup dialog makes, with the decisions already taken: the
- * two starter lists, seat 0 human against the heuristic, and a fixed seed so
- * two people following the same tutorial see the same opening. */
+/* The same POST the setup dialog makes, with one flag instead of a menu.
+ *
+ * `tutorial: true` is the server's business, not the browser's: it deals both
+ * decks stacked from `braverse/tutorial.py`, seats the scripted opponent, and
+ * turns the shuffle off, so the hand this course talks about is the hand you
+ * get. Sending deck names from here would only invite a tutorial dealt out of
+ * a deck the steps know nothing about. */
 async function startTutorial() {
   if (typeof showTab === "function") showTab("play");
-  const names = (state.config.decks || []).map((d) => d.name);
-  const pick = (want, fallback) => (names.includes(want) ? want : fallback);
-  const body = {
-    decks: [pick("st9_sea_fairy", names[0]), pick("st8_wind_archer", names[1] || names[0])],
-    pilots: ["human", "heuristic"],
-    seed: 424242,
-    delay: 0.6,
-    paused: false,
-    reveal: false,
-  };
-  const res = await api("/api/new", body);
+  const res = await api("/api/new", { tutorial: true, delay: 0.6 });
   if (res.error) { alert(res.error); return; }
   // Same reset the setup dialog does: a new match is a new event stream.
   state.version = -1;

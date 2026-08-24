@@ -3,11 +3,22 @@
 
     python play_server.py                 # http://localhost:8080
     python play_server.py --lan           # also reachable from the network
+    python play_server.py --online        # ...and from the internet, via a tunnel
 
-Two people on one network play through a *room*: one hosts, the other opens the
-link and joins. The server owns the game either way — the browser is only ever
-shown a seat's own view and offered a list of moves the server built, so it can
-neither see the other hand nor name a card that was not on offer.
+Two people play through a *room*: one hosts, the other opens the link and joins.
+The server owns the game either way — the browser is only ever shown a seat's
+own view and offered a list of moves the server built, so it can neither see the
+other hand nor name a card that was not on offer.
+
+`--online` puts that room on a public address (see `tunnel.py`) and so serves it
+to people who are not sitting at this machine. It therefore listens *twice*: the
+private port the host's own browser uses, and a second loopback port — the only
+one the tunnel can reach — which serves the game and nothing else. The split is
+not decoration. A tunnel client connects to us from 127.0.0.1, so on a single
+port every stranger would look like the person at the keyboard, and the routes
+that read and write the host's own files are gated on exactly that. Two ports
+means `_is_local` stays true, and the public one can refuse by construction
+rather than by remembering to check.
 
 The engine calls its controllers *re-entrantly* — a trap window and every
 mid-effect decision happen inside ``game.step`` — so a human seat cannot be
@@ -27,6 +38,7 @@ import functools
 import json
 import mimetypes
 import os
+import queue
 import random
 import re
 import secrets
@@ -40,16 +52,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from braverse.console import utf8_output
 from braverse.deckfile import DECK_DIR, read_decklist
 from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, __version__,
                       default_db, implemented_pool, validate)
 from braverse import actions as A
+from braverse import profile as PR
+from braverse import netplay as NP
 from braverse import replay as RP
+from braverse import tutorial as TUT
 from braverse.engine import BankedUntap, OPENING_COOKIE_PROMPT
 from braverse.enums import CardType, Marker
 from braverse.rps import CHOICES, THROWS, decide_first_player
 from braverse.state import CardInstance, Cookie, GameState
+
+import desktop
+import tunnel as TUN
 
 ROOT = Path(__file__).resolve().parent
 VIEWER = ROOT / "viewer"
@@ -60,6 +79,26 @@ IMAGES = ROOT / "card_images"
 # and trained pilots someone drops next to the binary. Look there too.
 SIDE = (Path(sys.executable).resolve().parent
         if getattr(sys, "frozen", False) else ROOT)
+
+WINDOWS = os.name == "nt"
+
+
+
+def writable(directory: Path) -> bool:
+    """Whether a file can actually be created in ``directory``.
+
+    `os.access(..., W_OK)` is the obvious test and is wrong on Windows, where it
+    reports every directory writable and the ACL only bites at open() time —
+    which is exactly the case that matters, since a game installed under
+    Program Files has a read-only directory beside the binary.
+    """
+    probe = directory / f".write-probe-{os.getpid()}"
+    try:
+        probe.touch()
+        probe.unlink()
+        return True
+    except OSError:
+        return False
 
 # How long the browser spends playing one action out, per event. A bot seat
 # waits this out before deciding again, so an attack, the HP cards it turned
@@ -83,6 +122,85 @@ POLL_HOLD = 25.0
 
 # Filled in by `main` when the server is told to listen off this machine.
 LAN_URLS: list[str] = []
+# Filled in by `main --online`: the public address the tunnel handed back, and
+# the hostname requests arriving through it will carry.
+PUBLIC_URL = ""
+PUBLIC_HOST = ""
+
+# What a stranger who followed an invite link may ask for.
+#
+# Everything outside this set belongs to the machine running the server — the
+# decklists on its disk, its replay folder, the pacing controls over its local
+# bot game — and is served only to a browser on that machine. Playing a room
+# needs the client itself, the board, the lobby, the moves, and enough of the
+# card pool to draw them; that is all this is.
+#
+# Hosting is *not* in it. The invite always flows one way, from the machine
+# running the game outwards, so nothing off it ever needs to open a room — and a
+# route that mints server-side state on request is one a stranger should not
+# have. Neither is anything that writes: a joiner saving a deck or a replay
+# would be writing to someone else's disk.
+PUBLIC_ROUTES = frozenset({
+    "/api/config", "/api/state", "/api/room",
+    "/api/decks", "/api/deck", "/api/deck/validate",
+    "/api/cardnames", "/api/pool",
+    "/api/room/join", "/api/room/leave", "/api/room/rematch",
+    "/api/choose",
+})
+
+# Hostnames a request may claim to have been sent to. A browser tricked into
+# resolving some attacker's name to 127.0.0.1 arrives with that name in `Host`,
+# and every same-origin check downstream would then believe it — so a name we
+# have no reason to answer to is refused before any route runs. Bare IPs and
+# `*.local` are how this machine is legitimately addressed on a network; the
+# tunnel hostname is added when there is one.
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0", ""})
+
+
+class Limiter:
+    """A token bucket per client, for the port strangers can reach.
+
+    Not a defence against anyone determined — it is one process serving a card
+    game — but the public port is a thread per connection on someone's laptop,
+    and "a stranger with the link can spend the host's machine" should not be
+    the way an evening ends. Buckets are dropped once they refill, so idle
+    clients cost nothing and the table cannot grow without bound.
+    """
+
+    def __init__(self, rate: float, burst: int):
+        self.rate = rate            # tokens per second
+        self.burst = burst
+        self.lock = threading.Lock()
+        self.buckets: dict[str, tuple[float, float]] = {}   # key -> (tokens, when)
+
+    def allow(self, key: str) -> bool:
+        now = time.time()
+        with self.lock:
+            tokens, when = self.buckets.get(key, (float(self.burst), now))
+            tokens = min(self.burst, tokens + (now - when) * self.rate)
+            if tokens < 1.0:
+                self.buckets[key] = (tokens, now)
+                return False
+            tokens -= 1.0
+            if tokens >= self.burst - 1e-9:
+                self.buckets.pop(key, None)   # full again; forget it
+            else:
+                self.buckets[key] = (tokens, now)
+            return True
+
+
+# Answering a question is the one thing a seat does often, and a fast turn is
+# several in a row — hence the loose burst. Joining is once per game, and is the
+# route that costs a room, so it gets its own much tighter bucket.
+MOVE_LIMIT = Limiter(rate=4.0, burst=40)
+JOIN_LIMIT = Limiter(rate=0.2, burst=6)
+# A ceiling on live matches, so an abandoned room cannot pile up thread by
+# thread over a long session. Set loose rather than tight on purpose: hosting is
+# not a route a stranger can reach (see `PUBLIC_ROUTES`), so the only thing this
+# bounds is the host's own clicking, and refusing a rematch because eight games
+# were opened this afternoon would be its own bug. Rooms nobody polls are reaped
+# on their own clock — see `Room.IDLE_LIMIT`.
+MAX_ROOMS = 64
 
 
 def scene_seconds(events: list) -> float:
@@ -219,7 +337,7 @@ def load_saved_decks() -> dict[str, tuple[list[str], list[str]]]:
     if not path.is_file():
         return {}
     try:
-        blob = json.loads(path.read_text())
+        blob = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     if not isinstance(blob, dict):
@@ -246,7 +364,8 @@ def write_saved_decks(decks: dict) -> None:
     for name, saved in decks.items():
         deck, extra = (saved, []) if isinstance(saved, list) else saved
         blob[name] = {"deck": list(deck), "extra": list(extra)}
-    tmp.write_text(json.dumps(blob, indent=2, sort_keys=True))
+    tmp.write_text(json.dumps(blob, indent=2, sort_keys=True),
+               encoding="utf-8")
     tmp.replace(path)          # never leave a half-written store behind
 
 
@@ -277,9 +396,28 @@ REPLAY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,118}\.json")
 MAX_REPLAY_LIST = 400      # how many the browser is shown, newest first
 MAX_BODY = 8 << 20         # an uploaded replay is a few tens of KB; cap the rest
 
+# Every extension `viewer/` and `card_images/` actually contain.
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".ico": "image/x-icon",
+    ".woff2": "font/woff2",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".wav": "audio/wav",
+}
+
 
 def replay_store() -> Path:
-    base = SIDE if os.access(SIDE, os.W_OK) else Path.home() / ".braverse"
+    base = SIDE if writable(SIDE) else Path.home() / ".braverse"
     path = base / REPLAY_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -328,8 +466,135 @@ def replay_filename(decks: Sequence[str], when: float) -> str:
     return f"{stamp}-{tag}.json"
 
 
+# ---------------------------------------------------------------------------
+# the player's profile
+# ---------------------------------------------------------------------------
+# One encrypted file per player, in `profiles/` beside the replays and falling
+# back to ~/.braverse the same way. See `braverse/profile.py` for what is in
+# one and what is sealed; the routes below are the only way in, and none of
+# them is public — a profile belongs to the machine it was made on.
+PROFILE_DIR_NAME = "profiles"
+MAX_PASSPHRASE = 256
+
+
+@lru_cache(maxsize=1)
+def profile_store() -> PR.ProfileStore:
+    base = SIDE if writable(SIDE) else Path.home() / ".braverse"
+    return PR.ProfileStore(base / PROFILE_DIR_NAME)
+
+
+class Profiles:
+    """Who is signed in, and what to do with a game they just finished.
+
+    Exactly one profile is open at a time, on the machine running the server —
+    this is a card game on someone's laptop, not a service with sessions. The
+    key that reseals the file lives in here for as long as it is open and is
+    never sent anywhere; closing the profile drops it.
+    """
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.session: Optional[PR.Session] = None
+
+    # -- signing in ------------------------------------------------------
+    def open(self, slug: str, passphrase: str = "") -> PR.Session:
+        session = profile_store().open(slug, passphrase)
+        with self.lock:
+            self.session = session
+        return session
+
+    def create(self, name: str, passphrase: str, avatar: str) -> PR.Session:
+        session = profile_store().create(name, passphrase=passphrase,
+                                         avatar=avatar)
+        with self.lock:
+            self.session = session
+        return session
+
+    def close(self) -> None:
+        with self.lock:
+            self.session = None
+
+    def active(self) -> Optional[PR.Session]:
+        with self.lock:
+            return self.session
+
+    def view(self) -> Optional[dict]:
+        """The open profile as the browser wants it, or None."""
+        with self.lock:
+            if self.session is None:
+                return None
+            return {"slug": self.session.slug, "locked": self.session.locked,
+                    **self.session.profile.summary()}
+
+    # -- finished games --------------------------------------------------
+    def bank(self, match: "Match") -> None:
+        """Add a finished game to the open profile, if it counts.
+
+        Called on the match thread as the game ends, and deliberately silent:
+        a profile that cannot be written must not take the game down with it,
+        and there is nobody to tell at that point anyway.
+        """
+        try:
+            self._bank(match)
+        except (PR.ProfileError, OSError):
+            pass
+
+    def _bank(self, match: "Match") -> None:
+        # A replay is a game that already counted, and the guided first game is
+        # a lesson rather than a game — neither is a result.
+        if match.replay is not None or match.config.tutorial:
+            return
+        seat = match.profile_seat
+        state = match.game.state
+        if seat is None or not state.over:
+            return
+        # Two people is the only thing that pays XP. A bot on the other side
+        # still goes in the record — it is a game you played — worth nothing.
+        versus_person = all(p == "human" for p in match.config.pilots)
+        names = list(match.config.names or ["", ""])
+        result = ("draw" if state.winner is None or state.winner < 0
+                  else "win" if state.winner == seat else "loss")
+        with self.lock:
+            session = self.session
+            if session is None:
+                return
+            session.profile.record(
+                deck=str(match.config.decks[seat]),
+                opponent_deck=str(match.config.decks[1 - seat]),
+                opponent=str(match.config.pilots[1 - seat]),
+                opponent_name=names[1 - seat] if len(names) > 1 else "",
+                result=result,
+                turns=int(state.turn_number),
+                replay=match.saved_as,
+                versus_person=versus_person,
+            )
+            dropped = session.profile.prune()
+            session.save()
+        # The entry and its log go together: a game that has fallen out of the
+        # last thirty is not one there is any way left to watch.
+        for name in PR.replays_of(dropped):
+            drop_replay(name)
+
+
+def drop_replay(name: str) -> bool:
+    """Delete one replay file by name. False if it was not there to delete."""
+    safe = safe_replay_name(name)
+    if not safe:
+        return False
+    try:
+        (replay_store() / safe).unlink()
+        return True
+    except OSError:
+        return False
+
+
+PROFILES = Profiles()
+
+
 def available_pilots() -> list[str]:
-    pilots = ["human", "heuristic", "random"]
+    # "tutorial" is a real pilot rather than a hidden mode: it is the gentlest
+    # opponent in the box and worth being able to pick again afterwards.
+    pilots = ["human", "heuristic", "random", "tutorial"]
     pilots += [f"rl:{p.name}" for p in scan("*.pt")]
     return pilots
 
@@ -339,6 +604,10 @@ def make_pilot(kind: str, seat: int, db: CardDB, seed: int, runner: "Match"):
         return HumanController(runner, seat)
     if kind == "random":
         return Paced(SeatedAgent(RandomAgent(seed=seed), seat), runner)
+    if kind == "tutorial":
+        # Already seat-aware and deliberately RNG-free; wrapping it in
+        # SeatedAgent would only hand it a seat hint it does not read.
+        return Paced(TUT.make_opponent(db=db, seat=seat), runner)
     if kind.startswith("rl:"):
         from braverse.rl import RLAgent, Trainer
         net = Trainer.load_net(next(p for p in scan("*.pt") if p.name == kind[3:]))
@@ -895,6 +1164,23 @@ class MatchConfig:
     # match is watching one back rather than playing a new one; the decks, the
     # seed and every decision come out of the recording instead of the menu.
     replay: Optional[RP.Recording] = None
+    # The guided first game: a stacked deal and a scripted opponent, so every
+    # step of the browser course has the board it is about. See
+    # `braverse/tutorial.py`.
+    tutorial: bool = False
+    # Which seat belongs to the person whose profile is open here, for the
+    # result to be banked against. Left unset it is the first human seat, which
+    # is right for every local game; a room says so explicitly, because the
+    # host's own chair is not always seat 0 (see `Room.join`).
+    profile_seat: Optional[int] = None
+    # A peer-to-peer game: this machine plays one seat and every answer from
+    # the other arrives over a data channel. Carries the seat we sit in, the
+    # agreed `netplay.Table` and the live `netplay.Session`. The decks and the
+    # seed come from that table rather than from the menu — both machines have
+    # to deal the same game, which is what lets there be no server holding it.
+    peer: Optional[dict] = None
+    # What the two seats are called, when they are people.
+    names: Optional[list] = None
 
 
 class Match:
@@ -943,6 +1229,35 @@ class Match:
             # Paced through the same gate a bot goes through, so a replay can be
             # paused, stepped and slowed down with the controls already there.
             self.controllers, self.cursor = RP.scripted(self.replay, pace=self.gate)
+        elif config.peer is not None:
+            # Nothing here is chosen locally. Both machines were handed the same
+            # `Table` by the handshake, and deal from it — that identity is the
+            # whole reason two engines with no server between them stay in step.
+            table = config.peer["table"]
+            session = config.peer["session"]
+            self.deck_lists = [list(d) for d in table.decks]
+            self.extra_lists = [list(e) for e in table.extra]
+            seed = table.seed
+            self.seed = seed
+            self.peer_session = session
+            # Our own seat is the browser, exactly as in any other human game;
+            # the other is a seat that only ever reads the wire.
+            self.controllers = NP.seats(HumanController(self, session.seat),
+                                        session, table)
+            self.recorder = None
+        elif config.tutorial:
+            # Stacked, in order, and not from a file: the tutorial's decks are
+            # a fixed permutation of the two starter lists, computed rather
+            # than stored so they cannot drift out of legality.
+            self.deck_lists = [TUT.player_deck(db), TUT.opponent_deck(db)]
+            self.extra_lists = [[], []]
+            seed = config.seed if config.seed is not None else 0
+            self.seed = seed
+            pilots = [make_pilot(config.pilots[i], i, db, seed + 100 * i, self)
+                      for i in range(2)]
+            self.recorder = RP.DecisionLog(db=db)
+            self.controllers = [RP.record(c, i, self.recorder)
+                                for i, c in enumerate(pilots)]
         else:
             decks = available_decklists()
             self.deck_lists = [list(decks[name][0]) for name in config.decks]
@@ -958,8 +1273,11 @@ class Match:
             self.controllers = [RP.record(c, i, self.recorder)
                                 for i, c in enumerate(pilots)]
         self.game = Game(self.deck_lists, self.controllers,
-                         extra_decks=self.extra_lists, db=db, seed=seed)
+                         extra_decks=self.extra_lists, db=db, seed=seed,
+                         shuffle=not config.tutorial)
         self.human_seats = [i for i, p in enumerate(config.pilots) if p == "human"]
+        self.profile_seat = (config.profile_seat if config.profile_seat is not None
+                             else (self.human_seats[0] if self.human_seats else None))
         self.toss = None
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -997,6 +1315,8 @@ class Match:
                 game.step(action)
             self.publish()
             self.autosave()
+            # After the autosave, so the entry can name the file it was kept in.
+            PROFILES.bank(self)
         except MatchAborted:
             return
         except RP.ReplayFinished as exc:
@@ -1597,6 +1917,173 @@ class Match:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# peer-to-peer: one match, two machines, no server holding the board
+# ---------------------------------------------------------------------------
+# How long a browser's poll for outbound messages is held before answering
+# empty. Long enough that an idle match costs almost no requests, short enough
+# that a closed tab is noticed while someone is still looking at the screen.
+PEER_HOLD = 20.0
+# A ceiling on messages queued for a browser that has stopped collecting them.
+# The engine only speaks when its seat answers, so anything approaching this is
+# a browser that is gone rather than a busy game.
+PEER_BACKLOG = 512
+
+
+class PeerBridge(NP.Link):
+    """A `netplay.Link` whose far end is this machine's own browser.
+
+    WebRTC lives in the browser and the engine lives in Python, so the data
+    channel cannot be handed to `netplay` directly. This is the seam: the
+    engine sends and receives ordinary `Link` messages, and the browser drains
+    one queue over HTTP and fills the other with what arrived on the channel.
+    The browser is a wire here, not a participant — it never reads a decision,
+    and forging one would only desync the machine doing the forging.
+
+    Ordering is preserved end to end, which is what `netplay` requires: queues
+    are FIFO, the channel is ordered, and the browser posts batches in the
+    order it received them.
+    """
+
+    def __init__(self):
+        self.to_peer: "queue.Queue[dict]" = queue.Queue()
+        self.from_peer: "queue.Queue[dict]" = queue.Queue()
+        self.cond = threading.Condition()
+        self.closed = False
+
+    # -- the engine's side -------------------------------------------------
+    def send(self, message: dict) -> None:
+        if self.closed:
+            raise NP.PeerGone("the connection is closed")
+        if self.to_peer.qsize() >= PEER_BACKLOG:
+            raise NP.PeerGone("the browser stopped relaying messages")
+        self.to_peer.put(dict(message))
+        with self.cond:
+            self.cond.notify_all()
+
+    def recv(self, timeout: Optional[float] = None):
+        try:
+            return self.from_peer.get(timeout=timeout)
+        except queue.Empty:
+            return None
+
+    def close(self) -> None:
+        self.closed = True
+        with self.cond:
+            self.cond.notify_all()
+
+    # -- the browser's side ------------------------------------------------
+    def deliver(self, messages: Sequence[dict]) -> None:
+        """Messages that arrived on the data channel, in the order they came."""
+        for message in messages:
+            if isinstance(message, dict):
+                self.from_peer.put(message)
+
+    def drain(self, hold: float = PEER_HOLD) -> list:
+        """Everything waiting to go out, holding briefly rather than spinning.
+
+        Returns as soon as there is anything at all — a decision the other
+        player is waiting on must not sit here for the length of a poll.
+        """
+        deadline = time.time() + hold
+        with self.cond:
+            while self.to_peer.empty() and not self.closed:
+                left = deadline - time.time()
+                if left <= 0:
+                    break
+                self.cond.wait(min(0.5, left))
+        out = []
+        while True:
+            try:
+                out.append(self.to_peer.get_nowait())
+            except queue.Empty:
+                break
+        return out
+
+
+class PeerLobby:
+    """One peer-to-peer game in the making, and then in progress.
+
+    The handshake has to happen before there is a `Match` — it is what decides
+    the decks and the seed the match will be built from — but it also has to
+    happen without blocking the browser that is driving the data channel. So it
+    runs on its own thread, and the browser polls `status` to find out whether
+    it is still waiting, playing, or has failed and why.
+    """
+
+    IDLE_LIMIT = 30 * 60
+
+    def __init__(self, app: "App", seat: int, deck: str, name: str):
+        self.app = app
+        self.seat = seat            # 0 hosts, 1 joins
+        self.deck = deck
+        self.name = name
+        self.bridge = PeerBridge()
+        self.session: Optional[NP.Session] = None
+        self.match: Optional[Match] = None
+        self.error = ""
+        self.touched = time.time()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+
+    def idle(self) -> bool:
+        return time.time() - self.touched > self.IDLE_LIMIT
+
+    def touch(self) -> None:
+        self.touched = time.time()
+
+    def _run(self) -> None:
+        try:
+            decks = available_decklists()
+            cards, extra = [list(x) for x in decks[self.deck]]
+            # Both seats are people at browsers, so both answer the whole
+            # controller protocol; it is still sent rather than assumed,
+            # because the engine branches on it and a wrong claim here is a
+            # desync that would not surface until the opening mulligan.
+            surface = NP.surface_of(HumanController(None, self.seat))
+            if self.seat == 0:
+                table = NP.host_handshake(
+                    self.bridge, deck=cards, extra=extra,
+                    seed=random.randrange(1 << 30), name=self.name,
+                    app_version=__version__, surface=surface)
+            else:
+                table = NP.join_handshake(
+                    self.bridge, deck=cards, extra=extra, name=self.name,
+                    app_version=__version__, surface=surface)
+            if table.app_version and table.app_version != __version__:
+                raise NP.Handshake(
+                    f"the other player is running {table.app_version} and you "
+                    f"are running {__version__} — the same build on both sides "
+                    f"is what keeps the two games identical")
+            self.session = NP.Session(link=self.bridge, seat=self.seat)
+            config = MatchConfig(
+                decks=[f"peer:{n or '?'}" for n in table.names],
+                pilots=["human", "human"],
+                online=True, record=False, profile_seat=self.seat,
+                peer={"table": table, "session": self.session})
+            self.match = Match(config, self.app.db)
+            self.match.start()
+        except NP.NetplayError as exc:
+            self.error = str(exc)
+        except Exception as exc:
+            self.error = f"{type(exc).__name__}: {exc}"
+
+    def status(self) -> dict:
+        return {"seat": self.seat,
+                "state": ("failed" if self.error else
+                          "playing" if self.match is not None else "waiting"),
+                "error": self.error}
+
+    def stop(self, why: str = "left the match") -> None:
+        if self.session is not None:
+            self.session.goodbye(why)
+        self.bridge.close()
+        if self.match is not None:
+            self.match.stop()
+
+
 # rooms: one match, two browsers
 # ---------------------------------------------------------------------------
 # No I, O, 0 or 1 — the code gets read down a phone or typed off a screen.
@@ -1614,6 +2101,14 @@ class Room:
     the right to watch. The token is the seat: it is minted once when you take
     the seat, never appears in another player's view, and is what lets the
     server answer "is this yours to play?" on every move.
+
+    Over the internet the code is not enough to *find* the room either. Four
+    characters out of an alphabet of 32 is a million rooms, which is a wall on a
+    network you can see the other end of and no wall at all against a script; so
+    a room also has a `secret`, minted with it, which every request that did not
+    come from the host's own machine must present. It rides in the invite link
+    rather than being typed, and it is the code that stays four characters,
+    because the code is the thing a person reads down a phone.
     """
 
     # A seat polling normally sits *inside* a held request for most of its life,
@@ -1631,6 +2126,12 @@ class Room:
         self.decks: list[Optional[str]] = [deck, None]
         self.names = [name or "Player 1", ""]
         self.tokens: list[Optional[str]] = [secrets.token_urlsafe(16), None]
+        # Whoever opened the room is the person whose machine this is, and so
+        # the seat whose results belong in the profile on it. Held as the token
+        # rather than the number: a host who leaves and sits back down takes
+        # the first free chair, which is not always the one they started in.
+        self.host_token = self.tokens[0]
+        self.secret = secrets.token_urlsafe(16)
         self.seen = [time.time(), 0.0]
         self.holding = [0, 0]   # polls this seat has in flight right now
         self.created = time.time()
@@ -1638,6 +2139,14 @@ class Room:
         self.version = 0        # lobby version, so a waiting host is woken
 
     # -- seats -----------------------------------------------------------
+    def admits(self, secret: Optional[str]) -> bool:
+        """Whether a request from off this machine may see this room at all.
+
+        Checked before the seat token, and separately from it: this is the
+        difference between a room you were sent and a room you found.
+        """
+        return bool(secret) and secrets.compare_digest(self.secret, str(secret))
+
     def seat_of(self, token: Optional[str]) -> Optional[int]:
         if not token:
             return None
@@ -1672,9 +2181,13 @@ class Room:
         return free, token
 
     def _start(self) -> None:
+        host = next((i for i, t in enumerate(self.tokens)
+                     if t is not None and t == self.host_token), None)
         config = MatchConfig(
             decks=[self.decks[0], self.decks[1]],
             pilots=["human", "human"],
+            profile_seat=host,
+            names=list(self.names),
             # `reveal` is a spectator's toggle over two bots; with two people
             # playing it would be a cheat, and the control route refuses it.
             reveal=False,
@@ -1792,6 +2305,10 @@ class Server:
         self.db = db
         self.match: Optional[Match] = None
         self.rooms: dict[str, Room] = {}
+        # At most one peer-to-peer game per server. Two would need two data
+        # channels in one browser and there is no reason to want that: this is
+        # the machine of one of the two people playing.
+        self.peer: Optional[PeerLobby] = None
         self.lock = threading.Lock()
 
     def new_match(self, config: MatchConfig) -> Match:
@@ -1804,9 +2321,41 @@ class Server:
         return match
 
     # -- rooms -----------------------------------------------------------
+    # -- peer-to-peer ------------------------------------------------------
+    def new_peer(self, seat: int, deck: str, name: str) -> PeerLobby:
+        """Start (or restart) the machine's peer game. Replaces any previous."""
+        with self.lock:
+            old, self.peer = self.peer, None
+        if old is not None:
+            old.stop("started a new game")
+        lobby = PeerLobby(self, seat, deck, name)
+        with self.lock:
+            self.peer = lobby
+        lobby.start()
+        return lobby
+
+    def peer_lobby(self) -> Optional[PeerLobby]:
+        with self.lock:
+            lobby = self.peer
+        if lobby is not None and lobby.idle():
+            self.close_peer("idle too long")
+            return None
+        return lobby
+
+    def close_peer(self, why: str = "left the match") -> None:
+        with self.lock:
+            lobby, self.peer = self.peer, None
+        if lobby is not None:
+            lobby.stop(why)
+
     def new_room(self, deck: str, name: str) -> Room:
         with self.lock:
             self._reap()
+            # Each room is a live match on its own thread, holding two decks and
+            # a game state. The code space would allow thousands; the machine
+            # would not enjoy it.
+            if len(self.rooms) >= MAX_ROOMS:
+                raise ValueError("too many rooms open")
             for _ in range(50):
                 code = room_code()
                 if code not in self.rooms:
@@ -1842,6 +2391,8 @@ class Server:
 class Handler(BaseHTTPRequestHandler):
     server_version = "BraverseViewer/1.0"
     app: Server = None  # type: ignore[assignment]
+    # Overridden by `PublicHandler`, which serves the port the tunnel reaches.
+    public = False
 
     def log_message(self, fmt, *args):  # quiet; the UI is the output
         pass
@@ -1866,7 +2417,13 @@ class Handler(BaseHTTPRequestHandler):
         if not path.is_file():
             self._send(404, b"not found", "text/plain")
             return
-        ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        # Our own table, then the platform's. `mimetypes` reads the registry on
+        # Windows, where .js is routinely mapped to text/plain and .css can be
+        # too — a front end served under those types is a blank page, and the
+        # cause is nowhere near the symptom.
+        ctype = (CONTENT_TYPES.get(path.suffix.lower())
+                 or mimetypes.guess_type(path.name)[0]
+                 or "application/octet-stream")
         self._send(200, path.read_bytes(), ctype, cache=cache)
 
     def _is_local(self) -> bool:
@@ -1879,6 +2436,98 @@ class Handler(BaseHTTPRequestHandler):
         """
         host = (self.client_address[0] or "").split("%")[0]
         return host in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
+
+    def _client(self) -> str:
+        """Who to hold a rate limit against.
+
+        On the public port every connection arrives from the tunnel client on
+        loopback, so the peer address is the same for everybody and no use at
+        all here. The forwarding headers *are* worth believing on that port, and
+        only there: the one thing that can reach it is our own tunnel process,
+        so it is the only place they cannot simply be typed in by the caller.
+        """
+        if self.public:
+            for header in ("Cf-Connecting-Ip", "X-Forwarded-For"):
+                value = self.headers.get(header)
+                if value:
+                    return value.split(",")[0].strip()[:64]
+        return (self.client_address[0] or "").split("%")[0]
+
+    def _known_host(self) -> bool:
+        """Whether we have any business answering to the name we were asked by.
+
+        This is the DNS-rebinding gate. `evil.example` resolving to 127.0.0.1
+        makes a stranger's page same-origin with this server as far as the
+        browser is concerned, and `_is_local` — which is what stands between a
+        web page and the host's decklists — would agree with it. A name we were
+        never reachable under is refused here, before any route runs.
+        """
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0]
+        host = host.strip().strip("[]").lower()
+        if host in LOCAL_HOSTS or host == PUBLIC_HOST.lower():
+            return True
+        # How this machine is legitimately addressed on a network: by an address
+        # rather than a name, or by the name the network itself gave it.
+        if host.endswith(".local"):
+            return True
+        return ":" in host or all(char in "0123456789." for char in host)
+
+    def _same_origin(self) -> bool:
+        """Whether a state-changing request came from our own page.
+
+        A browser attaches `Origin` to every cross-origin request it makes and
+        cannot be talked out of it, so comparing it to the host we were asked by
+        is enough to stop another site from posting moves — or deck deletions —
+        through a browser that happens to have this server open. A request with
+        no `Origin` at all is not a browser doing that, and is left alone: curl,
+        the test suite, and the tutorial harness all live there.
+        """
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return (origin.split("://", 1)[-1].strip().lower()
+                == (self.headers.get("Host") or "").strip().lower())
+
+    def _barred(self, path: str, post: bool) -> bool:
+        """Refuse this request on posture alone, before its route is reached.
+
+        Answering here rather than at each route is the point: a new route is
+        private until it is named in `PUBLIC_ROUTES`, which is the direction a
+        mistake should fall.
+        """
+        if not self._known_host():
+            self._send(403, b"unrecognised host", "text/plain")
+            return True
+        if post and not self._same_origin():
+            self._json({"error": "cross-site request refused"}, 403)
+            return True
+        if not self.public:
+            return False
+        # The front end itself, its styles and the card art are what a joiner
+        # came for; it is the API that is narrowed.
+        if path.startswith("/api/") and path not in PUBLIC_ROUTES:
+            self._json({"error": "not available over the internet"}, 403)
+            return True
+        if post:
+            limiter = JOIN_LIMIT if path == "/api/room/join" else MOVE_LIMIT
+            if not limiter.allow(self._client()):
+                self._json({"error": "too many requests; slow down"}, 429)
+                return True
+        return False
+
+    def _find_room(self, code: Optional[str], secret: Optional[str]) -> Optional[Room]:
+        """The room with this code, if this request is entitled to find it.
+
+        A public request without the room's secret is answered exactly as one
+        naming a room that does not exist — a script walking the code space
+        should not learn which four letters are a live game.
+        """
+        room = self.app.room(code)
+        if room is None:
+            return None
+        if self.public and not room.admits(secret):
+            return None
+        return room
 
     def _deck_problem(self, name: str) -> str:
         """Why this deck cannot be taken into an online match, or "".
@@ -1904,8 +2553,104 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     # -- routes ----------------------------------------------------------
+    # -- profiles ----------------------------------------------------------
+    def _profile_post(self, path: str, body: dict) -> None:
+        """Everything under `/api/profile…`. Local machine only.
+
+        Kept in one method rather than eight branches in `do_POST` because
+        every one of them shares the same two rules: it happens on this
+        machine, and it can fail three ways — locked, wrong passphrase, or a
+        file that will not open — which the browser has to tell apart.
+        """
+        if not self._is_local():
+            self._json({"error": "profiles live on the machine running the "
+                                 "server"}, 403)
+            return
+        passphrase = str(body.get("passphrase") or "")[:MAX_PASSPHRASE]
+        try:
+            if path == "/api/profiles/new":
+                name = PR.clean_name(body.get("name"))
+                if not name:
+                    self._json({"error": "give the profile a name"}, 400)
+                    return
+                PROFILES.create(name, passphrase, str(body.get("avatar") or ""))
+            elif path == "/api/profiles/open":
+                PROFILES.open(str(body.get("slug") or ""), passphrase)
+            elif path == "/api/profiles/close":
+                PROFILES.close()
+            elif path == "/api/profiles/delete":
+                # The logs are the player's either way: taking them with the
+                # profile is asked for, never assumed.
+                dropped = profile_store().delete(str(body.get("slug") or ""),
+                                                 passphrase)
+                if body.get("logs"):
+                    for name in PR.replays_of(dropped):
+                        drop_replay(name)
+                active = PROFILES.active()
+                if active is not None and active.slug == PR.slugify(
+                        str(body.get("slug") or "")):
+                    PROFILES.close()
+            elif path == "/api/profile/avatar":
+                session = PROFILES.active()
+                if session is None:
+                    self._json({"error": "no profile is open"}, 409)
+                    return
+                picked = PR.clean_avatar(body.get("avatar"))
+                if picked == "" and body.get("avatar"):
+                    self._json({"error": "that is not a picture this can "
+                                         "store"}, 400)
+                    return
+                session.profile.avatar = picked
+                session.save()
+            elif path == "/api/profile/games/keep":
+                session = PROFILES.active()
+                if session is None:
+                    self._json({"error": "no profile is open"}, 409)
+                    return
+                entry = session.profile.keep(str(body.get("id") or ""),
+                                             bool(body.get("kept")))
+                if entry is None:
+                    self._json({"error": "no game by that id"}, 404)
+                    return
+                # Un-marking a game can push it straight back out of the
+                # window it was being held above.
+                for gone in session.profile.prune():
+                    drop_replay(gone.replay)
+                session.save()
+            elif path == "/api/profile/games/delete":
+                session = PROFILES.active()
+                if session is None:
+                    self._json({"error": "no profile is open"}, 409)
+                    return
+                entry = session.profile.forget(str(body.get("id") or ""))
+                if entry is None:
+                    self._json({"error": "no game by that id"}, 404)
+                    return
+                session.save()
+                drop_replay(entry.replay)
+            else:
+                self._json({"error": "no such profile route"}, 404)
+                return
+        except PR.Locked as exc:
+            self._json({"error": str(exc), "locked": True}, 401)
+            return
+        except PR.BadPassphrase as exc:
+            self._json({"error": str(exc), "wrong": True}, 403)
+            return
+        except PR.ProfileError as exc:
+            self._json({"error": str(exc)}, 400)
+            return
+        except OSError as exc:
+            self._json({"error": f"could not write {profile_store().dir}: {exc}"},
+                       500)
+            return
+        self._json({"ok": True, "profiles": profile_store().list(),
+                    "active": PROFILES.view()})
+
     def do_GET(self):
         path = self.path.split("?")[0]
+        if self._barred(path, post=False):
+            return
         if path == "/":
             self._file(VIEWER / "index.html")
         elif path in ("/app.js", "/sfx.js", "/confirm.js", "/style.css",
@@ -1914,7 +2659,9 @@ class Handler(BaseHTTPRequestHandler):
                       "/showcase.js", "/showcase.css",
                       "/tutorial.js", "/tutorial.css",
                       "/replays.js", "/replays.css",
-                      "/title.js", "/title.css"):
+                      "/title.js", "/title.css",
+                      "/profile.js", "/profile.css",
+                      "/netplay.js"):
             self._file(VIEWER / path.lstrip("/"))
         elif path.startswith("/card_images/"):
             name = Path(path).name
@@ -1922,6 +2669,23 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, b"bad path", "text/plain")
                 return
             self._file(IMAGES / name, cache=True)
+        elif path == "/api/peer/out":
+            # Held rather than polled: a decision the other player is waiting
+            # on must leave as soon as our seat produces it.
+            lobby = self.app.peer_lobby()
+            if lobby is None:
+                self._json({"msgs": [], "gone": True})
+                return
+            lobby.touch()
+            # `hold` lets the caller ask for a shorter wait than the default —
+            # a browser that wants to show a connecting spinner, or a test that
+            # is asserting nothing *has* been sent and would otherwise pay the
+            # full hold to find out. Capped, so it cannot pin a thread open.
+            try:
+                hold = min(PEER_HOLD, max(0.0, float(self._query().get("hold", PEER_HOLD))))
+            except (TypeError, ValueError):
+                hold = PEER_HOLD
+            self._json({"msgs": lobby.bridge.drain(hold), "peer": lobby.status()})
         elif path == "/api/config":
             decks = available_decks()
             self._json({
@@ -1931,17 +2695,23 @@ class Handler(BaseHTTPRequestHandler):
                 # nothing off this machine can reach the port, and offering a
                 # link that cannot work is worse than offering none.
                 "lan": LAN_URLS,
+                # Empty unless started with --online. When set it is the address
+                # an invite link is built from, in preference to a LAN one: the
+                # person you are sending it to is not on your network.
+                "public": PUBLIC_URL,
             })
         elif path == "/api/state":
             self._state(self._query())
         elif path == "/api/room":
-            room = self.app.room(self._query().get("room"))
+            query = self._query()
+            room = self._find_room(query.get("room"), query.get("pass"))
             if room is None:
                 self._json({"error": "no room with that code", "gone": True}, 404)
                 return
-            seat = room.seat_of(self._query().get("token"))
+            seat = room.seat_of(query.get("token"))
             room.touch(seat)
-            self._json({"room": room.lobby(), "seat": seat})
+            self._json({"room": room.lobby(), "seat": seat,
+                        "pass": room.secret if seat is not None else None})
         elif path == "/api/deck":
             name = self._query().get("name", "")
             decks = available_decklists()
@@ -1954,6 +2724,17 @@ class Handler(BaseHTTPRequestHandler):
             payload["list"] = deck
             payload["extraList"] = extra
             self._json(payload)
+        elif path == "/api/profiles":
+            # Local only, like the deck store and the replay folder: these are
+            # files on this machine, and a stranger in a room has no business
+            # knowing who plays here.
+            if not self._is_local():
+                self._json({"error": "profiles live on the machine running "
+                                     "the server"}, 403)
+                return
+            self._json({"profiles": profile_store().list(),
+                        "active": PROFILES.view(),
+                        "path": str(profile_store().dir)})
         elif path == "/api/replays":
             rows = [row for row in (replay_summary(p) for p in replay_files())
                     if row is not None]
@@ -2005,7 +2786,32 @@ class Handler(BaseHTTPRequestHandler):
         """
         since = self._since(query)
         code = query.get("room")
+        if query.get("peer"):
+            # A peer game is watched exactly like any other match, with one
+            # difference that matters: the view is always built for *our* seat,
+            # never a spectator's. Both machines hold the whole GameState in a
+            # lockstep game, so hiding the other hand is the viewer's job here
+            # and it must not be skipped. See `braverse/netplay.py`.
+            lobby = self.app.peer_lobby()
+            if lobby is None:
+                self._json({"version": 0, "idle": True})
+                return
+            lobby.touch()
+            if lobby.match is None:
+                self._json({"version": 0, "idle": True, "lobby": True,
+                            "peer": lobby.status()})
+                return
+            if since is not None:
+                lobby.match.wait_for(since)
+            view = lobby.match.view(lobby.seat)
+            view["peer"] = lobby.status()
+            self._json(view)
+            return
         if not code:
+            if self.public:
+                # The host's own solo game against a bot is not on the internet.
+                self._json({"version": 0, "idle": True})
+                return
             match = self.app.match
             if match is None:
                 self._json({"version": 0, "idle": True})
@@ -2015,7 +2821,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(match.view())
             return
 
-        room = self.app.room(code)
+        room = self._find_room(code, query.get("pass"))
         if room is None:
             self._json({"error": "no room with that code", "gone": True}, 404)
             return
@@ -2046,19 +2852,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def _seated(self, body: dict) -> tuple[Optional[Room], Optional[int]]:
         """The room and seat this request is entitled to act as, if any."""
-        room = self.app.room(body.get("room"))
+        room = self._find_room(body.get("room"), body.get("pass"))
         if room is None:
             return None, None
         return room, room.seat_of(body.get("token"))
 
     def do_POST(self):
         path = self.path.split("?")[0]
+        if self._barred(path, post=True):
+            return
         body = self._body()
         if path == "/api/new":
             decks = available_decks()
             names = body.get("decks") or ["st9_sea_fairy", "st8_wind_archer"]
             pilots = body.get("pilots") or ["human", "heuristic"]
-            if any(n not in decks for n in names):
+            # The guided first game settles all of this itself: stacked decks
+            # that are not on disk, the scripted opponent, and a fixed seed.
+            # Taking the names from the request would only let a caller ask for
+            # a tutorial the course cannot teach.
+            teaching = bool(body.get("tutorial"))
+            if teaching:
+                names = [f"tutorial · {TUT.PLAYER_LIST}",
+                         f"tutorial · {TUT.OPPONENT_LIST}"]
+                pilots = ["human", "tutorial"]
+            elif any(n not in decks for n in names):
                 self._json({"error": "unknown deck"}, 400)
                 return
             if any(p not in available_pilots() for p in pilots):
@@ -2068,6 +2885,7 @@ class Handler(BaseHTTPRequestHandler):
             config = MatchConfig(
                 decks=list(names),
                 pilots=list(pilots),
+                tutorial=teaching,
                 seed=int(seed) if seed not in (None, "") else None,
                 delay=float(body.get("delay", 0.7)),
                 paused=bool(body.get("paused", False)),
@@ -2131,6 +2949,34 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"could not write {deck_store()}: {exc}"}, 500)
                 return
             self._json({"ok": True})
+        elif path == "/api/peer/new":
+            # Local only, and deliberately so: the whole point of a peer game
+            # is that nothing is hosted here for a stranger to reach. The data
+            # channel is dialled by the browser, not by us.
+            deck = str(body.get("deck") or "")
+            problem = self._deck_problem(deck)
+            if problem:
+                self._json({"error": problem}, 400)
+                return
+            seat = 0 if body.get("host") else 1
+            lobby = self.app.new_peer(seat, deck, clean_deck_name(body.get("name")))
+            self._json({"ok": True, "seat": seat, "peer": lobby.status()})
+        elif path == "/api/peer/in":
+            # Whatever arrived on the data channel, in the order it arrived.
+            lobby = self.app.peer_lobby()
+            if lobby is None:
+                self._json({"error": "no peer game", "gone": True}, 404)
+                return
+            lobby.touch()
+            messages = body.get("msgs")
+            if not isinstance(messages, list):
+                self._json({"error": "expected a list of messages"}, 400)
+                return
+            lobby.bridge.deliver(messages)
+            self._json({"ok": True, "peer": lobby.status()})
+        elif path == "/api/peer/close":
+            self.app.close_peer(str(body.get("why") or "left the match"))
+            self._json({"ok": True})
         elif path == "/api/room/new":
             deck = str(body.get("deck") or "")
             problem = self._deck_problem(deck)
@@ -2142,9 +2988,10 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json({"error": str(exc)}, 503)
                 return
-            self._json({"room": room.code, "seat": 0, "token": room.tokens[0]})
+            self._json({"room": room.code, "seat": 0, "token": room.tokens[0],
+                        "pass": room.secret})
         elif path == "/api/room/join":
-            room = self.app.room(body.get("room"))
+            room = self._find_room(body.get("room"), body.get("pass"))
             if room is None:
                 self._json({"error": "no room with that code", "gone": True}, 404)
                 return
@@ -2158,7 +3005,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 self._json({"error": str(exc)}, 409)
                 return
-            self._json({"room": room.code, "seat": seat, "token": token})
+            self._json({"room": room.code, "seat": seat, "token": token,
+                        "pass": room.secret})
         elif path == "/api/room/leave":
             room, seat = self._seated(body)
             if room is None or seat is None:
@@ -2187,6 +3035,16 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"error": "not your seat"}, 403)
                     return
                 match = room.match
+            elif body.get("peer"):
+                # Our own seat in a peer game. The seat is not taken from the
+                # request: this server plays exactly one seat, the one the
+                # handshake gave it, and a browser cannot ask to answer for the
+                # other machine.
+                lobby = self.app.peer_lobby()
+                if lobby is None or lobby.match is None:
+                    self._json({"error": "no peer game", "gone": True}, 404)
+                    return
+                match, seat = lobby.match, lobby.seat
             else:
                 match = self.app.match
             if match is None:
@@ -2288,6 +3146,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"could not delete {path_}: {exc}"}, 500)
                 return
             self._json({"ok": True})
+        elif path.startswith("/api/profile"):
+            self._profile_post(path, body)
         elif path == "/api/control":
             if body.get("room"):
                 # Pause, step, speed and reveal are a spectator's controls over
@@ -2315,16 +3175,52 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"not found", "text/plain")
 
 
+class PublicHandler(Handler):
+    """The same server, on the port the tunnel forwards to.
+
+    Public *by construction* rather than by inspection. It cannot be talked into
+    believing a request came from the host's keyboard, because it has no way to
+    say so — which is the whole reason `--online` runs two listeners instead of
+    hardening one. A tunnel client connects from loopback, so on a shared port
+    the only question that matters here ("is this the person who owns these
+    files?") would answer yes to everybody.
+    """
+
+    public = True
+
+    def _is_local(self) -> bool:
+        return False
+
+
 class Viewer(ThreadingHTTPServer):
     """The HTTP server, wired so it cannot outlive the terminal that ran it."""
 
     daemon_threads = True       # a live request must never hold the process up
-    allow_reuse_address = True  # restart on the same port without a TIME_WAIT wait
+    # Restart on the same port without waiting out TIME_WAIT. Not on Windows:
+    # there SO_REUSEADDR lets a second server bind a port someone is already
+    # listening on, and then half the requests go to the other process — so
+    # take the honest "port is busy" error instead.
+    allow_reuse_address = os.name != "nt"
 
 
 def port_holder(port: int) -> str:
     """PID currently listening on ``port``, for a useful error message."""
     import subprocess
+    if WINDOWS:
+        # netstat is the one always present; -ano keeps it numeric so nothing
+        # here depends on the machine's language.
+        try:
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            return ""
+        pids = []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[3] == "LISTENING" \
+                    and parts[1].rsplit(":", 1)[-1] == str(port):
+                pids.append(parts[4])
+        return " ".join(dict.fromkeys(pids))
     try:
         out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
                              capture_output=True, text=True, timeout=5).stdout
@@ -2334,7 +3230,13 @@ def port_holder(port: int) -> str:
 
 
 def main() -> None:
+    global PUBLIC_URL, PUBLIC_HOST
     import signal
+
+    # Everything this server prints — card names, the em dashes in its own
+    # status lines — is text the Windows default code page cannot encode, and a
+    # redirected stdout there is cp1252, not UTF-8. See braverse.console.
+    utf8_output()
 
     parser = argparse.ArgumentParser(description=__doc__)
     # $PORT lets a supervisor (or a preview harness juggling several sessions)
@@ -2345,8 +3247,23 @@ def main() -> None:
     parser.add_argument("--lan", action="store_true",
                         help="listen on every interface so someone else on this "
                              "network can join a room")
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--online", action="store_true",
+                        help="also put a room on a public https address, via a "
+                             "tunnel client, so someone off this network can "
+                             "join (needs cloudflared or ngrok)")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="serve, but do not open anything")
+    # The game is a desktop game as far as anyone playing it is concerned, so a
+    # window is what it opens when the machine can draw one; `desktop` decides
+    # what "can" means. --browser forces the old tab, for debugging the front
+    # end with real devtools.
+    parser.add_argument("--window", action="store_true",
+                        help="force the desktop window (fail if no backend)")
+    parser.add_argument("--browser", action="store_true",
+                        help="open a browser tab instead of a window")
     args = parser.parse_args()
+    if args.window and args.browser:
+        parser.error("--window and --browser are opposites; pick one")
     if args.lan and args.host == "127.0.0.1":
         args.host = "0.0.0.0"
 
@@ -2358,40 +3275,106 @@ def main() -> None:
         pid = port_holder(args.port)
         print(f"cannot listen on port {args.port}: {exc}")
         if pid:
+            kill = f"taskkill /PID {pid} /F" if WINDOWS else f"kill {pid}"
             print(f"an older viewer is still running as PID {pid} — stop it with:\n"
-                  f"    kill {pid}")
+                  f"    {kill}")
         print(f"or pick another port:\n    python play_server.py --port {args.port + 1}")
         raise SystemExit(1)
 
+    # The public face of the server, when asked for: a second listener bound to
+    # loopback on a port of the OS's choosing, serving `PublicHandler`, with the
+    # tunnel pointed at it. Nothing but the tunnel client can reach it, and it
+    # is the only thing the tunnel can reach.
+    public: Optional[Viewer] = None
+    link: Optional[TUN.Tunnel] = None
+    if args.online:
+        if not TUN.available():
+            print(TUN.INSTALL_HINT)
+            raise SystemExit(1)
+        PublicHandler.app = Handler.app
+        public = Viewer(("127.0.0.1", 0), PublicHandler)
+        try:
+            link = TUN.open_tunnel(public.server_address[1])
+        except TUN.TunnelError as exc:
+            public.server_close()
+            print(f"could not open a tunnel: {exc}")
+            raise SystemExit(1)
+        PUBLIC_URL = link.url.rstrip("/") + "/"
+        PUBLIC_HOST = link.host
+        threading.Thread(target=public.serve_forever, daemon=True).start()
+
     local = f"http://127.0.0.1:{args.port}/"
     url = local if args.host in ("0.0.0.0", "::") else f"http://{args.host}:{args.port}/"
-    print(f"CookieRun: Braverse — visual player on {url}   (ctrl-c to stop)")
+    # A window has to own the main thread (every OS web view insists on it), so
+    # in that mode the server moves to a thread and the window becomes what the
+    # process is waiting on: closing it is what stops the game.
+    windowed = not args.no_browser and not args.browser and (
+        args.window or desktop.available())
+
+    where = "in its own window" if windowed else f"on {url}"
+    print(f"CookieRun: Braverse — visual player {where}   (ctrl-c to stop)")
+    if windowed:
+        print(f"  serving it locally on {url} — closing the window stops the game")
     if args.host not in ("127.0.0.1", "localhost"):
         LAN_URLS[:] = lan_urls(args.port)
         for shared in LAN_URLS:
             print(f"  others on this network can join at {shared}")
-    if not args.no_browser:
+    if link is not None:
+        print(f"  online via {link.backend.name}: {PUBLIC_URL}")
+        print("  host a room and send the invite link it gives you — the link "
+              "carries the room's key,\n  so the code alone is not enough to "
+              "find your game. That address only serves\n  the game: your "
+              "decks, replays and local matches stay on this machine.")
+
+    if not args.no_browser and not windowed:
         import webbrowser
         threading.Timer(0.5, lambda: webbrowser.open(url)).start()
 
     # Closing the terminal sends SIGHUP and `kill` sends SIGTERM; take both as
     # "shut down", so a stray server can never end up holding the port. The
-    # shutdown has to run off the serving thread or it deadlocks.
+    # shutdown has to run off the serving thread or it deadlocks. Windows has
+    # no SIGHUP — asking for it by name is an AttributeError at startup, so the
+    # set is whatever this platform actually defines.
     def stop(signum, _frame):
         print(f"\nstopping ({signal.Signals(signum).name})")
         threading.Thread(target=httpd.shutdown, daemon=True).start()
+        if windowed:
+            desktop.close_window()   # or the window outlives the server it shows
 
-    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
-        signal.signal(sig, stop)
+    for name in ("SIGTERM", "SIGHUP", "SIGINT", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is not None:
+            signal.signal(sig, stop)
 
-    try:
-        httpd.serve_forever()
-    finally:
+    def cleanup() -> None:
+        if link is not None:
+            link.close()               # or the tunnel outlives the game it served
+        if public is not None:
+            public.shutdown()
+            public.server_close()
         if Handler.app.match is not None:
             Handler.app.match.stop()   # release a match thread blocked on a human
         Handler.app.close()            # and the same for every open room
         httpd.server_close()
         print("bye")
+
+    if windowed:
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        backend = desktop.open_window(local, on_close=httpd.shutdown)
+        if not backend:
+            # Asked for a window on a machine that cannot draw one: say so
+            # rather than serving a game nobody can see.
+            httpd.shutdown()
+            cleanup()
+            print(desktop.INSTALL_HINT)
+            raise SystemExit(1)
+        cleanup()
+        return
+
+    try:
+        httpd.serve_forever()
+    finally:
+        cleanup()
 
 
 if __name__ == "__main__":

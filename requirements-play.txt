@@ -7,3 +7,8 @@
 # Everything else in this project is standard library.
 
 numpy>=1.24        # braverse.features, imported by the package itself
+
+# Optional: the game in a native window rather than a browser tab. Without it
+# `play_server.py` uses a chromeless Chrome/Edge window, or a plain tab.
+# pywebview>=5
+

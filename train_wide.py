@@ -67,6 +67,7 @@ from braverse.deckfile import read_deck
 from braverse.features import Encoder
 from braverse.features_wide import WideEncoder
 from braverse.rl import TrainConfig, Trainer
+from braverse.console import utf8_output
 
 ENCODERS = {"wide": WideEncoder, "stock": Encoder}
 
@@ -117,6 +118,7 @@ def train_one(name: str, decks, db, args) -> dict:
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser(
         description="Train an agent on the wide state encoder.",
         epilog="See the module docstring for worked examples.")
@@ -166,7 +168,7 @@ def main() -> None:
         print("Read `vs unseen`, not `vs heuristic` — see the module docstring.")
 
     Path(args.out).with_suffix(".summary.json").write_text(
-        json.dumps(results, indent=1))
+        json.dumps(results, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

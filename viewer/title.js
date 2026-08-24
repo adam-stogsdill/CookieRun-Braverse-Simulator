@@ -57,6 +57,10 @@ const Title = {
     // A finished match asks its question once the last scene has played out;
     // `dismissed` is the person having said they want to look at the board.
     if (!snap.over) { Title.dismissed = null; Title.hideOver(); return; }
+    // A finished game is banked against the open profile on the match thread;
+    // this is only the browser going back for the new numbers. profile.js is
+    // loaded after this file, so it is checked for rather than assumed.
+    if (typeof Profile !== "undefined") Profile.seen(snap.version);
     if (state.animating || Title.on || Title.dismissed === snap.version) return;
     // Another tab has the window: the deck builder and the replay shelf are
     // not places to be asked what to do about a game that has ended.

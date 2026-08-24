@@ -14,6 +14,7 @@ import re
 
 from braverse import default_db
 from braverse.effects import Trigger, get_effect, is_implemented
+from braverse.console import utf8_output
 
 TRIGGERS = list(Trigger)
 
@@ -29,6 +30,7 @@ def needs_effect(card) -> bool:
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--phrases", action="store_true")
     parser.add_argument("--top", type=int, default=30)

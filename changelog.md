@@ -1,5 +1,116 @@
 # Changelog
 
+## 0.2.33
+
+- **You can now play someone directly, with no host and no open port.** The new
+  **Play someone directly** entry on the title screen connects the two
+  computers straight to each other. One of you starts and gets a code, sends it
+  over however you already chat, and pastes the reply that comes back; the game
+  begins on its own. Nobody has to run a server for the other, nothing is
+  forwarded on a router, and neither of you learns the other's address.
+- Both computers run the game and swap only the moves, so it stays in step over
+  a bad connection and costs almost nothing to keep open.
+- **It will tell you if the two games ever disagree.** If you are on different
+  versions, or one of you has an edited card, the match stops and says which
+  decision went wrong instead of leaving you playing two slightly different
+  games. Mismatched versions are caught before a card is dealt.
+- **The dialog is explicit that a direct game is not private from the person you
+  are playing.** Their computer runs the rules too, so it holds your hand and
+  only their screen hides it. Play it with people you trust; for a game that
+  keeps your hand secret from your opponent, **Play someone on your network** is
+  still the mode that does that.
+- Closing the tab now tells the other player, instead of leaving them waiting on
+  a seat that will never move again.
+- **There is a profile now, and it is yours alone.** The chip in the corner of
+  the title screen keeps the games you have played, how each of your decks has
+  done, and a level that climbs as you play. It is one encrypted file on your
+  own machine — no account, nothing sent anywhere, no port opened.
+- Give the profile a passphrase and nothing but that passphrase opens it. Leave
+  it blank and the file is still encrypted, by a key kept beside it — which
+  keeps it private in a backup or a synced folder, though not from someone
+  sitting at your computer. The chooser says which of the two a profile is
+  rather than calling both of them safe.
+- **Playing a person is 1 XP, and winning is 3 more.** A bot pays nothing, and
+  two bots playing each other pay nothing to anybody — so a level is a record of
+  games against people. Bot games are still listed, and each row says why it
+  paid what it did. A level costs four times the level you are on, so the first
+  one is a single won game.
+- Every deck you play gets its own line: games, won, lost, drawn and a win rate.
+- **The last thirty games are kept, and each one can still be watched.** Star a
+  game and it is kept for good and stops counting against the thirty. A game
+  that drops off the list takes its replay with it; deleting one yourself does
+  the same, and leaves the win itself standing — deleting the log is not a way
+  to un-play a game.
+- **Pick a profile picture:** any card's art, or a picture of your own, shrunk
+  in the browser so the profile stays small.
+- A game is recorded the moment it ends, on its own thread — so a game you
+  walked away from still counts, and the guided first game, which is a lesson
+  rather than a game, is not recorded at all.
+
+## 0.2.32
+
+- **The guided first game is now a set piece, and it always plays out.** The
+  tutorial deals both decks from the top instead of shuffling them, so the hand
+  it talks about is the hand you get: a Cookie to open with, two Items to spend
+  as support, a 【Blocker】 for your second slot, a Trap, and a cheap attacker.
+  No more being told to play a Cookie you were never dealt.
+- Take the free mulligan and you get a second hand with all the same lessons in
+  it, rather than whatever was next in the box.
+- **The opponent is a new pilot, "tutorial", that plays to teach.** It lays at
+  most two supports and swings once a turn, so it can never open on a
+  three-damage Cookie and grind you out while you are still reading — the old
+  practice bot had the game by turn 9 against someone following along. It also
+  goes for your *sturdiest* Cookie, which is what keeps your 【Blocker】 free to
+  step in front of the attack.
+- It also throws differently each round of the toss instead of repeating one
+  throw, so rock no longer ties over and over, and it hands you the first turn
+  when it wins — the course is written from the opening player's seat.
+- The step that waits for your first attack now says what is missing ("place
+  another card as support") instead of just "waiting".
+- The block tip no longer says blocking rests your Cookie. Most 【Blocker】s pay
+  energy — including the one the tutorial deals you — and only a few rest
+  themselves; it now says so.
+- A game that ends mid-tutorial no longer dims the result behind the tutorial's
+  own shading.
+
+## 0.2.31
+
+- **The header is down to the buttons you actually press mid-game.** Speed,
+  reveal, flip opponent's mat, sound, confirm and hold have moved out of the
+  top bar into a **Settings** window, opened with the gear next to *Learn*.
+  Every setting behaves exactly as it did and is still remembered per browser —
+  there is just far less furniture above the board.
+
+## 0.2.30
+
+- **Windows support.** The game starts, plays and saves on Windows the same way
+  it does on macOS and Linux, from the same checkout.
+- It no longer quits on startup there, the board no longer comes up blank
+  (Windows was telling the browser the game's own code was plain text), and
+  card names, decklists and replays are no longer mangled by the system's
+  default text encoding.
+- A deck or replay saved on Windows is now the same file as one saved on a Mac,
+  so the two can be swapped freely.
+- A copy installed somewhere it cannot write to — Program Files, say — now
+  keeps your replays and saved decks in your user folder instead of failing to
+  save them.
+- If the port is already in use, the message names the process holding it and
+  the Windows command to stop it.
+- Long training or deck-generation runs whose output is sent to a log file no
+  longer stop partway through with an encoding error the first time a card name
+  is printed.
+
+## 0.2.29
+
+- **The game now opens in its own window** instead of a browser tab — no
+  address bar, no tabs, and closing the window quits the game. Nothing about
+  playing it changed otherwise.
+- It uses a native window if `pywebview` is installed (`pip install
+  pywebview`), otherwise a chromeless Chrome/Edge/Brave window, otherwise a
+  browser tab exactly like before.
+- `--browser` asks for the old tab on purpose; `--window` insists on a real
+  window and tells you what to install if it cannot open one.
+
 ## 0.2.26
 
 - **New: a Replays tab, and every game you finish is kept.** Any of them can be

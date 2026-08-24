@@ -372,14 +372,15 @@ class Recording:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.to_json()))
+        with tmp.open("w", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(self.to_json()))
         tmp.replace(path)      # never leave a half-written replay behind
         return path
 
     @classmethod
     def load(cls, path: Path) -> "Recording":
         try:
-            blob = json.loads(Path(path).read_text())
+            blob = json.loads(Path(path).read_text(encoding="utf-8"))
         except OSError as exc:
             raise ReplayError(f"could not read {path}: {exc}") from exc
         except json.JSONDecodeError as exc:

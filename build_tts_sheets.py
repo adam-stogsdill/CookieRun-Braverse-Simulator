@@ -26,6 +26,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from braverse.console import utf8_output
+
 # TTS caps a deck sheet at 10 columns by 7 rows.
 MAX_COLUMNS = 10
 MAX_ROWS = 7
@@ -45,7 +47,7 @@ def load_rows(csv_path: Path) -> list[dict]:
 
 def deck_card_ids(deck_file: Path) -> list[str]:
     """Read a decklist written by evolve_deck.py (JSON blob at the end)."""
-    text = deck_file.read_text()
+    text = deck_file.read_text(encoding="utf-8")
     blob = json.loads(text[text.index("{", text.rindex("\n\n")):])
     return list(blob["deck"])
 
@@ -72,6 +74,7 @@ def build_sheet(card_ids: list[str], image_dir: Path, card_width: int
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     parser.add_argument("--images", type=Path, default=Path("card_images"))
@@ -137,7 +140,8 @@ def main() -> None:
 
     (args.out / "manifest.json").write_text(json.dumps(
         {"label": label, "card_width": args.width,
-         "missing_images": absent, "sheets": manifest}, indent=1))
+         "missing_images": absent, "sheets": manifest}, indent=1),
+        encoding="utf-8")
     print(f"\nmanifest -> {args.out}/manifest.json")
     if absent:
         print(f"{len(absent)} cards had no image, e.g. {absent[:5]}")

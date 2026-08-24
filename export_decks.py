@@ -21,6 +21,7 @@ from pathlib import Path
 
 from braverse import default_db
 from braverse.deckfile import DECK_DIR, archetype_name, run_tag, write_archetypes
+from braverse.console import utf8_output
 
 
 def best_by_archetype(history: list[dict], db) -> dict[str, dict]:
@@ -43,6 +44,7 @@ def best_by_archetype(history: list[dict], db) -> dict[str, dict]:
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("runs", nargs="+", help="coevolved_*.json files")
     parser.add_argument("--dir", default=DECK_DIR)
@@ -54,7 +56,7 @@ def main() -> None:
         if not path.exists():
             print(f"{run}: not found, skipping")
             continue
-        history = json.loads(path.read_text())
+        history = json.loads(path.read_text(encoding="utf-8"))
         if not history:
             print(f"{run}: no rounds recorded, skipping")
             continue

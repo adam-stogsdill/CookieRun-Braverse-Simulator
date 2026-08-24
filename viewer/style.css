@@ -708,10 +708,9 @@ button.wide { width: 100%; }
 
 /* Pacing is a spectator's business; in a match against a person there is
    nobody to pause. */
-body.online .controls .speed,
 body.online .controls #btn-pause,
 body.online .controls #btn-step,
-body.online #reveal-label { display: none; }
+body.online #settings-watch { display: none; }
 
 .lobby {
   position: fixed; inset: 0; z-index: 40;
@@ -1355,13 +1354,64 @@ body.online #reveal-label { display: none; }
 }
 #hintline.on { opacity: 1; transform: translate(-50%, 0); }
 
-.controls .check.pick { gap: 4px; }
-.controls .check.pick select {
+/* ---------------------------------------------------------------- settings
+   The bar used to carry every one of these as its own control, which is a lot
+   of furniture above a board you are trying to read. They live in a dialog
+   now; the ids are unchanged, so the wiring in app.js did not move with them. */
+.controls button.icon { padding: 5px 9px; font-size: 14px; line-height: 1; }
+#settings { width: 380px; }
+#settings label {
+  flex-direction: row; align-items: center; gap: 8px;
+  font-size: 12px; margin-bottom: 10px;
+}
+#settings h3 { margin: 14px 0 8px; }
+#settings-watch h3 { margin-top: 0; }
+#settings .speed input { width: 150px; margin-left: auto; }
+#settings .speed #speed-label { min-width: 40px; text-align: right; }
+#settings .check.pick select { margin-left: auto; }
+#settings .check.pick select {
   background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 1px 4px;
+  padding: 2px 6px;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
 }
+
+/* Playing someone directly — the code exchange. See viewer/netplay.js.
+ *
+ * The warning is styled as loudly as it reads. A peer game hands the whole
+ * game state to the other machine, and someone picking this because it sounds
+ * like the private option has misunderstood it in the one way that matters. */
+/* Both panes open at once would be taller than a laptop screen, and the code
+ * boxes are the part that must stay reachable — so the body scrolls and the
+ * status line and Close stay pinned where they can always be found. */
+#peerplay { display: flex; flex-direction: column; max-height: 88vh; }
+#peerplay .peer-form {
+  display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+}
+#peerplay .peer-foot { position: sticky; bottom: 0; background: var(--panel); }
+#peerplay .peer-blurb { margin: 0 0 10px; font-size: 12px; color: var(--dim); line-height: 1.5; }
+#peerplay .peer-warn {
+  margin: 0 0 14px; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+  border: 1px solid var(--bad); border-left-width: 3px; border-radius: 8px;
+  background: rgba(240, 85, 79, .08); color: var(--ink);
+}
+#peerplay .peer-warn b { color: var(--ink); }
+#peerplay .peer-roles { display: flex; gap: 8px; margin-bottom: 4px; }
+#peerplay .peer-roles button { flex: 1; }
+#peerplay .peer-step { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 14px; }
+#peerplay .peer-step.hidden { display: none; }
+#peerplay textarea {
+  width: 100%; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px; line-height: 1.4; word-break: break-all;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+}
+#peerplay .peer-step button { margin-bottom: 10px; }
+#peerplay .peer-foot {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
+}
+#peerplay .peer-status { flex: 1; font-size: 11px; color: var(--dim); min-height: 14px; }

@@ -1,0 +1,229 @@
+/* The player's profile: the chip on the title screen, and the three dialogs
+ * behind it.
+ *
+ * Everything here is a <dialog>, so it draws in the browser's top layer over
+ * whatever is on screen — the title, the board, or another tab — without any
+ * of them having to know about it. The shared dialog look lives in style.css;
+ * this file is only what those three need on top of it.
+ */
+
+/* Password boxes are new here — style.css styles the other input types. */
+dialog input[type=password] {
+  font: inherit; color: var(--ink); background: #262b39;
+  border: 1px solid var(--line); border-radius: 7px; padding: 5px 7px;
+}
+
+/* ------------------------------------------------------------------- chip */
+/* Top right of the title screen. Sits in the corner rather than in the menu:
+   it is who you are, not something to play. */
+.profile-chip {
+  position: absolute;
+  top: 18px; right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 190px;
+  padding: 8px 14px 8px 8px;
+  text-align: left;
+  background: rgba(28, 32, 43, .72);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+}
+.profile-chip:hover { border-color: var(--accent); }
+.profile-chip.hidden { display: none; }
+
+.chip-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chip-text b { font-size: 13px; font-weight: 600; }
+.chip-text i { font-style: normal; font-size: 11px; color: var(--dim); }
+
+/* --------------------------------------------------------------- avatars */
+.avatar {
+  flex: none;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 16px; font-weight: 700; color: #0f1218;
+  background: linear-gradient(160deg, var(--accent), #d3771a);
+  background-size: cover;
+  background-position: center 22%;
+  border: 1px solid var(--line);
+}
+.avatar.art { color: transparent; background-color: #0d1016; }
+.avatar.big { width: 64px; height: 64px; font-size: 26px; cursor: pointer; }
+.avatar.big:hover { border-color: var(--accent); }
+
+/* ------------------------------------------------------------------- xp */
+.xpbar {
+  width: 100%;
+  min-width: 120px;
+  height: 4px;
+  margin-top: 3px;
+  border-radius: 999px;
+  background: #2b3141;
+  overflow: hidden;
+}
+.xpfill { height: 100%; background: var(--accent); border-radius: 999px; }
+
+/* --------------------------------------------------------------- chooser */
+.profile-list { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 14px; }
+
+.profile-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg2);
+  overflow: hidden;
+}
+.profile-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  text-align: left;
+}
+.profile-pick:hover { background: #222735; }
+.profile-pick .tag { margin-left: auto; font-size: 10.5px; color: var(--good); }
+
+.profile-unlock {
+  display: flex; gap: 6px; align-items: center;
+  padding: 0 10px 9px 58px;
+}
+.profile-unlock input { flex: 1; }
+
+.profile-new {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.profile-new .newfields {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  gap: 10px;
+  flex: 1;
+}
+.profile-new label { margin-bottom: 0; }
+/* An <input> carries an intrinsic width of about twenty characters, which is
+   wider than the column it is in — without this the grid pushes Create off the
+   edge of the dialog. */
+.profile-new input { min-width: 0; width: 100%; }
+.facebtn {
+  background: transparent; border: 0; padding: 0;
+  border-radius: 50%;
+}
+
+.profile-empty { color: var(--dim); font-size: 12px; margin: 6px 0; }
+
+/* ------------------------------------------------------------------ pane */
+#profile { width: 720px; }
+
+.profile-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.profile-who { flex: 1; min-width: 0; }
+.profile-who h2 { margin: 0 0 2px; }
+.profile-level { font-size: 12px; color: var(--accent); margin-bottom: 5px; }
+.profile-xp { font-size: 11px; color: var(--dim); margin-top: 4px; }
+/* The bar is a reading of one number, not a rule across the dialog. */
+.profile-who .xpbar { max-width: 260px; }
+
+#profile h3 { margin-top: 16px; }
+
+.profile-tally {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.profile-tally .stat {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 4px;
+  text-align: center;
+}
+.profile-tally .stat b { display: block; font-size: 17px; }
+.profile-tally .stat i {
+  font-style: normal; font-size: 10.5px; color: var(--dim);
+}
+
+.profile-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.profile-table th {
+  text-align: right; font-weight: 500; color: var(--dim);
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .4px;
+  padding: 2px 6px;
+}
+.profile-table th:first-child, .profile-table td:first-child { text-align: left; }
+.profile-table td { text-align: right; padding: 4px 6px; border-top: 1px solid var(--line); }
+.profile-table td.deckname { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.profile-table td.good { color: var(--good); }
+.profile-table td.bad { color: var(--bad); }
+
+/* ----------------------------------------------------------------- games */
+.profile-games {
+  display: flex; flex-direction: column; gap: 5px;
+  max-height: 320px; overflow: auto;
+  margin-bottom: 8px;
+}
+.game-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 9px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  border-left-width: 3px;
+  border-radius: 8px;
+}
+/* The result is readable at a glance from the edge of the row, so a list of
+   thirty games reads as a shape rather than as thirty sentences. */
+.game-row.win { border-left-color: var(--good); }
+.game-row.loss { border-left-color: var(--bad); }
+.game-row.draw { border-left-color: var(--dim); }
+
+.game-row .star {
+  background: transparent; border: 0; padding: 0;
+  font-size: 16px; line-height: 1; color: var(--dim);
+}
+.game-row .star.on { color: var(--accent); }
+
+.game-main { flex: 1; min-width: 0; }
+.game-decks {
+  font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.game-meta {
+  display: flex; gap: 10px; flex-wrap: wrap;
+  font-size: 10.5px; color: var(--dim); margin-top: 2px;
+}
+.game-meta .result { text-transform: uppercase; letter-spacing: .4px; }
+.game-row.win .game-meta .result { color: var(--good); }
+.game-row.loss .game-meta .result { color: var(--bad); }
+.game-meta .xp { color: var(--accent); }
+.game-tools { display: flex; gap: 6px; align-items: center; flex: none; }
+.game-tools .dim { font-size: 10.5px; color: var(--dim); }
+
+#profile menu .grow { flex: 1; }
+#profile menu .danger:hover { color: var(--bad); border-color: var(--bad); }
+
+/* --------------------------------------------------------------- picture */
+.avatar-search { margin-bottom: 8px; }
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(58px, 1fr));
+  gap: 6px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 2px;
+  margin-bottom: 12px;
+}
+.avatar-card {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background-color: #0d1016;
+  background-size: cover;
+  background-position: center 20%;
+  padding: 0;
+}
+.avatar-card:hover { border-color: var(--accent); }
+.avatar-file { font-size: 11px; color: var(--dim); }

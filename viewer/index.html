@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="/tutorial.css">
 <link rel="stylesheet" href="/replays.css">
 <link rel="stylesheet" href="/title.css">
+<link rel="stylesheet" href="/profile.css">
 </head>
 <body>
 
@@ -26,37 +27,8 @@
   <div class="controls">
     <button id="btn-pause" class="ghost" title="Pause / resume the bots">Pause</button>
     <button id="btn-step" class="ghost" title="Advance one bot decision">Step</button>
-    <label class="speed" title="Delay between bot decisions">
-      speed
-      <input id="speed" type="range" min="0" max="2000" step="50" value="700">
-      <span id="speed-label">0.7s</span>
-    </label>
-    <label class="check" id="reveal-label" title="Show both hands (HP piles stay face down until revealed)">
-      <input id="reveal" type="checkbox"> reveal
-    </label>
-    <label class="check" title="Show the opponent's mat rotated, as it would sit across the table">
-      <input id="flipopp" type="checkbox" checked> flip opp.
-    </label>
-    <label class="check" title="Card flicks, hits and breaks">
-      <input id="sound" type="checkbox" checked> sound
-    </label>
-    <label class="check pick" title="Hold the mouse button to send a move you cannot take back, instead of clicking it">
-      confirm
-      <select id="confirm-level">
-        <option value="off">off</option>
-        <option value="key">key moves</option>
-        <option value="all">every move</option>
-      </select>
-    </label>
-    <label class="check pick" id="hold-label" title="How long a move has to be held before it is sent">
-      hold
-      <select id="hold-ms">
-        <option value="200">0.2s</option>
-        <option value="350">0.35s</option>
-        <option value="550">0.55s</option>
-        <option value="800">0.8s</option>
-      </select>
-    </label>
+    <button id="btn-settings" class="ghost icon" title="Settings — view, sound and confirmation"
+            aria-label="Settings">⚙</button>
     <button id="btn-learn" class="ghost" title="A guided first game against the bot">Learn</button>
     <button id="btn-new" class="primary">New match</button>
   </div>
@@ -149,6 +121,7 @@
 </div>
 
 <div id="title" class="hidden">
+  <button id="title-profile" class="profile-chip"></button>
   <div class="title-mark">
     <div class="big">CookieRun<span>: Braverse</span></div>
     <div class="sub">unofficial rules engine</div>
@@ -157,6 +130,7 @@
     <button id="title-bot"><b>Play a bot</b><i>You take a seat; the bot answers for the other</i></button>
     <button id="title-watch"><b>Watch two bots</b><i>Pause, step and read the whole match</i></button>
     <button id="title-lan"><b>Play someone on your network</b><i>Host a room, or join one with its code</i></button>
+    <button id="title-peer"><b>Play someone directly</b><i>Swap a code once; no host, no open port</i></button>
   </nav>
   <div class="title-minor">
     <button id="title-learn">Guided first game</button>
@@ -177,6 +151,57 @@
     <button id="over-look" class="look">stay and look at the board</button>
   </div>
 </div>
+
+<dialog id="peerplay">
+  <form method="dialog" class="peer-form">
+    <h2>Play someone directly</h2>
+    <p class="peer-blurb">
+      Both computers run the game and swap moves straight across. Nothing is
+      hosted, no port is opened, and neither of you needs the other's address.
+    </p>
+    <p class="peer-warn">
+      Your opponent's computer runs the rules too, so it holds the whole game —
+      your hand included — and only its screen hides it. Play this with people
+      you would hand your deck to. For a game that keeps your hand secret from
+      the other player, use <b>Play someone on your network</b> instead.
+    </p>
+
+    <label>Your deck <select id="peer-deck"></select></label>
+    <label>Your name <input id="peer-name" maxlength="24" placeholder="optional"></label>
+
+    <div class="peer-roles">
+      <button id="peer-be-host" class="primary" type="button">I'll start</button>
+      <button id="peer-be-guest" class="ghost" type="button">I was sent a code</button>
+    </div>
+
+    <div id="peer-step-host" class="peer-step hidden">
+      <label>1. Send this code to the other player
+        <textarea id="peer-offer" rows="3" readonly></textarea>
+      </label>
+      <button id="peer-copy" class="ghost" type="button">Copy</button>
+      <label>2. Paste the code they send back
+        <textarea id="peer-answer" rows="3" placeholder="their reply code"></textarea>
+      </label>
+      <button id="peer-accept" class="primary" type="button">Start the game</button>
+    </div>
+
+    <div id="peer-step-guest" class="peer-step hidden">
+      <label>1. Paste the code you were sent
+        <textarea id="peer-offer-in" rows="3" placeholder="their code"></textarea>
+      </label>
+      <button id="peer-reply" class="primary" type="button">Make my reply code</button>
+      <label>2. Send this back to them
+        <textarea id="peer-answer-out" rows="3" readonly></textarea>
+      </label>
+      <button id="peer-copy-answer" class="ghost" type="button">Copy</button>
+    </div>
+
+    <div class="peer-foot">
+      <span id="peer-status" class="peer-status"></span>
+      <button id="peer-close" class="ghost">Close</button>
+    </div>
+  </form>
+</dialog>
 
 <div id="centre" class="centre hidden"></div>
 
@@ -267,6 +292,130 @@
   </form>
 </dialog>
 
+<dialog id="settings">
+  <form method="dialog" id="settings-form">
+    <h2>Settings</h2>
+
+    <div id="settings-watch">
+      <h3>Watching</h3>
+      <label class="speed" title="Delay between bot decisions">
+        speed
+        <input id="speed" type="range" min="0" max="2000" step="50" value="700">
+        <span id="speed-label">0.7s</span>
+      </label>
+      <label class="check" id="reveal-label" title="Show both hands (HP piles stay face down until revealed)">
+        <input id="reveal" type="checkbox"> reveal both hands
+      </label>
+    </div>
+
+    <h3>Presentation</h3>
+    <label class="check" title="Show the opponent's mat rotated, as it would sit across the table">
+      <input id="flipopp" type="checkbox" checked> flip opponent's mat
+    </label>
+    <label class="check" title="Card flicks, hits and breaks">
+      <input id="sound" type="checkbox" checked> sound
+    </label>
+
+    <h3>Misclick guard</h3>
+    <label class="check pick" title="Hold the mouse button to send a move you cannot take back, instead of clicking it">
+      confirm
+      <select id="confirm-level">
+        <option value="off">off</option>
+        <option value="key">key moves</option>
+        <option value="all">every move</option>
+      </select>
+    </label>
+    <label class="check pick" id="hold-label" title="How long a move has to be held before it is sent">
+      hold
+      <select id="hold-ms">
+        <option value="200">0.2s</option>
+        <option value="350">0.35s</option>
+        <option value="550">0.55s</option>
+        <option value="800">0.8s</option>
+      </select>
+    </label>
+
+    <menu>
+      <button value="close" class="primary">Done</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="profiles">
+  <form method="dialog" id="profiles-form">
+    <h2>Who is playing?</h2>
+    <p class="hint">A profile is one encrypted file on this machine. It keeps
+       your games, how each deck has done and your level — and it goes nowhere
+       else. Give it a passphrase and nothing but that passphrase opens it;
+       leave it blank and it is unlocked by a key kept beside it, which keeps
+       the file private in a backup but not from someone sitting here.</p>
+
+    <div class="profile-list" id="profile-list"></div>
+    <p class="hint bad hidden" id="profile-note"></p>
+
+    <h3>New profile</h3>
+    <div class="profile-new">
+      <button type="button" id="new-face" class="facebtn" title="Pick a picture"></button>
+      <div class="newfields">
+        <label>name <input id="new-name" type="text" maxlength="24"
+                           placeholder="your name" autocomplete="off"></label>
+        <label>passphrase <input id="new-pass" type="password"
+                                 placeholder="optional" autocomplete="new-password"></label>
+        <label>again <input id="new-pass2" type="password"
+                            placeholder="repeat it" autocomplete="new-password"></label>
+      </div>
+      <button type="button" id="new-create" class="primary">Create</button>
+    </div>
+    <p class="hint" id="profile-where"></p>
+
+    <menu>
+      <button value="close" class="ghost">Close</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="profile">
+  <form method="dialog" id="profile-form">
+    <div class="profile-head" id="profile-head"></div>
+    <div class="profile-tally" id="profile-tally"></div>
+
+    <h3>Decks</h3>
+    <div id="profile-decks"></div>
+
+    <h3>Games</h3>
+    <p class="hint" id="profile-games-note"></p>
+    <div class="profile-games" id="profile-games"></div>
+    <p class="hint bad hidden" id="profile-pane-note"></p>
+
+    <menu>
+      <button type="button" id="profile-delete" class="ghost danger">Delete profile</button>
+      <span class="grow"></span>
+      <button type="button" id="profile-switch" class="ghost">Switch profile</button>
+      <button type="button" id="profile-signout" class="ghost">Sign out</button>
+      <button value="close" class="primary">Done</button>
+    </menu>
+  </form>
+</dialog>
+
+<dialog id="avatar">
+  <form method="dialog" id="avatar-form">
+    <h2>Profile picture</h2>
+    <label class="avatar-search">card art
+      <input id="avatar-q" type="search" placeholder="search name, id or rules text…"
+             autocomplete="off"></label>
+    <div class="avatar-grid" id="avatar-grid"></div>
+    <label class="avatar-file">…or a picture of your own
+      <input id="avatar-file" type="file" accept="image/*"></label>
+    <p class="hint">Your own picture is shrunk to 128&nbsp;px here in the
+       browser and stored inside the profile. The name and picture are the one
+       part of the file that is readable without the passphrase — the chooser
+       has to draw them before it knows one.</p>
+    <menu>
+      <button value="close" class="ghost">Cancel</button>
+    </menu>
+  </form>
+</dialog>
+
 <section id="replays" class="replays">
   <div class="replay-head">
     <h2>Replays</h2>
@@ -323,5 +472,7 @@
 <script src="/replays.js"></script>
 <script src="/tutorial.js"></script>
 <script src="/title.js"></script>
+<script src="/profile.js"></script>
+<script src="/netplay.js"></script>
 </body>
 </html>

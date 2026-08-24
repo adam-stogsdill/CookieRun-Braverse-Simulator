@@ -1,7 +1,10 @@
 /* The guided first game. Four panels and a ring, never a click-catcher: the
    card menu is parked on <body> outside whatever is lit up, so anything here
    that swallowed a pointer would eat the very move it just asked for. */
-.tut-veil { position: fixed; inset: 0; z-index: 60; pointer-events: none; }
+/* Under the title screen (60) and over the board. The two never show at once
+   — the title hides itself before handing over to the Learn button — but equal
+   z-indexes decided by document order is not a thing to leave lying around. */
+.tut-veil { position: fixed; inset: 0; z-index: 58; pointer-events: none; }
 .tut-veil.hidden { display: none; }
 .tut-panel {
   position: fixed;

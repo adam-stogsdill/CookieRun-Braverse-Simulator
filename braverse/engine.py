@@ -111,6 +111,7 @@ class Game:
         first_player: int = 0,
         max_turns: int = 200,
         max_actions_per_turn: int = 60,
+        shuffle: bool = True,
     ):
         self.db = db or default_db()
         self.rules = rules
@@ -118,6 +119,13 @@ class Game:
         # paper, scissors before the game starts (see `braverse/rps.py`); the
         # engine just needs to be told the answer.
         self.first_player = first_player
+        # A stacked deal: `shuffle=False` deals off the top of the list exactly
+        # as it was given, and nothing that returns cards to the deck reorders
+        # it either. Only the guided first game uses it — a tutorial step that
+        # says "play a Cookie" needs a Cookie to be there — and `braverse/
+        # tutorial.py` is where the stacked lists live. Every other caller gets
+        # the shuffle, so no self-play or training number moves.
+        self.shuffling = shuffle
         self.max_turns = max_turns
         self.max_actions_per_turn = max_actions_per_turn
         self._actions_this_turn = 0
@@ -152,12 +160,17 @@ class Game:
     def controller(self, index: int):
         return self._controllers[index]
 
+    def _shuffle(self, cards: list) -> None:
+        """Shuffle, unless this game was dealt from a stacked deck."""
+        if self.shuffling:
+            self.state.rng.shuffle(cards)
+
     def setup(self) -> None:
         state = self.state
         for player, deck_list, extra_list in zip(state.players, self._deck_lists,
                                                  self._extra_lists):
             player.deck = [CardInstance.make(cid, player.index) for cid in deck_list]
-            state.rng.shuffle(player.deck)
+            self._shuffle(player.deck)
             # The EXTRA deck is not shuffled and not drawn from: every card in
             # it is visible to its owner all game, and is played out of the
             # pile directly when its gate opens.
@@ -212,10 +225,10 @@ class Game:
                 return
             if not ask(self.state, list(player.hand), free=free):
                 return
-            self.state.rng.shuffle(player.hand)   # the hand goes back unordered
+            self._shuffle(player.hand)   # the hand goes back unordered
             player.deck.extend(player.hand)
             player.hand.clear()
-            self.state.rng.shuffle(player.deck)
+            self._shuffle(player.deck)
             self._draw_opening_hand(player)
             if free:
                 self.state.record(f"mulligan: P{player.index} draws a new hand")
@@ -238,7 +251,7 @@ class Game:
                 return
             player.deck.extend(player.hand)
             player.hand.clear()
-            self.state.rng.shuffle(player.deck)
+            self._shuffle(player.deck)
             self._draw_opening_hand(player)
             self.draw(opponent, self.rules.opponent_draws_on_redraw)
         self._lose(player.index, "could not draw an opening Cookie")
@@ -1235,7 +1248,7 @@ class Game:
         player.refresh_count += 1
         player.deck.extend(player.trash)
         player.trash.clear()
-        self.state.rng.shuffle(player.deck)
+        self._shuffle(player.deck)
         return bool(player.deck)
 
     def discard(self, player: PlayerState, n: int, ctx, *,

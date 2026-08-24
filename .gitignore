@@ -22,6 +22,10 @@ saved_decks.json
 # Games the viewer kept, one JSON file each — `viewer/replays.js`.
 replays/
 
+# Player profiles: one encrypted file each, plus the key that opens the ones
+# with no passphrase. Nothing here belongs in a repository — `braverse/profile.py`.
+profiles/
+
 # Training / evolution output.
 *.log
 *.err

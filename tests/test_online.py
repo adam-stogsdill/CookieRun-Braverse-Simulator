@@ -327,3 +327,186 @@ def test_a_joiner_cannot_write_to_the_host_machines_deck_store(base):
 def test_an_unknown_room_is_reported_as_gone(base):
     code, payload = call(base, "/api/state?room=ZZZZ")
     assert code == 404 and payload["gone"] is True
+
+
+# ---------------------------------------------------------------------------
+# --online: the port a stranger reaches
+# ---------------------------------------------------------------------------
+# Driven against a real `PublicHandler` listener, because the thing under test
+# is a posture and not a function: every one of these would pass if it were
+# asked of the private port, which is the whole reason the second port exists.
+
+
+@pytest.fixture(scope="module")
+def public():
+    """The public listener, wired the way `--online` wires it."""
+    from play_server import PublicHandler
+
+    PublicHandler.app = Handler.app
+    httpd = Viewer(("127.0.0.1", 0), PublicHandler)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def out(base: str, path: str, body=None, who: str = "203.0.113.9",
+        headers: dict | None = None, timeout: float = 30.0):
+    """A request from off this machine: it arrives with a forwarded address.
+
+    `who` buckets the rate limiter, so a test that deliberately trips it does
+    not spend the allowance of the next one.
+    """
+    data = None if body is None else json.dumps(body).encode()
+    sent = {"X-Forwarded-For": who}
+    if data:
+        sent["Content-Type"] = "application/json"
+    sent.update(headers or {})
+    req = urllib.request.Request(base + path, data=data, headers=sent)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return res.status, json.loads(res.read())
+    except urllib.error.HTTPError as exc:
+        raw = exc.read()
+        try:
+            return exc.code, json.loads(raw)
+        except json.JSONDecodeError:
+            return exc.code, {"body": raw.decode(errors="replace")}
+
+
+def invited(base):
+    """A room opened on the host's own machine, as the invite flow opens it."""
+    _, host = call(base, "/api/room/new", {"deck": DECKS[0], "name": "Host"})
+    assert host["pass"], "hosting must hand back the room's key"
+    return host
+
+
+def test_the_public_port_never_believes_a_caller_is_the_host(public):
+    """The loopback trap, and the reason there are two ports at all.
+
+    A tunnel client connects to us *from* 127.0.0.1, so on a shared port every
+    stranger would satisfy the check that guards the host's own files. Here the
+    connection really is from loopback and it still must not count.
+    """
+    code, refused = out(public, "/api/decks/save", {"name": "theirs", "cards": []})
+    assert code == 403
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/api/new", {}),                       # a match on someone else's machine
+    ("/api/control", {"paused": True}),     # pausing a person, not a bot
+    ("/api/room/new", {"deck": DECKS[0]}),  # minting state on request
+    ("/api/decks/save", {"name": "x", "cards": []}),
+    ("/api/decks/delete", {"name": "x"}),
+    ("/api/replays/save", {}),
+    ("/api/replays/delete", {"name": "x"}),
+])
+def test_a_route_that_is_not_playing_a_room_is_refused(public, path, body):
+    code, refused = out(public, path, body)
+    assert code == 403 and "internet" in refused["error"]
+
+
+@pytest.mark.parametrize("path", ["/api/replays", "/api/replay?name=x"])
+def test_the_hosts_replay_folder_is_not_browsable(public, path):
+    """It answers with the store's filesystem path, among other things."""
+    code, refused = out(public, path)
+    assert code == 403
+
+
+def test_the_room_code_alone_does_not_find_a_room_from_outside(base, public):
+    """Four characters is a wall on a LAN and no wall at all against a script."""
+    host = invited(base)
+    code, payload = out(public, f"/api/state?room={host['room']}")
+    assert code == 404 and payload["gone"] is True
+
+
+def test_a_wrong_key_is_indistinguishable_from_no_such_room(base, public):
+    """So walking the code space teaches nothing about which are live."""
+    host = invited(base)
+    real = out(public, f"/api/state?room={host['room']}&pass=nonsense")
+    fake = out(public, "/api/state?room=ZZZZ&pass=nonsense")
+    assert real == fake
+
+
+def test_the_key_from_the_invite_link_gets_you_in(base, public):
+    host = invited(base)
+    code, payload = out(public, f"/api/state?room={host['room']}&pass={host['pass']}")
+    assert code == 200 and payload.get("lobby") is True
+
+
+def test_the_key_is_a_room_not_a_seat(base, public):
+    """Everyone with the link has it, so it must buy no more than watching."""
+    host = invited(base)
+    _, guest = out(public, "/api/room/join",
+                   {"room": host["room"], "pass": host["pass"],
+                    "deck": DECKS[1], "name": "Guest"})
+    assert guest["seat"] == 1
+    # Holding the same key as the player whose turn it is, and still not them.
+    code, refused = out(public, "/api/choose",
+                        {"room": host["room"], "pass": host["pass"], "index": 0})
+    assert code == 403 and refused["error"] == "not your seat"
+    call(base, "/api/room/leave", {"room": host["room"], "token": host["token"]})
+
+
+def test_joining_from_outside_needs_the_key(base, public):
+    host = invited(base)
+    code, refused = out(public, "/api/room/join",
+                        {"room": host["room"], "deck": DECKS[1]})
+    assert code == 404 and refused["gone"] is True
+
+
+def test_the_hosts_solo_game_is_not_on_the_internet(public):
+    """A request with no room names the local match; there is none out here."""
+    code, payload = out(public, "/api/state")
+    assert code == 200 and payload == {"version": 0, "idle": True}
+
+
+def test_the_front_end_itself_is_still_served(public):
+    """A joiner needs the client; it is the API that is narrowed, not the page."""
+    req = urllib.request.Request(public + "/app.js")
+    with urllib.request.urlopen(req, timeout=10) as res:
+        assert res.status == 200 and b"roomAuth" in res.read()
+
+
+def test_a_flood_of_join_attempts_is_turned_away(base, public):
+    host = invited(base)
+    seen = set()
+    for _ in range(12):
+        code, _payload = out(public, "/api/room/join",
+                             {"room": host["room"], "pass": host["pass"],
+                              "deck": DECKS[1]}, who="198.51.100.4")
+        seen.add(code)
+        if code == 429:
+            break
+    assert 429 in seen
+    # And the limit is per client, not a wall in front of everybody.
+    code, _ = out(public, "/api/room/join",
+                  {"room": host["room"], "pass": host["pass"], "deck": DECKS[1]},
+                  who="198.51.100.5")
+    assert code != 429
+
+
+def test_a_post_from_another_site_is_refused(public):
+    """`Origin` is the one thing a browser will not let a page lie about."""
+    code, refused = out(public, "/api/choose", {"index": 0},
+                        headers={"Origin": "https://evil.example"})
+    assert code == 403 and "cross-site" in refused["error"]
+
+
+def test_a_host_header_we_never_answered_to_is_refused(base):
+    """DNS rebinding: a name pointed at 127.0.0.1 must not read as local."""
+    code, refused = call_with_host(base, "/api/decks", "evil.example")
+    assert code == 403
+    # The ways this machine is legitimately addressed still work.
+    assert call_with_host(base, "/api/decks", "localhost")[0] == 200
+    assert call_with_host(base, "/api/decks", "mymac.local")[0] == 200
+
+
+def call_with_host(base: str, path: str, host: str):
+    req = urllib.request.Request(base + path, headers={"Host": host})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return res.status, res.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()

@@ -26,7 +26,7 @@ def _blob(path: str | Path) -> dict:
     above it can change freely. Raises if the file is not one of ours — callers
     scanning a directory should catch and skip.
     """
-    text = Path(path).read_text()
+    text = Path(path).read_text(encoding="utf-8")
     return json.loads(text[text.index("{", text.rindex("\n\n")):])
 
 
@@ -98,7 +98,11 @@ def write_deck(path: str | Path, deck: Sequence[str], db: CardDB,
         readable += "\n\nEXTRA deck\n" + describe(extra, db)
     blob = json.dumps({"deck": list(deck), **({"extra": extra} if extra else {}),
                        **meta}, indent=1)
-    path.write_text(body + readable + "\n\n" + blob)
+    # UTF-8 and LF explicitly: card names are not ASCII, and a decklist
+    # written on Windows should be the same bytes as one written anywhere
+    # else — these files get mailed around.
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        fh.write(body + readable + "\n\n" + blob)
     return path
 
 

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from braverse import (STARTER_DECKS, Game, HeuristicAgent, SeatedAgent,
                       default_db, validate)
+from braverse.console import utf8_output
 
 
 def load_deck(name: str) -> tuple[str, list[str], list[str]]:
@@ -25,7 +26,7 @@ def load_deck(name: str) -> tuple[str, list[str], list[str]]:
     if name in STARTER_DECKS:
         return name, list(STARTER_DECKS[name]), []
     path = Path(name)
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     # evolve_deck.py writes a human-readable block, then a JSON blob.
     blob = json.loads(text[text.index("{", text.rindex("\n\n")):])
     return path.stem, list(blob["deck"]), list(blob.get("extra") or [])
@@ -64,6 +65,7 @@ def match(a: tuple[list[str], list[str]], b: tuple[list[str], list[str]],
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--decks", nargs="+", required=True)
     parser.add_argument("--agent", choices=("heuristic", "rl"), default="heuristic")

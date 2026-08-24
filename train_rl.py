@@ -13,9 +13,11 @@ import time
 
 from braverse import STARTER_DECKS, default_db
 from braverse.rl import TrainConfig, Trainer
+from braverse.console import utf8_output
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=4000)
     parser.add_argument("--batch-games", type=int, default=32)

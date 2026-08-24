@@ -358,7 +358,7 @@ class Trainer:
             "state_dim": self.encoder.state_dim,
             "config": self.cfg.__dict__,
             "history": self.history[-50:],
-        }, indent=1))
+        }, indent=1), encoding="utf-8")
 
     @staticmethod
     def load_net(path: str | Path) -> PolicyNet:

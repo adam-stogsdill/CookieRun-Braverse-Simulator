@@ -14,6 +14,7 @@ import time
 
 from braverse import (STARTER_DECKS, Game, HeuristicAgent, RandomAgent,
                       SeatedAgent, default_db, validate)
+from braverse.console import utf8_output
 
 AGENTS = {"heuristic": HeuristicAgent, "random": RandomAgent, "rl": None}
 
@@ -33,6 +34,7 @@ def make_agent(kind: str, seat: int, seed: int, checkpoint: str | None = None):
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("-n", "--games", type=int, default=100)
     parser.add_argument("--p0", choices=AGENTS, default="heuristic")

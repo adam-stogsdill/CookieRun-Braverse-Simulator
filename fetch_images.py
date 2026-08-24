@@ -32,6 +32,8 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from braverse.console import utf8_output
+
 IMAGE_URL = "https://static.dotgg.gg/cookierun/cards/{card_id}.webp"
 USER_AGENT = "braverse-sim-images/1.0 (personal tabletop project)"
 DEFAULT_CSV = Path(__file__).resolve().parent / "braverse_cards.csv"
@@ -98,6 +100,7 @@ def fetch_card_back(source: str, out_dir: Path) -> str:
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", type=Path, default=DEFAULT_CSV)
     parser.add_argument("--out", type=Path, default=Path("card_images"))

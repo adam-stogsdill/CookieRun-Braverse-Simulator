@@ -16,9 +16,11 @@ from pathlib import Path
 from braverse import STARTER_DECKS, default_db
 from braverse.deckgen import (DeckEvolver, DeckGenConfig, describe,
                               implemented_pool, set_pool)
+from braverse.console import utf8_output
 
 
 def main() -> None:
+    utf8_output()   # a redirected stdout on Windows is cp1252
     parser = argparse.ArgumentParser()
     parser.add_argument("--pool", choices=("starter_sets", "implemented", "all"),
                         default="starter_sets",
@@ -92,7 +94,7 @@ def main() -> None:
     Path(args.out).write_text(describe(deck, db) + "\n\n" + json.dumps({
         "deck": deck, "validation_score": score, "holdout": holdout,
         "baselines": baselines, "history": history,
-    }, indent=1))
+    }, indent=1), encoding="utf-8")
     print(f"\nsaved -> {args.out}")
 
 
