@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.34
+
+- **One command now builds the game into something you can hand to someone.**
+  `python build_release.py` produces a single file for the computer it runs on
+  — a `.exe` on Windows, a binary on macOS — zipped with a short read-me that
+  says how to open it past the "unknown publisher" and "unidentified developer"
+  prompts. The person you send it to needs no Python and no card art; they
+  double-click it and the game opens.
+- The build carries only what playing needs. The training half of the project
+  is left out, and `--no-images` makes a 11 MB build for a slow connection,
+  where cards show their text instead of their art.
+
 ## 0.2.33
 
 - **You can now play someone directly, with no host and no open port.** The new

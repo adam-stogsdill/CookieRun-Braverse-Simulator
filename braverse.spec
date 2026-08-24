@@ -11,6 +11,7 @@
 # `available_pilots()` only offers `rl:*` when a `.pt` file sits next to the
 # binary, and none is bundled, so the menu degrades to human/heuristic/random.
 
+import os
 from pathlib import Path
 
 ROOT = Path(SPECPATH)
@@ -18,12 +19,19 @@ ROOT = Path(SPECPATH)
 # The whole library, so a decklist dropped next to the binary can name any card
 # and still render as art. Run `python3 fetch_images.py` before building — a
 # thin `card_images/` silently yields a binary with holes in it.
-images = [(str(p), "card_images") for p in sorted((ROOT / "card_images").glob("*.webp"))]
-if len(images) < 2000:
-    raise SystemExit(
-        f"card_images/ has only {len(images)} files — run `python3 fetch_images.py` "
-        f"first, or edit this check if a partial library is what you want."
-    )
+#
+# `BRAVERSE_BUNDLE_IMAGES=0` builds without it: a ~190 MB smaller binary that
+# draws every card as text instead of art. `build_release.py --no-images` sets
+# it; nothing else does, so a plain `pyinstaller braverse.spec` is unchanged.
+if os.environ.get("BRAVERSE_BUNDLE_IMAGES", "1") == "0":
+    images = []
+else:
+    images = [(str(p), "card_images") for p in sorted((ROOT / "card_images").glob("*.webp"))]
+    if len(images) < 2000:
+        raise SystemExit(
+            f"card_images/ has only {len(images)} files — run `python3 fetch_images.py` "
+            f"first, or edit this check if a partial library is what you want."
+        )
 
 decklists = [(str(p), ".") for p in sorted(ROOT.glob("*.txt"))]
 

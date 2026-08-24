@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.33
+Current Version: 0.2.34
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -210,8 +210,23 @@ Hand someone the file, they double-click it, the browser opens:
 
 ```bash
 python3 fetch_images.py             # the art goes inside the binary
+python3 build_release.py            # -> release/braverse-<version>-macos-arm64.zip
+```
+
+`build_release.py` is the whole build: it checks the art library is complete,
+makes a throwaway `.venv-build/` holding `requirements-play.txt` and
+PyInstaller and *nothing else* — so there is no torch on the path for
+PyInstaller to find, rather than merely excluding it — runs the spec, proves
+the binary starts (`--help` imports everything the game needs), and zips it
+with a README naming the platform it was built for and the first-launch prompt
+that platform shows. `--no-images` builds without the art (11 MB rather than
+208, cards render as text), `--webview` bundles the native-window backend,
+`--no-venv` skips the venv and uses the current interpreter, which is faster
+and only as lean as that interpreter is. The spec still builds on its own:
+
+```bash
 pip install pyinstaller
-pyinstaller braverse.spec           # -> dist/braverse  (198 MB)
+pyinstaller braverse.spec           # -> dist/braverse  (208 MB)
 ```
 
 It carries the engine, the browser front end, `braverse_cards.csv`, the
@@ -232,7 +247,11 @@ browser opens. If that grates, build a folder instead — flip `onefile=True` to
 
 PyInstaller does not cross-compile: build it on macOS and you get a macOS
 arm64 binary, build it on Windows for a `.exe`. Unsigned binaries need one
-right-click → **Open** on macOS the first time.
+right-click → **Open** on macOS the first time. To get both platforms out of
+one command, `.github/workflows/build player` runs `build_release.py` on a
+macOS runner and a Windows one — from the Actions tab (with a checkbox for
+whether to fetch and bundle the art), or automatically on a `v*` tag, which
+also drafts a release with both zips attached.
 
 ## Quick start
 
@@ -426,8 +445,9 @@ pip install pywebview        # optional: a native window instead of a tab
 py play_server.py
 ```
 
-`pyinstaller braverse.spec` builds `dist\braverse.exe` there, the same way it
-builds a binary on macOS.
+`py build_release.py` builds `release\braverse-<version>-windows-x86_64.zip`
+there, the same way it builds a macOS binary on macOS — the `.exe` inside is
+the only thing a player needs.
 
 `tests/test_windows.py` covers each of these by faking the platform, so a Mac or
 Linux `pytest -q` still catches a regression in the Windows path. What it cannot
