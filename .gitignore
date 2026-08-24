@@ -37,3 +37,5 @@ rl_agent_*
 *.sh
 # Standalone builds — `python build_release.py`.
 release/
+
+*.exe
