@@ -1015,7 +1015,22 @@ send it over whatever you already use to talk to each other; they paste it, send
 back a reply code, and the game begins on its own. A signalling server would be
 one more thing to run, to trust and to keep online, for an exchange that happens
 once per game. The codes are gzipped where the browser has `CompressionStream`,
-which takes a few kilobytes of SDP down to a few hundred characters. The one
+which takes a few kilobytes of SDP down to a few hundred characters.
+
+Because that exchange is paced by *people*, so is everything waiting on it:
+`SIGNAL_TIMEOUT` is half an hour, not the minute an RPC would get. The first
+version got this wrong and it was instructive — the codes exchanged perfectly,
+WebRTC connected, and then nothing happened, because the handshake had given up
+sixty seconds in and nothing was reading the wire any more. `TURN_TIMEOUT` is
+generous for the same reason and one more: a lockstep game has nowhere to
+resume from, so a timeout does not drop a frame, it ends the match. Until the
+data channel opens there is no pump draining the local engine, so the dialog
+polls it directly — an engine that has already failed must say so rather than
+leaving a hopeful status line up over a dead game. Closing the dialog is read
+the same way: starting a peer game hides the title screen, so a connection that
+never happened has to put it back on the way out, or the player is left on an
+empty board with a lobby still open behind it. A game actually in progress is
+left alone — the board behind the dialog is a real match. The one
 outside party involved is a public STUN server, used only to discover how your
 machine looks from behind a NAT — it carries no game data, and two people on the
 same network do not need it at all.

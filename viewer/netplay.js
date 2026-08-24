@@ -37,6 +37,8 @@ const Peer = {
   seat: null,
   on: false,
   status: "",
+  playing: false,     // the engine has a match, not just a lobby waiting
+  watching: null,     // the setting-up watchdog, while there is no pump yet
   inbox: [],          // messages from the channel, waiting to be posted inward
   flushing: false,
   pumping: false,
@@ -230,30 +232,74 @@ const Peer = {
     return Peer.encode(pc.localDescription);
   },
 
+  /* Watch the local engine while the codes are being swapped.
+   *
+   * Until the channel opens there is no pump, so nothing is reading what the
+   * engine has to say — and the setting-up phase is exactly when it has
+   * something worth saying: a deck that will not load, a peer on another
+   * build, a handshake that gave up. Without this the dialog sits on a
+   * cheerful stale line while the game behind it is already dead, which is a
+   * worse failure than the failure. Stops as soon as the pump takes over. */
+  watch() {
+    if (Peer.watching) return;
+    Peer.watching = setInterval(async () => {
+      if (!Peer.on || (Peer.channel && Peer.channel.readyState === "open")) {
+        clearInterval(Peer.watching);
+        Peer.watching = null;
+        return;
+      }
+      try {
+        const snap = await api("/api/state?peer=1");
+        if (snap && snap.peer) Peer.report(snap.peer);
+      } catch (err) { /* the poll failing is not itself news */ }
+    }, 2000);
+  },
+
   begin(seat) {
     Peer.seat = seat;
     Peer.on = true;
+    Peer.playing = false;
     state.peer = true;
     // A peer game is drawn from our own seat, exactly as a room is; nothing
     // below should be comparing a seat to 0.
     if (typeof seatPerspective === "function") seatPerspective(seat);
     Peer.note("waiting for the other player");
+    Peer.watch();
   },
 
   /** What the local engine says about the handshake, for the status line. */
   report(status) {
     if (!status) return;
-    if (status.error) Peer.note(status.error);
-    else if (status.state === "playing" && Peer.status !== "playing") {
+    if (status.error) { Peer.fail(status.error); return; }
+    else if (status.state === "playing" && !Peer.playing) {
+      Peer.playing = true;
       Peer.note("playing");
-      Peer.status = "playing";
     }
+  },
+
+  /** The game is not going to happen, and the dialog should stop pretending. */
+  fail(message) {
+    Peer.note(message);
+    const line = el("#peer-status");
+    if (line) line.classList.add("bad");
+    Peer.on = false;
+    state.peer = false;
+  },
+
+  /** Whether there is a real game behind the dialog, or only a hopeful lobby.
+   *
+   * The difference decides what closing the dialog means: stepping away from a
+   * match in progress, or abandoning a connection that never happened. */
+  connected() {
+    return Peer.playing && !!Peer.channel && Peer.channel.readyState === "open";
   },
 
   note(message) {
     Peer.status = message;
     const line = el("#peer-status");
-    if (line) line.textContent = message;
+    if (!line) return;
+    line.textContent = message;
+    if (Peer.on) line.classList.remove("bad");
   },
 
   /* -- leaving ----------------------------------------------------------- */
@@ -267,7 +313,14 @@ const Peer = {
 
   async leave(why) {
     Peer.on = false;
+    Peer.playing = false;
     state.peer = false;
+    // Whatever is polled next is a different match, so the version counter this
+    // one left behind means nothing to it — the same reason a rematch cannot
+    // keep counting from the game before it. Reset so the next snapshot is
+    // adopted as first sight rather than replayed as a scene.
+    state.version = -1;
+    state.eventId = 0;
     Peer.teardown();
     Peer.inbox.length = 0;
     try { await api("/api/peer/close", { why: why || "left the match" }); } catch (e) {}
@@ -379,7 +432,29 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("#peer-reply", () => PeerUI.reply());
   bind("#peer-copy", () => PeerUI.copy("#peer-offer"));
   bind("#peer-copy-answer", () => PeerUI.copy("#peer-answer-out"));
-  // Closing the dialog is not leaving the game: the board is behind it, and a
-  // connected match should stay connected. Only an unstarted one is torn down.
-  bind("#peer-close", () => { if (!Peer.on) Peer.leave("closed the dialog"); });
+  /* Closing the dialog on a game that never connected has to put the player
+   * back somewhere they can play from.
+   *
+   * Starting a peer game hides the title screen — correct while a match is
+   * coming up, wrong the moment it turns out not to be. Left alone, someone
+   * whose opponent never pasted a code is looking at an empty board with a
+   * lobby still open behind it and no way back to the menu. So an unconnected
+   * game is torn down on the way out and the title screen comes back up.
+   *
+   * Hung off the dialog's own `close` rather than the button, because Escape
+   * closes a <dialog> too and would otherwise slip past this.
+   *
+   * A game actually in progress is left alone: the board behind the dialog is
+   * a real match, and closing the dialog is how you get back to looking at it. */
+  const dialog = el("#peerplay");
+  if (dialog) {
+    dialog.addEventListener("close", async () => {
+      if (Peer.connected()) return;
+      await Peer.leave("closed before connecting");
+      // `poll` would get there on its own once the lobby is gone; doing it here
+      // as well means the menu is back the instant the dialog is, rather than a
+      // poll later.
+      if (typeof Title !== "undefined") Title.show();
+    });
+  }
 });

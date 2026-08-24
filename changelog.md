@@ -19,6 +19,11 @@
   only their screen hides it. Play it with people you trust; for a game that
   keeps your hand secret from your opponent, **Play someone on your network** is
   still the mode that does that.
+- **Closing the dialog on a game that never connected takes you back to the
+  title screen**, so an opponent who never pasted their code costs you nothing
+  but the time — you are back at the menu and can start something else. Closing
+  it on a game that *is* under way just gets you back to the board, which is
+  still there.
 - Closing the tab now tells the other player, instead of leaving them waiting on
   a seat that will never move again.
 - **There is a profile now, and it is yours alone.** The chip in the corner of

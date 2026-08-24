@@ -204,6 +204,28 @@ def test_a_host_that_deals_us_a_different_deck_is_refused():
     bad.join(timeout=5)
 
 
+def test_the_handshake_outlives_a_human_pasting_a_code():
+    """Signalling is paced by people, and the wait has to be paced the same.
+
+    The exchange is: copy a code, send it over whatever you use to chat, wait
+    for a reply code, paste it back. That is minutes, routinely. An earlier
+    version timed this out after 60 seconds, so the codes would exchange
+    perfectly, WebRTC would connect, and the game would never start — the
+    handshake had already given up and nothing was reading the wire any more.
+    """
+    assert N.SIGNAL_TIMEOUT >= 10 * 60, "a person cannot paste a code that fast"
+    import inspect
+    for handshake in (N.host_handshake, N.join_handshake):
+        default = inspect.signature(handshake).parameters["timeout"].default
+        assert default == N.SIGNAL_TIMEOUT, (
+            f"{handshake.__name__} waits on a person, not on an RPC")
+
+
+def test_a_seat_is_not_lost_by_stepping_away_from_the_keyboard():
+    """A lockstep game has nowhere to resume from, so a timeout is permanent."""
+    assert N.TURN_TIMEOUT >= 10 * 60
+
+
 def test_a_peer_that_never_speaks_does_not_hang_forever():
     left, _right = N.loopback()
     with pytest.raises(N.Handshake, match="never answered"):

@@ -55,9 +55,20 @@ from .replay import (ACTION, CHOOSE, DECLINED, MANY, MULLIGAN, ORDER, SURFACE,
 PROTOCOL = 1
 
 # How long a seat waits on the other machine before giving up. Generous on
-# purpose: the person on the other end is reading their hand, not answering an
-# RPC, and a long think is not a dropped connection.
-TURN_TIMEOUT = 300.0
+# purpose, and then some: the person on the other end is reading their hand,
+# not answering an RPC, and a lockstep game has nowhere to resume from — a
+# timeout does not drop a frame, it ends the match permanently. Someone who
+# steps away to make tea should still have a game when they come back.
+TURN_TIMEOUT = 30 * 60.0
+
+# How long the *handshake* waits, which is a different kind of wait entirely.
+# Signalling here is done by hand: one player copies a code into a chat window,
+# the other pastes it back, and both of those are paced by people rather than
+# by machines. Timing that out on an RPC's clock is the bug this constant
+# exists to not have — the exchange completing in under a minute is the
+# exception, not the rule. The ceiling that actually matters is
+# `play_server.PeerLobby.IDLE_LIMIT`, which reaps a lobby nobody is using.
+SIGNAL_TIMEOUT = 30 * 60.0
 
 
 def surface_of(controller) -> tuple:
@@ -199,7 +210,7 @@ class Table:
 def host_handshake(link: Link, *, deck: Sequence[str], extra: Sequence[str],
                    seed: int, name: str = "", app_version: str = "",
                    surface: Sequence[str] = SURFACE,
-                   timeout: float = 60.0) -> Table:
+                   timeout: float = SIGNAL_TIMEOUT) -> Table:
     """Wait for a joiner, then settle the table and send it back.
 
     The host holds seat 0. It cannot build the table until the joiner's deck
@@ -222,7 +233,7 @@ def host_handshake(link: Link, *, deck: Sequence[str], extra: Sequence[str],
 def join_handshake(link: Link, *, deck: Sequence[str], extra: Sequence[str],
                    name: str = "", app_version: str = "",
                    surface: Sequence[str] = SURFACE,
-                   timeout: float = 60.0) -> Table:
+                   timeout: float = SIGNAL_TIMEOUT) -> Table:
     """Offer a deck to the host and take back the table it settles on.
 
     The joiner holds seat 1. It checks that the table it is handed actually

@@ -1415,3 +1415,5 @@ body.online #settings-watch { display: none; }
   margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line);
 }
 #peerplay .peer-status { flex: 1; font-size: 11px; color: var(--dim); min-height: 14px; }
+/* A handshake that failed must not read like one still in progress. */
+#peerplay .peer-status.bad { color: var(--bad); }
