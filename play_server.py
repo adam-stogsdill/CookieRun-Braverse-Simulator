@@ -53,7 +53,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from braverse.console import utf8_output
-from braverse.deckfile import DECK_DIR, read_decklist
+from braverse.deckfile import DECK_DIR, parse_decklist, read_decklist
 from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, __version__,
                       default_db, implemented_pool, validate)
@@ -328,6 +328,10 @@ def deck_source(name: str) -> str:
 # restart and can be edited by hand; if that directory is read-only — a bundle
 # dropped in /Applications, say — fall back to the user's home.
 DECK_STORE_NAME = "saved_decks.json"
+# A decklist is a couple of kilobytes; this is the ceiling on a paste or a
+# dropped file, well under `MAX_BODY`, so a mis-dropped image is refused as
+# what it is rather than parsed line by line.
+MAX_IMPORT = 256 << 10
 MAX_DECK_NAME = 60
 MAX_DECK_CARDS = 400       # a 60-card deck with room to be mid-edit
 _store_lock = threading.Lock()
@@ -2954,6 +2958,39 @@ class Handler(BaseHTTPRequestHandler):
             payload = deck_payload(self.app.db, cards, name, extra)
             payload["saved"] = True
             payload["path"] = str(deck_store())
+            self._json(payload)
+        elif path == "/api/decks/import":
+            # Local only, like every other route that writes decks: the file
+            # being read is on this machine and the store it lands in is too.
+            if not self._is_local():
+                self._json({"error": "decks can only be changed on the machine "
+                                     "running the server"}, 403)
+                return
+            text = body.get("text")
+            if not isinstance(text, str) or not text.strip():
+                self._json({"error": "nothing to import"}, 400)
+                return
+            if len(text) > MAX_IMPORT:
+                self._json({"error": "that file is too big to be a decklist"}, 400)
+                return
+            found = parse_decklist(text, self.app.db)
+            if not found.deck and not found.extra:
+                self._json({"error": "no cards in that — a decklist is one card "
+                                     "a line, with an id like ST9-007 or the "
+                                     "card's name",
+                            "skipped": found.skipped[:10]}, 400)
+                return
+            # Named by the file it came from unless the list named itself: a
+            # deck arrives as `sea_fairy_aggro.txt` far more often than it
+            # arrives with a name written inside it.
+            name = clean_deck_name(found.name or body.get("name"))
+            payload = deck_payload(self.app.db, found.deck, name, found.extra)
+            payload["notes"] = found.notes[:20]
+            payload["skipped"] = found.skipped[:20]
+            payload["skippedCount"] = len(found.skipped)
+            # Saving is the browser's next call, not this one's: an illegal
+            # import belongs in the deck builder to be fixed, and there is
+            # still exactly one route that writes the deck store.
             self._json(payload)
         elif path == "/api/decks/delete":
             if not self._is_local():

@@ -28,7 +28,8 @@ Options:
     --no-venv       build with the current interpreter, no throwaway venv
     --no-images     leave out card_images/ (cards render as text)
     --no-installer  ship the game alone, without install-braverse
-    --webview       also bundle pywebview, for a native window over a browser tab
+    --webview       bundle pywebview, for the game's own window (default on macOS)
+    --no-webview    leave it out; the game borrows a Chromium window instead
     --no-zip        leave the bare binary in release/, do not archive it
     --keep-build    keep PyInstaller's work directory for inspection
     --out DIR       where the release goes (default: release/)
@@ -161,6 +162,19 @@ def build_venv(args) -> Path:
             run([py, "-m", "pip", "install", "--quiet", "pyobjc-core<11"])
         run([py, "-m", "pip", "install", "--quiet", "pywebview>=5"])
     return venv
+
+
+def check_window_backend(py: Path, args) -> None:
+    """A requested native window that the build interpreter cannot import is a
+    silent downgrade — the spec bundles what it finds, and the binary comes out
+    launching Chrome instead. Say so at build time, where it is fixable."""
+    if not args.webview:
+        return
+    ok = subprocess.run([str(py), "-c", "import webview"],
+                        capture_output=True).returncode == 0
+    if not ok:
+        die("--webview was asked for but pywebview is not importable in the "
+            "build environment — install it there, or pass --no-webview")
 
 
 def check_lean(py: Path) -> None:
@@ -326,8 +340,11 @@ def main() -> None:
                     help="leave out card_images/ (~190 MB smaller, cards as text)")
     ap.add_argument("--no-installer", action="store_true",
                     help="ship the game alone, without install-braverse")
-    ap.add_argument("--webview", action="store_true",
-                    help="bundle pywebview so the game opens in a native window")
+    ap.add_argument("--webview", dest="webview", action="store_true", default=None,
+                    help="bundle pywebview so the game opens in a native window "
+                         "(the default on macOS)")
+    ap.add_argument("--no-webview", dest="webview", action="store_false",
+                    help="leave pywebview out; the game borrows a Chromium window")
     ap.add_argument("--no-zip", action="store_true",
                     help="leave the bare binary in the output directory")
     ap.add_argument("--keep-build", action="store_true",
@@ -336,8 +353,21 @@ def main() -> None:
     args = ap.parse_args()
     utf8_output()
 
+    # A build with no native-window backend is not a build without a window —
+    # it is a build that launches *Google Chrome*, because that is what
+    # `desktop.py` falls back to. On macOS pywebview costs about 2 MB frozen
+    # and gives the game its own WebKit window, so it is the default there.
+    # Not on Windows, where pywebview needs pythonnet to reach WebView2 and the
+    # frozen combination is untested — and where the fallback is a chromeless
+    # Edge window that ships with the OS, so it always works and looks the
+    # same. `--webview` opts in there, `--no-webview` opts out anywhere.
+    if args.webview is None:
+        args.webview = platform.system() == "Darwin"
+
     ver, tag = version(), platform_tag()
-    say(f"braverse {ver} for {tag}")
+    say(f"braverse {ver} for {tag}"
+        + ("" if args.webview else " (no native window backend — the game will "
+                                  "borrow a Chromium window)"))
     preflight(args)
 
     py = Path(sys.executable)
@@ -350,6 +380,7 @@ def main() -> None:
     else:
         py = venv_python(build_venv(args))
     check_lean(py)
+    check_window_backend(py, args)
 
     work = ROOT / "build"
     dist = ROOT / "dist"

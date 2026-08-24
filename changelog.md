@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.36
+
+- **You can import decks.** The deck builder has an **Import** button: choose a
+  file, drop one (or several) onto the deck panel, or paste a list straight in.
+  It reads decklists this game exported, lists copied from its Copy button, and
+  ordinary lists written by hand or copied off a website — `4x ST9-007`,
+  `ST9-007 x4`, `3 ST9-007 Sea Fairy Cookie`, or just the card's name.
+- **It tells you what it could not read.** Any line it did not understand is
+  shown back to you exactly as you wrote it, so a list that came in four cards
+  short says which four lines to fix instead of quietly playing wrong.
+- **A card named without its id is a guess, and says so.** Many cards share a
+  name across sets; the importer picks one, tells you how many it had to choose
+  between, and you can swap it in the builder.
+- **A complete deck is saved as you import it**, named after the file it came
+  from, and is in the New match menu straight away. A half-finished list opens
+  in the builder instead so you can finish it.
+
 ## 0.2.35
 
 - **The download now comes with an installer.** Run `install-braverse` and it
@@ -20,6 +37,14 @@
   it over the old one; only the game itself is replaced.
 - On a Mac, the installer clears the download flag on the copy it installs, so
   the game opens normally instead of being refused as an unidentified developer.
+- **Fixed: opening the deck builder from the title screen bounced straight
+  back to the title screen.** The Replays button did the same thing. Both now
+  open and stay open, and going back to Play brings the menu straight back.
+- **The Mac download now opens in its own window instead of launching Chrome.**
+  Earlier builds borrowed a Chrome window when they had no window of their own,
+  which is why a browser appeared alongside the game. If a window still cannot
+  be drawn the game says so and falls back to a browser window rather than
+  failing to start.
 
 ## 0.2.34
 

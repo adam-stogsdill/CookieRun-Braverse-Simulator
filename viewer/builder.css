@@ -146,3 +146,42 @@ body.view-build .builder {
 .decklist .row button { padding: 0 6px; line-height: 18px; }
 
 .deck-hint { font-size: 10px; color: var(--dim); }
+
+/* ------------------------------------------------------------- importing */
+/* `[open]` is not optional on an id rule that sets `display`: the user agent
+ * hides a closed <dialog> with `dialog:not([open]) { display: none }`, and any
+ * id selector outranks it — so `#import { display: flex }` would leave this
+ * panel painted over the board forever after it closes. tests/test_viewer.py
+ * pins it for every dialog in the page. */
+#import[open] { width: 520px; max-width: 92vw; }
+#import h2 { margin: 0 0 6px; }
+.import-blurb { margin: 0 0 12px; color: var(--dim); font-size: 12px; line-height: 1.5; }
+
+.import-drop {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px dashed var(--line); border-radius: 8px;
+  padding: 12px; margin-bottom: 10px;
+  transition: border-color .15s, background .15s;
+}
+.import-drop.dropping, .deckpane.dropping {
+  border-color: var(--accent);
+  background: rgba(240, 169, 43, .10);
+}
+.import-drop-hint { color: var(--dim); font-size: 12px; }
+
+#import-text {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  line-height: 1.5;
+}
+
+.import-report { margin-top: 10px; max-height: 30vh; overflow: auto; }
+.import-line { font-size: 12px; line-height: 1.6; }
+.import-line.good { color: var(--good); }
+.import-line.warn { color: var(--accent); }
+/* The lines that did not come through, quoted as they were written — the
+ * point is that the person can see their own typo. */
+.import-line.skip {
+  color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding-left: 12px; white-space: pre-wrap; word-break: break-word;
+}

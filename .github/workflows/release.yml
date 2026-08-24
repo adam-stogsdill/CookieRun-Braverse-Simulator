@@ -41,8 +41,11 @@ jobs:
           python -m pip install -r requirements-play.txt
           python fetch_images.py
 
+      # No --webview either way: build_release.py already defaults it per
+      # platform (on for macOS, off for Windows), and forcing it on here would
+      # ship the Windows build a backend nobody has run frozen.
       - name: Build
-        run: python build_release.py ${{ inputs.card_art && '--webview' || '--no-images --webview' }}
+        run: python build_release.py ${{ inputs.card_art && '' || '--no-images' }}
 
       - uses: actions/upload-artifact@v4
         with:

@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.35
+Current Version: 0.2.36
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -249,7 +249,14 @@ that platform shows. `--no-images` builds without the art (11 MB rather than
 208, cards render as text), `--webview` bundles the native-window backend,
 `--no-venv` skips the venv and uses the current interpreter, which is faster
 and only as lean as that interpreter is, and `--no-installer` ships the game
-alone. The spec still builds on its own:
+alone. On macOS it bundles pywebview by default — about 2 MB frozen, and the
+difference between the game having its own WebKit window and it *launching
+Google Chrome*, which is what `desktop.py` falls back to when there is no
+backend to draw with. `--no-webview` opts out; `--webview` opts in on Windows,
+where it is off by default because pywebview needs pythonnet to reach WebView2
+and the frozen combination is untested — and where the fallback is a chromeless
+Edge window that ships with the OS. A bundled backend that turns out not to run
+is not fatal: `open_window` says so and uses the browser window. The spec still builds on its own:
 
 ```bash
 pip install pyinstaller
@@ -1124,6 +1131,38 @@ An illegal deck still saves. Half-built is the normal state of a deck you mean
 to come back to; it simply cannot be picked for a match until it is 60 cards.
 Loading a starter or generated list opens it as `<name> copy`, so editing one to
 see how it feels cannot silently shadow the deck it came from.
+
+#### Importing a deck
+
+The game ships with two decks, so nearly every deck a player has is one that
+arrived from somewhere else. **Import** takes it: a file, several files, a drop
+onto the deck pane, or a paste. `braverse.deckfile.parse_decklist` does the
+reading, server-side because that is the side that knows the cards, and it is
+deliberately generous about the shapes a list turns up in — this project's own
+files exactly, the `--COOKIE--` sections **Export** writes, the `3 ST9-007 Sea
+Fairy Cookie` lines **Copy** puts on the clipboard, `4x ST9-007`, `ST9-007 x4`,
+a bare id, or a name with no id at all.
+
+It is equally deliberate about being loud. Every line it could not place comes
+back quoted and is shown in the dialog, because an importer that silently drops
+four cards produces a deck that is wrong in a way nobody notices until a game
+goes strangely. Names are a guess rather than an answer — 271 of the 813 card
+names in the database are printed on more than one card — so a name that
+matches several resolves to the lowest id, deterministically, and says which
+card it took and that the builder can swap it.
+
+An import lands *in the builder*, not in the deck store: it may be half a list,
+or a list with three lines that need fixing, and the builder is where that
+happens. `POST /api/decks/import` only parses — there is still exactly one route
+that writes a deck. A legal import is then saved by the browser on the spot,
+under the name the file carried (`sea_fairy_aggro.txt` → `sea fairy aggro`), so
+a finished deck is in the New match dropdown without a second step. Like every
+other route that touches the deck store, it answers only the machine running the
+server.
+
+The other way in needs no browser at all: drop the `.txt` in the `decks/` folder
+beside the binary, which is what `install.py` creates and explains. Both roads
+end in the same deck menu.
 
 **Why it is a server and not a script.** The engine calls its controllers
 *re-entrantly*: the defender's trap window opens inside `game.step`, and so does

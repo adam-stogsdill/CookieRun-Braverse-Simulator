@@ -51,6 +51,182 @@ def read_decklist(path: str | Path) -> tuple[list[str], list[str]]:
     return list(blob["deck"]), list(blob.get("extra") or [])
 
 
+# ---------------------------------------------------------------------------
+# reading a decklist somebody else wrote
+# ---------------------------------------------------------------------------
+# The format above is ours, and anything this project wrote can be read back
+# exactly. A decklist that arrives from outside is a different problem: it was
+# copied off a website, typed out, exported by another tool, or pasted into a
+# chat window and pasted back out. `parse_decklist` is deliberately generous
+# about all of that, and deliberately loud about what it could not use — an
+# importer that silently drops four cards produces a deck that is wrong in a
+# way nobody notices until a game goes strangely.
+#
+# Understood, in order of preference:
+#
+#     {"deck": [...], "extra": [...]}     our own files, exactly
+#     --COOKIE--                          the viewer's Export sections
+#     3x Sea Fairy Cookie ST9-001 LV2
+#     3 ST9-001 Sea Fairy Cookie          the viewer's Copy button
+#     ST9-001 x3
+#     3x Sea Fairy Cookie                 no id at all — resolved by name
+#     ST9-001                             one copy
+#
+# An id is authoritative when there is one; a name is a guess, because 271 of
+# the 813 card names in the database are printed on more than one card, and a
+# guess is reported as one.
+
+_ID = re.compile(r"\b([A-Za-z]{1,6}\d*-\d+[A-Za-z]?)\b")
+_COUNT_LEAD = re.compile(r"^\s*(\d{1,3})\s*[x*]?\s+", re.I)
+_COUNT_TRAIL = re.compile(r"[\s(]*[x*]\s*(\d{1,3})\s*\)?\s*$", re.I)
+_SECTION = re.compile(r"^\s*[-=*#\s]*([A-Za-z ]{3,20}?)[-=*\s:]*$")
+_LEVEL = re.compile(r"\b(?:LV|LEVEL)\s*\d+\b", re.I)
+_MAX_CARDS = 400            # a 60-card deck with room to be mid-edit
+
+
+class ImportedDeck:
+    """What one pasted or dropped decklist turned out to be.
+
+    `skipped` and `notes` are the point as much as `deck` is: they are what the
+    importer shows so the person can see that their 60-card list came in as 56
+    and why, rather than finding out during a game.
+    """
+
+    def __init__(self, deck=None, extra=None, name="", notes=None, skipped=None):
+        self.deck: list[str] = list(deck or [])
+        self.extra: list[str] = list(extra or [])
+        self.name: str = name
+        self.notes: list[str] = list(notes or [])
+        self.skipped: list[str] = list(skipped or [])
+
+    def __repr__(self) -> str:      # pragma: no cover - debugging only
+        return (f"ImportedDeck(name={self.name!r}, deck={len(self.deck)}, "
+                f"extra={len(self.extra)}, skipped={len(self.skipped)})")
+
+
+def _json_decklist(text: str) -> dict | None:
+    """The JSON half of one of our own files, if this text has one."""
+    for start in (text.rfind("{"), text.find("{")):
+        if start < 0:
+            continue
+        try:
+            blob = json.loads(text[start:])
+        except ValueError:
+            continue
+        if isinstance(blob, dict) and isinstance(blob.get("deck"), list):
+            return blob
+    return None
+
+
+def _count_and_rest(line: str) -> tuple[int, str]:
+    """How many copies this line asks for, and the line without that part."""
+    lead = _COUNT_LEAD.match(line)
+    if lead:
+        return int(lead.group(1)), line[lead.end():]
+    trail = _COUNT_TRAIL.search(line)
+    if trail:
+        return int(trail.group(1)), line[:trail.start()]
+    return 1, line
+
+
+def _resolve(line: str, db: CardDB) -> tuple[str | None, str]:
+    """One line to a card id, plus a note when the answer was a guess."""
+    for match in _ID.finditer(line):
+        found = match.group(1)
+        if found in db:
+            return found, ""
+        upper = found.upper()
+        if upper in db:
+            return upper, ""
+
+    # No id, or none we know: what is left ought to be a name. Strip the
+    # decorations the export formats add — a Level, a trailing set in
+    # brackets, the punctuation people separate columns with.
+    name = _LEVEL.sub("", line)
+    name = re.sub(r"[\[(][^\])]*[\])]", "", name)
+    name = name.strip(" \t-·|,:;\u2014\u2013")
+    if not name:
+        return None, ""
+    matches = db.by_name(name)
+    if not matches:
+        return None, ""
+    if len(matches) == 1:
+        return matches[0].id, ""
+    # Printed more than once. Take the lowest id so the same list always
+    # imports the same way, and say so — this is the one place the importer
+    # decides something the file did not.
+    pick = sorted(m.id for m in matches)[0]
+    return pick, (f"{name} is printed on {len(matches)} cards — took {pick}; "
+                  f"the deck builder can swap it")
+
+
+def parse_decklist(text: str, db: CardDB) -> ImportedDeck:
+    """Read a decklist somebody else wrote, as generously as is honest.
+
+    Never raises on bad input: a line that means nothing lands in `skipped`,
+    because the caller's job is to show the person what did not come through.
+    """
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    blob = _json_decklist(text)
+    if blob is not None:
+        deck = [str(c) for c in blob.get("deck") or []][:_MAX_CARDS]
+        extra = [str(c) for c in blob.get("extra") or []][:_MAX_CARDS]
+        unknown = sorted({c for c in (*deck, *extra) if c not in db})
+        return ImportedDeck(
+            deck=[c for c in deck if c in db],
+            extra=[c for c in extra if c in db],
+            name=str(blob.get("name") or blob.get("archetype") or ""),
+            skipped=[f"unknown card id: {c}" for c in unknown],
+        )
+
+    result = ImportedDeck()
+    in_extra = False
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not line or line.startswith("//"):
+            continue
+        if line.startswith("#"):
+            key = re.match(r"#\s*name\s*:\s*(.+)", line, re.I)
+            if key:
+                result.name = key.group(1).strip()
+            continue
+
+        # A section header switches piles rather than naming a card. Matched
+        # before the card line so `--EXTRA--` is never read as a card called
+        # EXTRA, and loosely, because people write `EXTRA:` and `== EXTRA ==`.
+        header = _SECTION.match(line)
+        if header and not _ID.search(line) and not line[0].isdigit():
+            word = header.group(1).strip().upper()
+            if word in ("EXTRA", "EXTRA DECK"):
+                in_extra = True
+                continue
+            if word in ("COOKIE", "FLIP", "ITEM", "TRAP", "STAGE", "NPC",
+                        "MAIN", "MAIN DECK", "DECK"):
+                in_extra = False
+                continue
+
+        count, rest = _count_and_rest(line)
+        card_id, note = _resolve(rest, db)
+        if card_id is None:
+            # Prose from a `describe` block, a URL, a stray column header. Only
+            # worth reporting if it looked like it was trying to be a card.
+            if len(line) < 80 and not line.endswith(":"):
+                result.skipped.append(line)
+            continue
+        if note:
+            result.notes.append(note)
+
+        count = max(1, min(count, 60))
+        pile = (result.extra if in_extra or db[card_id].type.value == "EXTRA"
+                else result.deck)
+        room = _MAX_CARDS - (len(result.deck) + len(result.extra))
+        if room <= 0:
+            result.skipped.append(f"stopped at {_MAX_CARDS} cards: {line}")
+            break
+        pile.extend([card_id] * min(count, room))
+    return result
+
+
 def deck_colors(deck: Sequence[str], db: CardDB) -> list[str]:
     """Colours present in a decklist, most-played first."""
     from collections import Counter

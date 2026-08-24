@@ -15,9 +15,12 @@ const Title = {
   on: false,
 
   show() {
+    /* Set first, then switch tabs: `showTab` syncs the title back when it
+     * lands on the play view, and a sync that still saw `on === false` would
+     * call straight back in here. */
+    Title.on = true;
     if (typeof showTab === "function") showTab("play");
     el("#title").classList.remove("hidden");
-    Title.on = true;
     Title.hideOver();
   },
 
@@ -52,7 +55,14 @@ const Title = {
   sync(snap) {
     if (!snap) return;
     const waiting = !!snap.lobby || !!state.room;
-    if (snap.idle && !waiting && !Title.on) Title.show();
+    /* Not while another tab has the window. Every route off this menu that
+     * does not start a game — the deck builder, the replay shelf — leaves the
+     * server just as idle as it was, so a title screen that only asked about
+     * the *match* would raise itself on the very next poll and drag the play
+     * view back up with it, which is the deck builder closing the instant it
+     * is opened. */
+    const elsewhere = typeof onPlayTab === "function" && !onPlayTab();
+    if (snap.idle && !waiting && !Title.on && !elsewhere) Title.show();
     if ((waiting || (!snap.idle && !snap.over)) && Title.on) Title.hide();
     // A finished match asks its question once the last scene has played out;
     // `dismissed` is the person having said they want to look at the board.

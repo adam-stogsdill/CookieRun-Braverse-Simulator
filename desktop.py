@@ -172,8 +172,17 @@ def open_window(url: str, on_close: Optional[Callable[[], None]] = None) -> str:
     ``on_close`` runs once the window is gone, either way.
     """
     if have_webview():
-        run_webview(url, on_close)
-        return "webview"
+        try:
+            run_webview(url, on_close)
+            return "webview"
+        except Exception as exc:
+            # pywebview *imports* on any platform but only *runs* where its
+            # backend does: WebView2 plus pythonnet on Windows, WebKitGTK on
+            # Linux. `have_webview` cannot tell the difference — importing is
+            # all it can do without opening a window — so a bundled copy that
+            # cannot draw has to fall through here rather than take the game
+            # down. The browser window below looks the same to a player.
+            print(f"native window unavailable ({exc}); using a browser window")
 
     proc = run_app_mode(url)
     if proc is not None:

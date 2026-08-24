@@ -95,6 +95,7 @@
       <button id="deck-new" class="ghost tiny">New</button>
       <button id="deck-copy" class="ghost tiny" title="Copy the decklist to the clipboard">Copy</button>
       <button id="deck-export" class="ghost tiny" title="Download the decklist as a text file, grouped by card type">Export</button>
+      <button id="deck-import" class="ghost tiny" title="Load a decklist from a file, or paste one in">Import</button>
       <button id="deck-view" class="ghost tiny" title="Show the whole deck full screen, grouped by card type — for screenshots">View</button>
       <button id="deck-delete" class="ghost tiny">Delete</button>
     </div>
@@ -237,6 +238,27 @@
   </div>
   <div class="browser-count" id="browser-count"></div>
   <div class="browser-grid" id="browser-grid"></div>
+</dialog>
+
+<dialog id="import">
+  <form method="dialog" id="import-form">
+    <h2>Import a deck</h2>
+    <p class="import-blurb">
+      Drop a decklist file here, choose one, or paste a list below. Files this
+      game exported work, and so does a plain list — one card a line, by id or
+      by name.
+    </p>
+    <div id="import-drop" class="import-drop">
+      <input id="import-file" type="file" accept=".txt,.json,text/plain" multiple>
+      <span class="import-drop-hint">…or drop files here</span>
+    </div>
+    <textarea id="import-text" rows="8" spellcheck="false" placeholder="4x ST9-007&#10;2 ST9-001 GingerBrave&#10;3x Sea Fairy Cookie"></textarea>
+    <div class="import-report" id="import-report"></div>
+    <menu>
+      <button value="cancel" class="ghost">Close</button>
+      <button type="button" id="import-go" class="primary">Import</button>
+    </menu>
+  </form>
 </dialog>
 
 <dialog id="setup">

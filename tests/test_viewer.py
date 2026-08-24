@@ -771,3 +771,41 @@ def test_a_dialog_is_not_forced_visible_after_it_closes():
     assert not offenders, (
         "these set `display` on a closed dialog and will leave it on screen:\n  "
         + "\n  ".join(offenders))
+
+
+def test_the_title_screen_cannot_reclaim_another_tab():
+    """`Title.sync` must consult `onPlayTab` before raising the menu.
+
+    The routes off the title screen that do not start a game — the deck
+    builder, the replay shelf — leave the server exactly as idle as it was.
+    So a `sync` that decides purely from the *match* raises the title again on
+    the very next poll, and `Title.show` calls `showTab("play")`, which drags
+    the board back over the tab that was just opened. It presents as the deck
+    builder closing the instant it is opened, one poll later, with nothing in
+    the console and every click handler running correctly.
+
+    Static, because the bug lives in the interaction between a poll and a tab
+    and there is no JavaScript engine here to play it out.
+    """
+    src = (VIEWER / "title.js").read_text()
+    sync = src[src.index("sync(snap)"):src.index("renderOver(snap)")]
+    raising = [line for line in sync.splitlines() if "Title.show()" in line]
+    assert raising, "Title.sync no longer raises the title — has this moved?"
+    for line in raising:
+        guard = sync[:sync.index(line)]
+        assert "onPlayTab" in guard, (
+            "Title.sync raises the title without asking which tab is on screen:\n"
+            f"  {line.strip()}\n"
+            "another tab would be closed by the next poll")
+
+
+def test_returning_to_the_board_brings_the_menu_back_without_waiting():
+    """`showTab("play")` re-syncs, so the menu is there when the tab arrives.
+
+    Only half of the pair above: gating `sync` on the tab is what stops the
+    title screen stealing the builder, and this is what stops the cure — a
+    play tab that sits empty until whenever the next poll happens to land.
+    """
+    src = (VIEWER / "builder.js").read_text()
+    show_tab = src[src.index("function showTab"):src.index("TABS.forEach((tab) => { el(tab.button)")]
+    assert "Title.sync" in show_tab

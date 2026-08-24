@@ -68,6 +68,12 @@ function showTab(name) {
   // replays.js, loaded after this file, so it is checked for rather than
   // assumed — the same way the sleeves tab is.
   if (name === "replays" && typeof refreshReplays === "function") refreshReplays();
+  // Coming back to the board with no game to come back to. `sync` is what
+  // decides that, and it runs off `poll`; asking it here as well is the
+  // difference between the menu being there when the tab arrives and it
+  // appearing over an empty board a moment later.
+  if (name === "play" && typeof Title !== "undefined" && !Title.on
+      && typeof state !== "undefined" && state.snap) Title.sync(state.snap);
 }
 
 TABS.forEach((tab) => { el(tab.button).onclick = () => showTab(tab.name); });
@@ -497,3 +503,144 @@ el("#deck-name").addEventListener("input", () => { build.dirty = true; });
 window.addEventListener("beforeunload", (e) => {
   if (build.dirty) { e.preventDefault(); e.returnValue = ""; }
 });
+
+/* --------------------------------------------------------------- importing */
+/* The game ships with two decks, so most decks a player has are ones they
+ * wrote down somewhere else. This is the way in: a file, several files, or a
+ * paste. The parsing is the server's (`braverse.deckfile.parse_decklist`),
+ * because it is the side that knows the cards; this only carries text over and
+ * reports what came back.
+ *
+ * An import lands *in the builder*, not straight in the deck store: it may be
+ * half a deck, or a list with three lines the parser could not place, and the
+ * builder is where that gets fixed. A legal one is saved on the spot as well,
+ * since needing to press Save after importing a finished deck is a papercut on
+ * the one path that has to be easy. */
+function importReport(data, source) {
+  const report = el("#import-report");
+  const bits = [];
+  const total = data.size + (data.extraSize || 0);
+  bits.push(h("div", "import-line good",
+              `${source}: ${total} cards` + (data.extraSize ? ` (+${data.extraSize} EXTRA)` : "")));
+  if (!data.legal) {
+    bits.push(h("div", "import-line warn",
+                data.problems.join(" · ") || "not a legal deck yet"));
+  }
+  (data.notes || []).forEach((note) => bits.push(h("div", "import-line warn", note)));
+  if (data.skippedCount) {
+    bits.push(h("div", "import-line warn",
+                `${data.skippedCount} line${data.skippedCount === 1 ? "" : "s"} not understood:`));
+    (data.skipped || []).forEach((line) => bits.push(h("div", "import-line skip", line)));
+  }
+  report.innerHTML = "";
+  bits.forEach((node) => report.appendChild(node));
+}
+
+/* The name a file carries is the name the deck gets, unless the list named
+ * itself — `sea_fairy_aggro.txt` is how a deck arrives far more often than
+ * with a name written inside it. */
+function nameFromFile(filename) {
+  return filename.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+}
+
+async function importText(text, fallbackName) {
+  const data = await api("/api/decks/import", { text, name: fallbackName || "" });
+  if (data.error) {
+    importReport({ size: 0, problems: [data.error], skipped: data.skipped || [],
+                   skippedCount: (data.skipped || []).length, legal: false },
+                 fallbackName || "paste");
+    el("#import-report").firstChild.className = "import-line warn";
+    return null;
+  }
+  // Straight into the builder, cards and all, exactly as loading a deck does.
+  data.cards.forEach((card) => build.cards.set(card.id, card));
+  (data.extra || []).forEach((card) => build.cards.set(card.id, card));
+  build.list = [];
+  build.extra = [];
+  data.cards.forEach((card) => { for (let i = 0; i < card.count; i++) build.list.push(card.id); });
+  (data.extra || []).forEach((card) => { for (let i = 0; i < card.count; i++) build.extra.push(card.id); });
+  build.loaded = null;
+  build.dirty = true;
+  el("#deck-name").value = data.name || fallbackName || "";
+  renderDeck();
+  searchPool();
+  importReport(data, fallbackName || "pasted list");
+
+  // Legal and named: save it, so it is in the deck menu without a second step.
+  const name = el("#deck-name").value.trim();
+  if (data.legal && name) {
+    const saved = await api("/api/decks/save",
+                            { name, cards: build.list, extra: build.extra });
+    if (!saved.error) {
+      build.loaded = name;
+      build.dirty = false;
+      await refreshDeckList(name);
+      loadConfig();
+      el("#import-report").appendChild(
+        h("div", "import-line good", `saved as "${name}" — it is in the deck menu now`));
+    }
+  }
+  return data;
+}
+
+async function importFiles(files) {
+  const list = [...files].filter((file) => file.size <= 256 * 1024);
+  if (!list.length) { flash("no decklist files there"); return; }
+  // One at a time, deliberately: each one loads into the builder and the last
+  // is what stays there, so the report has to be about that one.
+  for (const file of list) {
+    const text = await file.text();
+    await importText(text, nameFromFile(file.name));
+  }
+  if (list.length > 1) {
+    el("#import-report").appendChild(
+      h("div", "import-line good",
+        `${list.length} files imported — the last one is open in the builder`));
+  }
+}
+
+el("#deck-import").onclick = () => {
+  if (!confirmDiscard()) return;
+  el("#import-text").value = "";
+  el("#import-file").value = "";
+  el("#import-report").innerHTML = "";
+  el("#import").showModal();
+};
+
+el("#import-go").onclick = async () => {
+  const text = el("#import-text").value;
+  if (text.trim()) { await importText(text, ""); return; }
+  const files = el("#import-file").files;
+  if (files && files.length) { await importFiles(files); return; }
+  flash("choose a file or paste a list first");
+};
+
+el("#import-file").addEventListener("change", (e) => {
+  if (e.target.files && e.target.files.length) importFiles(e.target.files);
+});
+
+/* Dropping on the panel is the shortest path there is, so both the dialog and
+ * the deck pane take a drop — the second opens the dialog on the way, so the
+ * report still has somewhere to appear. */
+function wireDrop(node, openFirst) {
+  node.addEventListener("dragover", (e) => {
+    if (!(e.dataTransfer && [...e.dataTransfer.types].includes("Files"))) return;
+    e.preventDefault();
+    node.classList.add("dropping");
+  });
+  node.addEventListener("dragleave", () => node.classList.remove("dropping"));
+  node.addEventListener("drop", (e) => {
+    if (!(e.dataTransfer && e.dataTransfer.files.length)) return;
+    e.preventDefault();
+    node.classList.remove("dropping");
+    if (openFirst && !el("#import").open) {
+      if (!confirmDiscard()) return;
+      el("#import-report").innerHTML = "";
+      el("#import").showModal();
+    }
+    importFiles(e.dataTransfer.files);
+  });
+}
+
+wireDrop(el("#import-drop"), false);
+wireDrop(el(".deckpane"), true);

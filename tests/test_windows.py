@@ -172,3 +172,34 @@ def test_utf8_output_is_not_called_at_import():
     for module in (play_server, desktop):
         top = inspect.getsource(module).split("def ")[0]
         assert "utf8_output()" not in top
+
+
+# --- the window backend ----------------------------------------------------
+def test_a_bundled_webview_that_cannot_run_falls_back(monkeypatch, capsys):
+    """pywebview imports on every platform but only *runs* where its backend
+    does — WebView2 plus pythonnet on Windows, WebKitGTK on Linux.
+
+    `have_webview()` can only try the import, so a frozen build that carries a
+    copy it cannot draw with must fall through to the browser window rather
+    than take the game down on the first launch.
+    """
+    monkeypatch.setattr(desktop, "have_webview", lambda: True)
+
+    def no_backend(url, on_close=None):
+        raise RuntimeError("Unable to load DLL 'WebView2Loader.dll'")
+
+    monkeypatch.setattr(desktop, "run_webview", no_backend)
+    monkeypatch.setattr(desktop, "run_app_mode", lambda url: _FakeProc())
+
+    closed = []
+    assert desktop.open_window("http://127.0.0.1:8080/", lambda: closed.append(1)) == "app"
+    assert closed == [1]
+    assert "native window unavailable" in capsys.readouterr().out
+
+
+class _FakeProc:
+    def wait(self):
+        return 0
+
+    def poll(self):
+        return 0
