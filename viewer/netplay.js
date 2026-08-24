@@ -43,6 +43,42 @@ const Peer = {
   flushing: false,
   pumping: false,
 
+  /* -- talking to our own engine ---------------------------------------- */
+
+  /** `api`, with the failure modes said in words a player can act on.
+   *
+   * A bare "Failed to fetch" is the browser's way of saying it could not reach
+   * the server *at all*, and letting that string reach the screen tells nobody
+   * anything: the commonest causes are the local server having stopped and the
+   * page being an old tab pointed at a port nothing is listening on any more,
+   * and neither is guessable from those three words. A page that loaded but
+   * cannot POST is almost always one of those two.
+   *
+   * The other case worth separating is a reply that is not JSON, which means
+   * something answered but it was not this app — an older build without these
+   * routes, or another server on the port. */
+  async reach(path, body) {
+    let res;
+    try {
+      const opts = body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      };
+      res = await fetch(path, opts);
+    } catch (err) {
+      throw new Error("cannot reach the game on this computer — is the server "
+                      + "still running, and is this page pointed at it? "
+                      + `(${location.origin})`);
+    }
+    try {
+      return await res.json();
+    } catch (err) {
+      throw new Error(`${location.origin} answered ${res.status} but not in a `
+                      + "form this app understands — it may be an older build, "
+                      + "or a different server on that port");
+    }
+  },
+
   /* -- signalling codes ------------------------------------------------- */
 
   /** A description as a code short enough to paste into a chat window.
@@ -161,7 +197,7 @@ const Peer = {
     try {
       while (Peer.inbox.length) {
         const batch = Peer.inbox.splice(0, Peer.inbox.length);
-        const res = await api("/api/peer/in", { msgs: batch });
+        const res = await Peer.reach("/api/peer/in", { msgs: batch });
         if (res && res.gone) { Peer.note("this game is over"); return; }
         if (res && res.peer) Peer.report(res.peer);
       }
@@ -180,7 +216,7 @@ const Peer = {
     Peer.pumping = true;
     try {
       while (Peer.on && Peer.channel && Peer.channel.readyState === "open") {
-        const res = await api("/api/peer/out");
+        const res = await Peer.reach("/api/peer/out");
         if (!res || res.gone) break;
         if (res.peer) Peer.report(res.peer);
         for (const message of res.msgs || []) {
@@ -189,7 +225,7 @@ const Peer = {
         }
       }
     } catch (err) {
-      Peer.note("lost contact with the local engine");
+      Peer.fail(err.message || "lost contact with the game on this computer");
     } finally {
       Peer.pumping = false;
     }
@@ -199,8 +235,8 @@ const Peer = {
 
   /** Host: build the offer code, and hold it out to be pasted elsewhere. */
   async host(deck, name) {
-    const started = await api("/api/peer/new", { host: true, deck, name });
-    if (started.error) { Peer.note(started.error); return null; }
+    const started = await Peer.reach("/api/peer/new", { host: true, deck, name });
+    if (started.error) { Peer.fail(started.error); return null; }
     Peer.begin(0);
     const pc = Peer.fresh();
     // The host opens the channel; the joiner picks it up from `ondatachannel`.
@@ -221,8 +257,8 @@ const Peer = {
   /** Joiner: take the host's offer code, and give back an answer code. */
   async join(code, deck, name) {
     const offer = await Peer.decode(code);      // before anything is committed
-    const started = await api("/api/peer/new", { host: false, deck, name });
-    if (started.error) { Peer.note(started.error); return null; }
+    const started = await Peer.reach("/api/peer/new", { host: false, deck, name });
+    if (started.error) { Peer.fail(started.error); return null; }
     Peer.begin(1);
     const pc = Peer.fresh();
     pc.addEventListener("datachannel", (event) => Peer.adopt(event.channel));
@@ -249,7 +285,7 @@ const Peer = {
         return;
       }
       try {
-        const snap = await api("/api/state?peer=1");
+        const snap = await Peer.reach("/api/state?peer=1");
         if (snap && snap.peer) Peer.report(snap.peer);
       } catch (err) { /* the poll failing is not itself news */ }
     }, 2000);
@@ -323,7 +359,7 @@ const Peer = {
     state.eventId = 0;
     Peer.teardown();
     Peer.inbox.length = 0;
-    try { await api("/api/peer/close", { why: why || "left the match" }); } catch (e) {}
+    try { await Peer.reach("/api/peer/close", { why: why || "left the match" }); } catch (e) {}
   },
 };
 
@@ -372,6 +408,19 @@ const PeerUI = {
   deck() { return el("#peer-deck").value; },
   name() { return el("#peer-name").value.trim(); },
 
+  /* Why a step failed, said without blaming the wrong thing.
+   *
+   * "That code did not work" is right for a code that would not decode, and
+   * actively misleading for a server that is not running — it sends someone
+   * off to re-copy a code that was never the problem. `Peer.reach` already
+   * phrases its own failures for a player, so those are passed through as they
+   * are and only a genuine decode failure gets the blame. */
+  blame(err, what) {
+    const message = String((err && err.message) || err);
+    return /cannot reach|answered \d|understands/.test(message)
+      ? message : `${what} — ${message}`;
+  },
+
   /* A textarea rather than the clipboard alone: `navigator.clipboard` needs a
    * secure context, and a plain http://localhost page is only sometimes one.
    * The code is always on screen to be selected by hand. */
@@ -391,7 +440,7 @@ const PeerUI = {
       el("#peer-offer").value = code;
       Peer.note("send that code over, then paste their reply");
     } catch (err) {
-      Peer.note(String(err.message || err));
+      Peer.fail(PeerUI.blame(err, "could not start a game"));
     }
   },
 
@@ -400,7 +449,7 @@ const PeerUI = {
       await Peer.accept(el("#peer-answer").value);
       Peer.note("connecting…");
     } catch (err) {
-      Peer.note("that reply code did not work — " + (err.message || err));
+      Peer.fail(PeerUI.blame(err, "that reply code did not work"));
     }
   },
 
@@ -418,7 +467,7 @@ const PeerUI = {
       el("#peer-answer-out").value = code;
       Peer.note("send that back, and the game starts on its own");
     } catch (err) {
-      Peer.note("that code did not work — " + (err.message || err));
+      Peer.fail(PeerUI.blame(err, "that code did not work"));
     }
   },
 };
