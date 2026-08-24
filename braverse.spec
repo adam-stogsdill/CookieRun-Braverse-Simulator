@@ -72,3 +72,31 @@ exe = EXE(
     upx=False,
     target_arch=None,
 )
+
+# The installer, built beside the game as its own small binary: it copies the
+# game into a chosen folder and makes the folders a player drops decks and card
+# art into. It ships next to the game so installing needs no Python either — a
+# script would not help someone who has none, which is the whole audience for a
+# frozen build. It carries no data and needs no numpy, so it costs a few MB.
+#
+# `BRAVERSE_INSTALLER=0` skips it, for a build of only the game.
+if os.environ.get("BRAVERSE_INSTALLER", "1") != "0":
+    inst = Analysis(
+        ["install.py"],
+        pathex=[str(ROOT)],
+        datas=[],
+        excludes=["numpy", "torch", "tqdm", "pytest", "PIL", "tkinter", "matplotlib"],
+        noarchive=False,
+    )
+    inst_pyz = PYZ(inst.pure)
+    inst_exe = EXE(
+        inst_pyz,
+        inst.scripts,
+        inst.binaries,
+        inst.datas,
+        name="install-braverse",
+        console=True,
+        onefile=True,
+        upx=False,
+        target_arch=None,
+    )

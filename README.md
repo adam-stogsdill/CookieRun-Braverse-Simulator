@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.34
+Current Version: 0.2.35
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -213,6 +213,32 @@ python3 fetch_images.py             # the art goes inside the binary
 python3 build_release.py            # -> release/braverse-<version>-macos-arm64.zip
 ```
 
+The zip holds three files: the game, an installer, and a read-me. The game runs
+from wherever it is put — the installer exists because *where it is put* is
+where the game keeps things.
+
+```bash
+./install-braverse                  # asks where, then whether to make a shortcut
+./install-braverse --uninstall      # removes the program, keeps decks and profiles
+```
+
+It copies the game into a folder the player owns (`%LOCALAPPDATA%\Braverse`,
+`~/Applications/Braverse`, `~/.local/share/braverse` — never Program Files or
+`/Applications`, because the game writes beside its executable and those are
+read-only to the person playing), creates `decks/`, `card_images/`, `profiles/`
+and `replays/` with a read-me in each saying what belongs there, and offers a
+shortcut: a Start Menu `.lnk` on Windows, a small `.app` in `~/Applications` on
+macOS — a launcher, not a copy, so an upgrade does not orphan it. Both set the
+working directory to the install folder, since that is what decides where the
+game saves. On macOS it also clears `com.apple.quarantine` from the copy it
+installs, which is the difference between the game opening and Gatekeeper
+refusing an unsigned binary outright.
+
+Installing again over the same folder replaces only the program: that is the
+upgrade path, and why the installed binary is named `braverse` and not after a
+version. `--uninstall` leaves decks, profiles and replays where they are, and
+says so; `--purge` is how you ask for the other thing.
+
 `build_release.py` is the whole build: it checks the art library is complete,
 makes a throwaway `.venv-build/` holding `requirements-play.txt` and
 PyInstaller and *nothing else* — so there is no torch on the path for
@@ -222,7 +248,8 @@ with a README naming the platform it was built for and the first-launch prompt
 that platform shows. `--no-images` builds without the art (11 MB rather than
 208, cards render as text), `--webview` bundles the native-window backend,
 `--no-venv` skips the venv and uses the current interpreter, which is faster
-and only as lean as that interpreter is. The spec still builds on its own:
+and only as lean as that interpreter is, and `--no-installer` ships the game
+alone. The spec still builds on its own:
 
 ```bash
 pip install pyinstaller
@@ -231,7 +258,10 @@ pyinstaller braverse.spec           # -> dist/braverse  (208 MB)
 
 It carries the engine, the browser front end, `braverse_cards.csv`, the
 decklists and the **whole ~2000-card art library**, so any deck of any cards
-renders. Drop a decklist `.txt` next to the binary and it shows up in the deck
+renders. Art in a `card_images/` folder beside the binary is used in preference
+to the bundled copy (`play_server.card_image`) — the library is baked in and
+`fetch_images.py` is not in the bundle, so that folder is the only way a card
+printed after the build gets a picture. Drop a decklist `.txt` next to the binary and it shows up in the deck
 menu — that is how a card outside the shipped decks gets played, and why the
 art is bundled whole. A `.txt` beside the binary overrides a bundled one of the
 same name. The spec refuses to build against a thin `card_images/`.

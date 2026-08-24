@@ -73,12 +73,27 @@ import tunnel as TUN
 ROOT = Path(__file__).resolve().parent
 VIEWER = ROOT / "viewer"
 IMAGES = ROOT / "card_images"
+CARD_DIR = "card_images"
 
 # Frozen by PyInstaller (see braverse.spec), ROOT is the throwaway directory the
 # bundle unpacks into — fine for the assets baked in, useless for the decklists
 # and trained pilots someone drops next to the binary. Look there too.
 SIDE = (Path(sys.executable).resolve().parent
         if getattr(sys, "frozen", False) else ROOT)
+
+
+def card_image(name: str) -> Path:
+    """The art for one card: someone's own copy first, the bundled one after.
+
+    Art dropped in `card_images/` beside the binary wins, the same way a
+    decklist there does. That is the only way a card printed after the build
+    gets a picture — the library is baked in, and `fetch_images.py` is not in
+    the bundle — and it is how someone puts their own scans on the table.
+    When running from a checkout the two directories are the same one, and this
+    is a no-op.
+    """
+    mine = SIDE / CARD_DIR / name
+    return mine if mine.is_file() else IMAGES / name
 
 WINDOWS = os.name == "nt"
 
@@ -2677,7 +2692,7 @@ class Handler(BaseHTTPRequestHandler):
             if "/" in name or ".." in name:
                 self._send(400, b"bad path", "text/plain")
                 return
-            self._file(IMAGES / name, cache=True)
+            self._file(card_image(name), cache=True)
         elif path == "/api/peer/out":
             # Held rather than polled: a decision the other player is waiting
             # on must leave as soon as our seat produces it.

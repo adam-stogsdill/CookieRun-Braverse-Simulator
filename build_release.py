@@ -4,8 +4,10 @@
     python3 build_release.py                 # -> release/braverse-0.2.33-macos-arm64.zip
     python build_release.py --no-images      # same, ~190 MB smaller, cards as text
 
-What comes out is only what a *player* needs: the engine, the browser front end,
-the card database, the card art, and (optionally) the native-window backend.
+What comes out is a folder holding two binaries — the game and an installer
+that puts it somewhere permanent — and a read-me. Only what a *player* needs is
+in them: the engine, the browser front end, the card database, the card art,
+and (optionally) the native-window backend.
 Everything the project uses to *develop* the game — torch, the RL pilots, the
 evolution and training scripts, the tests, the card scrapers — is left out.
 
@@ -25,6 +27,7 @@ Options:
 
     --no-venv       build with the current interpreter, no throwaway venv
     --no-images     leave out card_images/ (cards render as text)
+    --no-installer  ship the game alone, without install-braverse
     --webview       also bundle pywebview, for a native window over a browser tab
     --no-zip        leave the bare binary in release/, do not archive it
     --keep-build    keep PyInstaller's work directory for inspection
@@ -52,6 +55,7 @@ WINDOWS = os.name == "nt"
 # not a thin one, so they are checked before PyInstaller spends five minutes.
 REQUIRED = [
     Path("play_server.py"),
+    Path("install.py"),
     Path("desktop.py"),
     Path("tunnel.py"),
     Path("braverse_cards.csv"),
@@ -172,60 +176,81 @@ def check_lean(py: Path) -> None:
             f"them, but a clean venv build is the safer bundle")
 
 
-def pyinstaller(py: Path, args, work: Path, dist: Path) -> Path:
+def pyinstaller(py: Path, args, work: Path, dist: Path) -> tuple[Path, Path | None]:
+    """The game, and the installer that puts it somewhere — one PyInstaller run
+    over `braverse.spec`, which builds both."""
     env = dict(os.environ)
     env["BRAVERSE_BUNDLE_IMAGES"] = "0" if args.no_images else "1"
+    env["BRAVERSE_INSTALLER"] = "0" if args.no_installer else "1"
     say("running PyInstaller — this takes a few minutes")
     started = time.time()
     run([py, "-m", "PyInstaller", "braverse.spec", "--noconfirm",
          "--distpath", str(dist), "--workpath", str(work),
          "--log-level", "WARN"], env=env)
-    exe = dist / ("braverse.exe" if WINDOWS else "braverse")
+
+    suffix = ".exe" if WINDOWS else ""
+    exe = dist / f"braverse{suffix}"
     if not exe.exists():
         die(f"PyInstaller reported success but {exe} is not there")
-    size = exe.stat().st_size / 1e6
-    say(f"built {exe.name} — {size:.0f} MB in {time.time() - started:.0f}s")
-    return exe
+    installer = dist / f"install-braverse{suffix}"
+    if not args.no_installer and not installer.exists():
+        die(f"PyInstaller reported success but {installer} is not there")
+
+    say(f"built {exe.name} — {exe.stat().st_size / 1e6:.0f} MB "
+        f"in {time.time() - started:.0f}s")
+    if installer.exists():
+        say(f"built {installer.name} — {installer.stat().st_size / 1e6:.0f} MB")
+    return exe, (installer if installer.exists() else None)
 
 
-def smoke_test(exe: Path) -> None:
-    """`--help` exits before the server starts but after every import, so it
+def smoke_test(exe: Path, what: str) -> None:
+    """`--help` exits before anything happens but after every import, so it
     proves the bundle can load numpy, the card database and the engine — the
     failures a frozen build actually has."""
     try:
         proc = subprocess.run([str(exe), "--help"], capture_output=True,
                               text=True, timeout=180)
     except subprocess.TimeoutExpired:
-        die("the binary hung on --help")
+        die(f"the {what} hung on --help")
         return
     if proc.returncode != 0:
-        die(f"the binary failed on --help:\n{proc.stdout}\n{proc.stderr}")
-    say("smoke test passed (binary starts and imports the engine)")
+        die(f"the {what} failed on --help:\n{proc.stdout}\n{proc.stderr}")
+    say(f"smoke test passed ({what} starts and imports what it needs)")
 
 
 NOTES = """\
 CookieRun: Braverse Simulator {ver} — {tag}
 
-Run it
-------
+Install it
+----------
+{install_line}
+
+It asks where to put the game, makes the folders you drop decks and card art
+into, and offers to make a shortcut. Nothing is installed system-wide and it
+never asks for an administrator; uninstalling is deleting the folder.
+
+Or just run it
+--------------
 {run_line}
 
-It starts a local server and opens the game in a window (or a browser tab at
-http://127.0.0.1:8080). Everything runs on this machine; nothing is uploaded.
+The game runs from wherever it sits — installing only decides *where*, and the
+game keeps decks, profiles and replays in that same folder. Run it out of
+Downloads and that is where they go.
+
+Either way it starts a local server and opens the game in a window (or a
+browser tab at http://127.0.0.1:8080). Everything runs on this machine;
+nothing is uploaded.
 
   --port N      serve on another port
   --lan         let other machines on your network join (off by default)
   --no-browser  just serve, do not open anything
 
-macOS: the binary is unsigned, so the first launch is refused. Right-click it
-and choose Open, or run:  xattr -dr com.apple.quarantine ./braverse
+First launch
+------------
+macOS: these binaries are unsigned, so the first launch is refused — right-click
+and choose Open. The installer clears that flag on the copy it installs, so
+this only bites the two files in this folder.
 Windows: SmartScreen shows "unknown publisher" — More info -> Run anyway.
-
-Decks, replays and profiles
----------------------------
-Decklists (.txt) placed next to this binary show up in the deck menu. Games you
-keep, saved decks and player profiles are written next to it too, so keep it
-somewhere you can write to (not /Applications, not Program Files).
 
 What is in here
 ---------------
@@ -237,45 +262,57 @@ Unofficial fan project, not affiliated with Devsisters.
 """
 
 
-def package(exe: Path, args, tag: str, ver: str) -> Path:
+def package(exe: Path, installer: Path | None, args, tag: str, ver: str) -> Path:
+    """A folder holding the game, the installer and a read-me — zipped, with
+    that folder inside the zip rather than its three files loose, so unzipping
+    into Downloads leaves one thing behind instead of three."""
     out = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
     stem = f"braverse-{ver}-{tag}"
-    final = out / (stem + (".exe" if WINDOWS else ""))
-    if final.exists():
-        final.unlink()
-    shutil.copy2(exe, final)
-    final.chmod(final.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    suffix = ".exe" if WINDOWS else ""
+    staged = out / stem
+    if staged.exists():
+        shutil.rmtree(staged)
+    staged.mkdir(parents=True)
+
+    # Plain names inside the folder: the folder is what carries the version and
+    # the platform, and the installer looks for `braverse` by name.
+    copies = [(exe, staged / f"braverse{suffix}")]
+    if installer is not None:
+        copies.append((installer, staged / f"install-braverse{suffix}"))
+    for src, dst in copies:
+        shutil.copy2(src, dst)
+        dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     notes = NOTES.format(
         ver=ver, tag=tag,
-        run_line=(f"  {final.name}" if WINDOWS else f"  ./{final.name}"),
+        install_line=("  install-braverse.exe" if WINDOWS else
+                      "  ./install-braverse") if installer is not None else
+                     "  (this build has no installer — run the game where you like)",
+        run_line=f"  braverse{suffix}" if WINDOWS else "  ./braverse",
         art=" and the full card art library" if not args.no_images else
             " (no card art in this build — cards render as text)")
-    readme = out / f"{stem}-README.txt"
+    readme = staged / "README.txt"
     # newline="\n" explicitly: this file is read on Windows too, and
     # `write_text`'s newline argument does not exist before Python 3.10.
     with open(readme, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(notes)
 
     if args.no_zip:
-        say(f"binary: {final}")
-        return final
+        say(f"folder: {staged}")
+        return staged
 
     archive = out / f"{stem}.zip"
     if archive.exists():
         archive.unlink()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
-        # Python's zipfile drops the executable bit unless it is written by
-        # hand, and a binary that unzips without +x is a bug report.
-        info = zipfile.ZipInfo.from_file(final, final.name)
-        info.external_attr = (0o755 << 16)
-        info.compress_type = zipfile.ZIP_DEFLATED
-        with open(final, "rb") as fh:
-            z.writestr(info, fh.read())
-        z.write(readme, "README.txt")
-    final.unlink()
-    readme.unlink()
+        for path in sorted(staged.iterdir()):
+            # Python's zipfile drops the executable bit unless it is written by
+            # hand, and a binary that unzips without +x is a bug report.
+            info = zipfile.ZipInfo.from_file(path, f"{stem}/{path.name}")
+            info.external_attr = ((0o755 if path.suffix != ".txt" else 0o644) << 16)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, path.read_bytes())
+    shutil.rmtree(staged)
     say(f"release: {archive} ({archive.stat().st_size / 1e6:.0f} MB)")
     return archive
 
@@ -287,6 +324,8 @@ def main() -> None:
                     help="build with the current interpreter instead of a clean venv")
     ap.add_argument("--no-images", action="store_true",
                     help="leave out card_images/ (~190 MB smaller, cards as text)")
+    ap.add_argument("--no-installer", action="store_true",
+                    help="ship the game alone, without install-braverse")
     ap.add_argument("--webview", action="store_true",
                     help="bundle pywebview so the game opens in a native window")
     ap.add_argument("--no-zip", action="store_true",
@@ -314,9 +353,11 @@ def main() -> None:
 
     work = ROOT / "build"
     dist = ROOT / "dist"
-    exe = pyinstaller(py, args, work, dist)
-    smoke_test(exe)
-    result = package(exe, args, tag, ver)
+    exe, installer = pyinstaller(py, args, work, dist)
+    smoke_test(exe, "game")
+    if installer is not None:
+        smoke_test(installer, "installer")
+    result = package(exe, installer, args, tag, ver)
 
     if not args.keep_build and work.exists():
         shutil.rmtree(work, ignore_errors=True)

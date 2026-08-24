@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.35
+
+- **The download now comes with an installer.** Run `install-braverse` and it
+  asks where to put the game, sets it up there, and offers to make a shortcut —
+  in the Start Menu on Windows, in your Applications folder on a Mac, where you
+  can drag it to the Dock. It never asks for an administrator password, and
+  uninstalling is deleting the folder it made.
+- **It makes folders for the things you add.** `decks/` for decklists you or
+  your friends make, `card_images/` for card art, `profiles/` for players and
+  `replays/` for games you kept. Each one has a short note in it saying what
+  goes there, so you can add a deck by dropping the file in as well as by using
+  the deck builder.
+- **You can add art for cards the game does not have a picture of.** Put a
+  `.webp` named after the card — `ST9-007.webp` — in `card_images/` and the game
+  uses it instead of its own. That covers cards printed since the version you
+  downloaded, and your own scans.
+- **Installing a newer version keeps your decks, profiles and replays.** Install
+  it over the old one; only the game itself is replaced.
+- On a Mac, the installer clears the download flag on the copy it installs, so
+  the game opens normally instead of being refused as an unidentified developer.
+
 ## 0.2.34
 
 - **One command now builds the game into something you can hand to someone.**
