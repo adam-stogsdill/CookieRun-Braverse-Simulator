@@ -617,6 +617,35 @@ function phaseTrack(seat, snap) {
   return track;
 }
 
+/* The quiet answer to "is anything actually happening?".
+ *
+ * A seat waiting on the other player has nothing on screen that moves: the
+ * board is theirs to change and the panel is one line of text off to the right,
+ * which is easy to be looking away from. This is a small breathing mark in the
+ * *other* player's seat bar — where their half of the table already is, so it
+ * costs no new furniture — and it says only two things: they are being asked
+ * something, or they are being asked about your attack.
+ *
+ * Only ever drawn for a seat this browser cannot answer for (`waiting` is set
+ * by the server, and only in an online match). In a hot seat both questions
+ * are yours and a chip saying you are waiting for yourself would be a lie.
+ */
+function waitingChip(seat, snap) {
+  const pending = snap.pending;
+  if (!pending || !pending.waiting || pending.seat !== seat || snap.over) return null;
+  const attack = pending.responding;
+  const chip = h("span", "thinking" + (attack ? " responding" : ""));
+  const dots = h("span", "dots");
+  for (let i = 0; i < 3; i++) dots.appendChild(h("i"));
+  chip.appendChild(dots);
+  chip.appendChild(h("span", "what", attack ? "may respond" : "thinking"));
+  chip.title = attack
+    ? `Your attack on ${attack.targetName} is declared but not through: they `
+      + "can spring a trap or block with another Cookie before it lands."
+    : `${seatLabel(seat, snap)} is answering: ${pending.prompt}`;
+  return chip;
+}
+
 function renderSide(seat, snap) {
   const side = el("#side-" + seat);
   side.innerHTML = "";
@@ -636,6 +665,8 @@ function renderSide(seat, snap) {
     bar.appendChild(h("span", "pill" + (isHuman ? " human" : ""), prettyPilot(pilot)));
   }
   bar.appendChild(h("span", "deckname", snap.decks[seat]));
+  const chip = waitingChip(seat, snap);
+  if (chip) bar.appendChild(chip);
 
   /* -- mat ------------------------------------------------------------ */
   const mat = h("div", "mat" + (snap.turnPlayer === seat && !snap.over ? " active" : ""));
@@ -1899,15 +1930,25 @@ function renderOptions(snap) {
   const idle = snap.replay
     ? (snap.replay.note ? "Replay ended" : "Replaying…")
     : "Bots playing…";
-  setText(el("#prompt"), prompt || (snap.over ? "Game over" : idle));
+  // Their prompt is written for them: "Attacked — trap, block, or take it" is
+  // the wrong way round for the player who threw the punch.
+  const waitingOnAttack = pending && pending.waiting && pending.responding;
+  const heading = waitingOnAttack ? "Attack declared" : prompt;
+  setText(el("#prompt"), heading || (snap.over ? "Game over" : idle));
   el("#prompt-who").textContent = pending ? seatLabel(pending.seat, snap) : lastLine;
 
   const say = (text, cls) => box.appendChild(h("div", "filterbar" + (cls ? " " + cls : ""), text));
   if (!pending) return;
   if (pending.waiting) {
     // The question is the other seat's, and its options are that seat's hand,
-    // so this browser was never sent them. Show what they are being asked.
-    say("waiting for your opponent…", "waiting");
+    // so this browser was never sent them. Say who is being asked rather than
+    // "your opponent" — a name is the difference between a wait and a hang.
+    const who = seatLabel(pending.seat, snap);
+    if (waitingOnAttack) {
+      say(`${who} may trap or block before it lands…`, "waiting responding");
+    } else {
+      say(`waiting for ${who}…`, "waiting");
+    }
     return;
   }
   if (pending.centre) { say("answer in the middle of the table"); return; }
@@ -2159,19 +2200,25 @@ function movesFor(uid) {
   return pendingOptions().filter((o) => o.subject === uid);
 }
 
-/** Where a given card is allowed to be dropped, as CSS selectors. */
+/* Where a given card is allowed to be dropped, as CSS selectors.
+ *
+ * Your own zones are `.side.me`, never `#side-0`: the ids stay bolted to their
+ * seat while `seatPerspective` moves the `me`/`opponent` classes, so seat 1
+ * addressing `#side-0` is pointing at the *opponent's* half of the table —
+ * which is where a support card had to be dropped to land in your own area. */
 function dropTargetsFor(uid) {
   const targets = [];
+  const mine = (zone) => `.side.me .zone.${zone}`;
   movesFor(uid).forEach((opt) => {
     if (opt.kind === "Attack" && opt.target !== undefined) {
       targets.push({ sel: `[data-cookie="${opt.target}"]`, opt });
     } else if (opt.kind === "PlaceSupport") {
-      targets.push({ sel: "#side-0 .zone.support", opt });
+      targets.push({ sel: mine("support"), opt });
     } else if (opt.kind === "PlayCookie" || opt.kind === "PlaySupportCard") {
-      targets.push({ sel: "#side-0 .zone.battle", opt });
-      if (opt.kind === "PlaySupportCard") targets.push({ sel: "#side-0 .zone.stage", opt });
+      targets.push({ sel: mine("battle"), opt });
+      if (opt.kind === "PlaySupportCard") targets.push({ sel: mine("stage"), opt });
     } else if (opt.kind === "PlayTrap" || opt.kind === "ActivateSkill") {
-      targets.push({ sel: "#side-0 .zone.battle", opt });
+      targets.push({ sel: mine("battle"), opt });
     }
   });
   return targets;
@@ -2348,6 +2395,30 @@ async function loadCardIndex() {
 }
 loadCardIndex();
 
+/* The engine writes every card in the log as "Name (ST9-007)", because 271 of
+ * the 813 names are printed on more than one card and the name index above can
+ * only hold one card per name — so hovering a name previewed whichever copy
+ * happened to be first, which is the wrong card and often a different one from
+ * the one that just acted. The id in the line says exactly which, and this
+ * fetches it. One card per request, cached, and only when the id is not the
+ * one the name index already has. */
+const cardById = new Map();
+/* Which card the pointer is on, as an id. Not the element: `renderLog` rebuilds
+ * the whole list on every poll, so the tag the pointer entered is routinely
+ * gone by the time the fetch lands — and a `:hover` test against it says the
+ * player looked away when they did no such thing. */
+let hoveredCard = "";
+
+function cardFor(id) {
+  if (!id) return null;
+  if (!cardById.has(id)) {
+    cardById.set(id, api("/api/card?id=" + encodeURIComponent(id))
+      .then((data) => (data && data.card) || null)
+      .catch(() => null));
+  }
+  return cardById.get(id);
+}
+
 /** One log line, with every card name in it turned into a hover target. */
 function logLine(line) {
   const li = h("li");
@@ -2358,11 +2429,31 @@ function logLine(line) {
   while ((match = cardIndex.matcher.exec(line)) !== null) {
     if (match.index > at) li.appendChild(document.createTextNode(line.slice(at, match.index)));
     const card = cardIndex.byName.get(match[0]);
-    const tag = h("span", "logcard", match[0]);
-    tag.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
-    tag.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
+    // The id trails the name in parentheses. Swallow it into the hover target
+    // so the whole "Name (ST9-007)" is one thing to point at.
+    const trailer = /^ \(([A-Za-z0-9]+-[0-9]+[A-Za-z]?)\)/.exec(
+      line.slice(match.index + match[0].length));
+    const id = trailer ? trailer[1] : "";
+    const text = match[0] + (trailer ? trailer[0] : "");
+    const tag = h("span", "logcard", text);
+    tag.addEventListener("mouseenter", (e) => {
+      preview.dataset.follow = "1";
+      hoveredCard = id || (card && card.id) || "";
+      showPreview(card, e);
+      if (!id || (card && card.id === id)) return;
+      // A different printing of the name: show the index's card at once so the
+      // panel never lags the pointer, and correct it when the real one lands.
+      Promise.resolve(cardFor(id)).then((exact) => {
+        if (exact && hoveredCard === id) showPreview(exact, e);
+      });
+    });
+    tag.addEventListener("mouseleave", () => {
+      hoveredCard = "";
+      delete preview.dataset.follow;
+      hidePreview();
+    });
     li.appendChild(tag);
-    at = match.index + match[0].length;
+    at = match.index + match[0].length + (trailer ? trailer[0].length : 0);
   }
   if (at < line.length) li.appendChild(document.createTextNode(line.slice(at)));
   return li;

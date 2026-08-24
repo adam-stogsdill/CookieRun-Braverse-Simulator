@@ -1926,3 +1926,31 @@ def test_banked_untap_is_not_offered_with_no_rested_support(monkeypatch):
 
     assert not seat.prompts, "asked to order an event that does nothing"
     assert order == ["ST8-002"]
+
+
+def test_log_names_cards_with_their_id(db):
+    """Every card the log names is named "Name (ST9-007)".
+
+    271 of the 813 names in the pool are printed on more than one card, so the
+    viewer — which hovers a name in the log and previews the card behind it —
+    could only ever guess which printing acted. The id is the answer, and it
+    has to be on every line that names a card, not just the ambiguous ones:
+    the viewer matches one shape.
+
+    Read here exactly as the viewer reads it: one alternation of every name,
+    longest first, so a name printed inside a longer one does not match on its
+    own.
+    """
+    import re
+
+    names = sorted({c.name for c in db.cards.values()}, key=len, reverse=True)
+    matcher = re.compile("(" + "|".join(re.escape(n) for n in names) + ")")
+    game = new_game(seed=4, db=db)
+    game.play_out()
+    named = 0
+    for line in game.state.log:
+        for match in matcher.finditer(line):
+            assert re.match(r" \([A-Za-z0-9]+-\d+[A-Za-z]?\)",
+                            line[match.end():]), line
+            named += 1
+    assert named > 20, "the game logged almost nothing; the test proves little"

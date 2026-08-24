@@ -14,6 +14,7 @@ from braverse.cost import Cost
 from braverse.effects import (OPPONENT_DAMAGE_SHIELDS, STATIC_ABILITY_CARDS,
                               Ctx, Trigger, effect, playable_if)
 from braverse.enums import Color, Keyword
+from braverse.state import card_label
 
 
 def _faints_last_opponent_turn(ctx: Ctx, color=None, level=None) -> int:
@@ -302,7 +303,7 @@ def shadow_milk_red_on_play(ctx: Ctx) -> None:
     stolen = ctx.state.rng.choice(ctx.opp.hand)
     ctx.steal_to_hp(cookie, stolen, ctx.opp.hand)
     ctx.note(f"takes a card from the opponent's hand as HP: "
-             f"{ctx.db[stolen.card_id].name}")
+             f"{card_label(ctx.db[stolen.card_id])}")
 
 
 @effect("BS9-010", Trigger.ATTACK)

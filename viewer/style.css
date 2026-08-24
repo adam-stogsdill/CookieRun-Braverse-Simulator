@@ -276,6 +276,37 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
 .seatbar .pill.human { background: var(--accent2); color: #04203c; }
 .seatbar .deckname { font-size: 10.5px; color: var(--felt-label); margin-left: auto; }
 
+/* "They are being asked something." Deliberately the smallest thing on the
+   seat bar: three dots breathing, a two-word label, and no box around it. It
+   sits after the deck name, at the far end of the other player's bar, so the
+   only moving thing on screen while you wait is out at the edge of it rather
+   than over the board. Amber and a shade louder while they are answering an
+   attack — that is the one wait where something of yours is still in the air. */
+.seatbar .thinking {
+  display: flex; align-items: center; gap: 5px; margin-left: 8px;
+  font-size: 10px; letter-spacing: .3px; color: var(--felt-label);
+  white-space: nowrap;
+}
+.seatbar .thinking .dots { display: flex; gap: 3px; }
+.seatbar .thinking .dots i {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: currentColor; opacity: .25;
+  animation: think 1.4s ease-in-out infinite;
+}
+.seatbar .thinking .dots i:nth-child(2) { animation-delay: .18s; }
+.seatbar .thinking .dots i:nth-child(3) { animation-delay: .36s; }
+.seatbar .thinking.responding { color: var(--accent); }
+@keyframes think {
+  0%, 70%, 100% { opacity: .22; transform: translateY(0); }
+  35%           { opacity: 1;   transform: translateY(-2px); }
+}
+/* Someone who does not want motion still gets the mark, just still. */
+@media (prefers-reduced-motion: reduce) {
+  .seatbar .thinking .dots i { animation: none; opacity: .7; }
+}
+
+.filterbar.waiting.responding { color: var(--accent); }
+
 /* -------------------------------------------------------------------- cards */
 .card {
   position: relative;

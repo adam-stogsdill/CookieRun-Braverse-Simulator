@@ -159,7 +159,7 @@ PUBLIC_HOST = ""
 PUBLIC_ROUTES = frozenset({
     "/api/config", "/api/state", "/api/room",
     "/api/decks", "/api/deck", "/api/deck/validate",
-    "/api/cardnames", "/api/pool",
+    "/api/cardnames", "/api/card", "/api/pool",
     "/api/room/join", "/api/room/leave", "/api/room/rematch",
     "/api/choose",
 })
@@ -1117,8 +1117,16 @@ class HumanController:
             return None
         db = self.match.db
         payload = [action_json(db, state, i, a) for i, a in enumerate(options)]
-        index = self.match.ask(self.seat, "Your move", payload, optional=False,
-                               turn_action=True)
+        # A question inside the attack response window is not a turn. Both
+        # seats are told which it is: the defender because "Your move" during
+        # someone else's attack says nothing about what is being asked, and the
+        # attacker because their browser is otherwise sitting on a bare wait
+        # with no hint that the swing they declared is being answered.
+        answering = self.match.attack_response()
+        prompt = ("Attacked — trap, block, or take it" if answering
+                  else "Your move")
+        index = self.match.ask(self.seat, prompt, payload, optional=False,
+                               turn_action=True, responding=answering)
         return options[index] if index is not None else None
 
     def choose(self, state: GameState, prompt: str, options: Sequence, *, optional: bool):
@@ -1796,10 +1804,26 @@ class Match:
                     raise MatchAborted()
 
     # -- questions -------------------------------------------------------
+    def attack_response(self) -> Optional[dict]:
+        """The attack a defender is being asked about, for the browser, or None.
+
+        Named by uid on both ends so either seat can point at the Cookies on
+        its own board — the same identity the option list uses.
+        """
+        game = getattr(self, "game", None)
+        window = game.response_window() if game is not None else None
+        if window is None:
+            return None
+        attacker, target = window
+        return {"attacker": attacker.uid, "target": target.uid,
+                "attackerName": attacker.name(self.db),
+                "targetName": target.name(self.db)}
+
     def ask(self, seat: int, prompt: str, options: list, *, optional: bool,
             count: int = 1, pick: Optional[dict] = None,
             centre: Optional[str] = None, up_to: bool = False,
-            shown: Optional[list] = None, turn_action: bool = False):
+            shown: Optional[list] = None, turn_action: bool = False,
+            responding: Optional[dict] = None):
         """Block the match thread until the browser answers.
 
         Returns an index, or a list of them when the question takes more than
@@ -1820,6 +1844,9 @@ class Match:
             # The turn's own action list, as opposed to a mid-effect question.
             # The viewer needs to tell them apart to run its support step.
             "turnAction": turn_action,
+            # The attack this question is a response to, or None. Public to
+            # both seats: an attack is declared out loud.
+            "responding": responding,
             # Drawn next to the answers but not answerable. See `shown_cards`.
             "shown": shown or [],
             "id": self.version + 1,
@@ -1940,6 +1967,10 @@ class Match:
             "pick": None,
             "centre": None,
             "shown": [],
+            # Kept, unlike the options: which attack is being answered is
+            # something the attacker declared, and it is the one thing that
+            # makes their wait legible.
+            "responding": pending.get("responding"),
             "waiting": True,
         }
 
@@ -2841,6 +2872,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, path_.read_bytes(), "application/json")
         elif path == "/api/cardnames":
             self._json({"cards": card_names(self.app.db)})
+        elif path == "/api/card":
+            # One card, by id. The log names cards as "Name (ST9-007)" because
+            # 271 of 813 names are printed on more than one card, and the name
+            # index can only hold one card per name — so a hover on a name that
+            # is not the index's copy comes back here for the right one.
+            card_id = (self._query().get("id") or "").strip()
+            if card_id not in self.app.db:
+                self._json({"error": "no card by that id"}, 404)
+                return
+            self._json({"card": card_json(self.app.db, card_id)})
         elif path == "/api/pool":
             self._json({**pool_meta(self.app.db),
                         **search_pool(self.app.db, self._query())})

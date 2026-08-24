@@ -258,4 +258,4 @@ def divine_light_crystal(ctx: Ctx) -> None:
     if target is None:
         return
     target.hp_cannot_reach_zero = True
-    ctx.note(f"{target.name(ctx.db)}'s HP cannot reach 0 during this battle")
+    ctx.note(f"{target.label(ctx.db)}'s HP cannot reach 0 during this battle")

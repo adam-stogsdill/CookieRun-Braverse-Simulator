@@ -18,6 +18,18 @@ from .enums import Color, Marker, Phase, Zone
 _uid_counter = itertools.count(1)
 
 
+def card_label(defn: CardDef) -> str:
+    """`Name (ST9-007)` — how a card is named in the log.
+
+    271 of 813 names are printed on more than one card, so the name alone does
+    not say *which* card acted. The viewer turns every name in the log into a
+    hover target and looks it up by name, which meant a line about one printing
+    previewed a different card with the same name. The id is what tells them
+    apart, so the log carries it everywhere it names a card.
+    """
+    return f"{defn.name} ({defn.id})"
+
+
 @dataclass
 class CardInstance:
     """One physical card."""
@@ -34,6 +46,9 @@ class CardInstance:
 
     def defn(self, db: CardDB) -> CardDef:
         return db[self.card_id]
+
+    def label(self, db: CardDB) -> str:
+        return card_label(self.defn(db))
 
 
 @dataclass
@@ -99,6 +114,10 @@ class Cookie:
 
     def name(self, db: CardDB) -> str:
         return self.defn(db).name
+
+    def label(self, db: CardDB) -> str:
+        """The Cookie's name for the log, with the id that disambiguates it."""
+        return card_label(self.defn(db))
 
     def level(self, db: CardDB) -> int:
         if self.level_override is not None:
@@ -258,20 +277,36 @@ class GameState:
         The name alone left "effect damage" doing far too much work: the same
         card can hit you as a trap, as an 【Activate】 skill or as a FLIP that
         turned over mid-swing, and the record read identically for all three.
-        Entries are either a bare name (older callers) or a `(name, kind)`
-        pair; both are accepted so nothing has to be updated in lockstep.
+        Entries are a bare name (older callers), a `(name, kind)` pair or a
+        `(name, kind, label)` triple; all three are accepted so nothing has to
+        be updated in lockstep. The stamp uses the *label* — the name with the
+        card's id — because a name can be printed on more than one card.
         """
-        name, kind = self.source_name(), self.source_kind()
+        name, kind = self.source_label(), self.source_kind()
         if not name:
             return ""
         return f"[{name} \u00b7 {kind}] " if kind else f"[{name}] "
 
     def source_name(self) -> str:
-        """The card whose effect is resolving right now, or "" for none."""
+        """The card whose effect is resolving right now, or "" for none.
+
+        The bare name: this is what the viewer floats over the board next to a
+        damage number, where there is no room for an id and no ambiguity to
+        resolve. The log wants :meth:`source_label` instead.
+        """
         if not self.effect_sources:
             return ""
         top = self.effect_sources[-1]
         return top[0] if isinstance(top, tuple) else top
+
+    def source_label(self) -> str:
+        """That card as the log names it — `Name (ST9-007)`."""
+        if not self.effect_sources:
+            return ""
+        top = self.effect_sources[-1]
+        if isinstance(top, tuple) and len(top) > 2 and top[2]:
+            return top[2]
+        return self.source_name()
 
     def source_kind(self) -> str:
         """One word for what sort of thing that is — trap, FLIP, 【Activate】."""

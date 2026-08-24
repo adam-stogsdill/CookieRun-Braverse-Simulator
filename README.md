@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.39
+Current Version: 0.2.42
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -738,6 +738,14 @@ the column, and **everything that names a card feeds it** — a card on the tabl
 a row in a card's menu, a button in the middle of the table, and every card name
 in the log. One place to look, whatever you pointed at.
 
+The log writes a card as `Peppermint Cookie (ST9-007)`, and hovering it previews
+that card. The number is not decoration: 271 of the 813 names in the pool are
+printed on more than one card, and a name is all the log used to give — so the
+panel showed whichever printing came first in the pool, which is routinely not
+the Cookie that just attacked. The viewer swallows the number into the hover
+target and fetches the card behind it, falling back to the name alone on a line
+that carries no number.
+
 The deck builder and the full-screen deck view have no panel to dock to and keep
 the cursor-following version; so does the trash/break browser, where the preview
 paints over the dialog rather than behind it — a modal `<dialog>` lives in the
@@ -1027,6 +1035,30 @@ added to a dozen payloads — and the page keeps the first build it heard from a
 says so, with a Reload, if the answer ever changes. It is checked on whatever
 call the page was already making, so joining a room is covered without a check
 of its own.
+
+##### Waiting on the other player
+
+Half of an online game is spent watching a board nobody is allowed to touch,
+and the first version of it gave you one line of grey text in the side panel —
+easy to be looking away from, and identical whether they were mid-thought or
+the game had hung. Two things now say otherwise, and deliberately only two:
+
+- The seat bar on **their** half of the table grows three breathing dots and a
+  word — *thinking*. It is the smallest thing on the bar and the only thing on
+  screen that moves while you wait, so it reads as a pulse rather than as
+  furniture. It is drawn only for a seat this browser cannot answer for, which
+  is why a hot seat never shows it: both questions there are yours.
+- **An attack is the one wait with something of yours still in the air**, and
+  it gets said out loud. The defender's response window — trap, block, or take
+  it — used to be asked as "Your move" in the middle of someone else's turn,
+  which told them nothing, while the attacker sat on the same bare wait as any
+  other pause. The question now names itself on both screens: the defender is
+  asked *"Attacked — trap, block, or take it"*, and the attacker's side of the
+  table turns amber and says *"they may trap or block before it lands"*. The
+  attack it belongs to travels with the question (`pending.responding`, by
+  Cookie uid) rather than being guessed from prompt text, and it survives the
+  hiding pass that strips the defender's options — which attack was declared is
+  public, the hand it might be answered from is not.
 
 What this is not, yet: there is no matchmaking, no accounts, no ranking, and no
 clock on a decision, so a player who wanders off leaves the game sitting there

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.42
+
+- **The log names every card by its card number.** Lines now read "Peppermint
+  Cookie (ST9-007)" rather than just the name, and hovering one previews that
+  exact card. Hundreds of names are printed on more than one card, so a hover
+  used to show whichever printing came first — often a different Cookie than
+  the one that just attacked.
+
+## 0.2.41
+
+- **You can see when the other player is thinking.** Their side of the table
+  shows a small pulse next to their name while they are being asked something,
+  so a quiet moment reads as a turn in progress rather than a game that has
+  stopped.
+- **An attack now says that it can still be answered.** When you swing, their
+  side turns amber and says they may trap or block before it lands — and the
+  player being attacked is told that is what the question is, instead of just
+  "your move" in the middle of your turn.
+
+## 0.2.40
+
+- **Playing from the second seat drags cards to the right place.** Dropping a
+  card onto your support area, battle area or stage now works on your own half
+  of the table whichever seat you are in. Sitting in seat 2, those drops only
+  landed on your *opponent's* half of the board — so placing your own support
+  meant dragging the card across the table into their area.
+
 ## 0.2.39
 
 - **Playing someone directly now checks the version on both sides.** Before,

@@ -14,7 +14,7 @@ from typing import Callable, Protocol, Sequence
 from .cards import CardDB
 from .cost import Cost, plan_payment
 from .enums import Color
-from .state import Cookie, CardInstance, GameState, PlayerState
+from .state import Cookie, CardInstance, GameState, PlayerState, card_label
 
 
 def _view_prompt(criterion: str) -> str:
@@ -465,7 +465,7 @@ class Ctx:
             card.face_up = bool(reveal)
             self.me.hand.append(card)
             if reveal:
-                self.state.record(f"reveals {self.db[card.card_id].name} "
+                self.state.record(f"reveals {card_label(self.db[card.card_id])} "
                                   f"and adds it to hand")
         leftovers = [c for c in viewed if c not in taken]
         if rest == "trash":
@@ -496,7 +496,7 @@ class Ctx:
         """
         seen = self.me.deck[:n]
         if seen:
-            names = ", ".join(self.db[c.card_id].name for c in seen)
+            names = ", ".join(card_label(self.db[c.card_id]) for c in seen)
             self.state.record(f"reveals {names} from the top of the deck")
         return list(seen)
 
@@ -674,7 +674,7 @@ class Ctx:
             return False
         self.me.trash.remove(card)
         self.me.hand.append(card)
-        self.state.record(f"{self.db[card.card_id].name} returns to hand")
+        self.state.record(f"{card_label(self.db[card.card_id])} returns to hand")
         return True
 
     def return_to_hand(self, cookie: Cookie) -> None:

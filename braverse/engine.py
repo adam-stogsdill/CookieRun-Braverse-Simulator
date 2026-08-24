@@ -27,7 +27,8 @@ from .effects import (Ctx, Trigger, ask_many, cannot_attack, effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
                       may_play, modified_attack_cost)
 from .enums import CardType, Color, Marker, Phase
-from .state import CardInstance, Cookie, GameState, PlayerState
+from .state import (CardInstance, Cookie, GameState, PlayerState,
+                    card_label)
 
 # What sort of thing an effect is, for the log. "effect damage" covers a trap
 # sprung on your turn, an 【Activate】 skill, an ITEM and the "Then, ..." rider
@@ -452,6 +453,20 @@ class Game:
             return self._response_player
         return self.state.turn_player
 
+    def response_window(self) -> tuple[Cookie, Cookie] | None:
+        """The attack the defender is being asked about, as ``(attacker,
+        target)``, or None when no attack is waiting on an answer.
+
+        Public because a question asked inside this window is not the same
+        question as a turn: the seat being asked is not the seat whose turn it
+        is, and the *other* player is sitting there watching an attack they
+        have already declared. A UI that cannot tell the two apart shows both
+        of them "your move" and neither of them why they are waiting.
+        """
+        if self._response_player is None:
+            return None
+        return self._pending_attack
+
     def _would_do_something(self, player: PlayerState, trigger: Trigger, *,
                             card: CardInstance | None = None,
                             cookie: Cookie | None = None) -> bool:
@@ -682,7 +697,7 @@ class Game:
         card.rested = False
         player.support.append(card)
         player.supported_this_turn = True
-        self.state.record(f"supports {self.db[card.card_id].name}")
+        self.state.record(f"supports {card_label(self.db[card.card_id])}")
 
     def _do_play_cookie(self, action: A.PlayCookie) -> None:
         player = self.state.current
@@ -712,7 +727,7 @@ class Game:
         if host is not None:
             self._awaken(player, host, card)
         else:
-            self.state.record(f"plays {defn.name} from the EXTRA deck")
+            self.state.record(f"plays {card_label(defn)} from the EXTRA deck")
             self._deploy_cookie(player, card, from_zone="extra")
 
     def _awaken(self, player: PlayerState, host: Cookie,
@@ -736,7 +751,7 @@ class Game:
             # A full HP value rather than a modifier: top the pile up to it.
             gain = max(0, gain - host.remaining_hp)
         self._fill_hp(player, host, host.remaining_hp + gain)
-        self.state.record(f"awakens {under.name} \u2192 {defn.name}")
+        self.state.record(f"awakens {card_label(under)} \u2192 {card_label(defn)}")
         self._run_cookie_effect(host, Trigger.ON_PLAY, player)
 
     def _deploy_cookie(self, player: PlayerState, card: CardInstance,
@@ -750,7 +765,7 @@ class Game:
         self._fill_hp(player, cookie, defn.hp or 0)
         cookie.summoned_this_turn = True
         cookie.rested = False
-        self.state.record(f"plays {defn.name}")
+        self.state.record(f"plays {card_label(defn)}")
         if from_zone == "extra":
             pass            # nothing extra fires: the EXTRA card's own gate was the price
         elif from_zone == "trash":
@@ -785,10 +800,10 @@ class Game:
                 player.trash.append(old)
             card.rested = False
             player.stage.append(card)
-            self.state.record(f"places stage {defn.name}")
+            self.state.record(f"places stage {card_label(defn)}")
         else:
             player.items_played_this_turn += 1
-            self.state.record(f"activates {defn.name}")
+            self.state.record(f"activates {card_label(defn)}")
             self._run_effect(card, Trigger.ITEM, player)
             # An item that placed itself somewhere — "place this card in your
             # support area as rested" — has already chosen its zone. Filing it
@@ -803,13 +818,13 @@ class Game:
         if cookie is not None:
             # Logged before it resolves, so the skill is named even when what it
             # does is invisible — a draw, a buff, an effect that fizzles.
-            self.state.record(f"activates {cookie.name(self.db)}")
+            self.state.record(f"activates {cookie.label(self.db)}")
             self._run_cookie_effect(cookie, Trigger.ACTIVATE, player)
             cookie.used_markers.add(Trigger.ACTIVATE.value)
             return
         card = next((c for c in player.stage if c.uid == action.source_uid), None)
         if card is not None:
-            self.state.record(f"activates {self.db[card.card_id].name}")
+            self.state.record(f"activates {card_label(self.db[card.card_id])}")
             self._run_effect(card, Trigger.STAGE_ACTIVATE, player)
 
     # ------------------------------------------------------------------
@@ -836,7 +851,7 @@ class Game:
         # their attack, and "attacks for 3" told you which Cookie swung but not
         # which of its lines did.
         swing = f" with {attack.name}" if attack.name else ""
-        state.record(f"{attacker.name(self.db)} attacks {target.name(self.db)}"
+        state.record(f"{attacker.label(self.db)} attacks {target.label(self.db)}"
                      f"{swing} for {attacker.attack_damage(self.db)}")
 
         target = self._response_window(defender, attacker, target)
@@ -859,16 +874,17 @@ class Game:
             # The swing was announced at its printed number a moment ago. If a
             # trap or a defensive skill has shaved it since, say so — otherwise
             # the log reads as an attack that mysteriously underperformed.
-            self.state.record(f"{attacker.name(self.db)}'s attack is reduced "
+            self.state.record(f"{attacker.label(self.db)}'s attack is reduced "
                               f"to {damage} (from {swing})")
         # Riders can ask "if your opponent's Cookie faints from this Cookie's
         # attack", so record the outcome before the rider runs.
         before = len(defender.break_area)
         if damage > 0:
+            swung = f"'s {attack.name}" if attack.name else ""
             self.deal_damage(target, damage, source_player=player.index,
                              kind="attack",
-                             source=f"{attacker.name(self.db)}"
-                                    + (f"'s {attack.name}" if attack.name else ""))
+                             source=f"{attacker.name(self.db)}{swung}",
+                             source_label=f"{attacker.label(self.db)}{swung}")
         if target in defender.battle and target.hp_cards:
             self._run_cookie_effect(target, Trigger.SURVIVED_DAMAGE, defender)
         self._attack_target = target
@@ -905,7 +921,7 @@ class Game:
                     if not self.pay_cost(defender, defn.play_cost):
                         break
                     self._take_from_hand(defender, choice.card_uid)
-                    self.state.record(f"springs trap {defn.name}")
+                    self.state.record(f"springs trap {card_label(defn)}")
                     self._run_effect(card, Trigger.ITEM, defender)
                     defender.trash.append(card)
                     self._trap_used += 1
@@ -924,7 +940,7 @@ class Game:
                     blocked = True
                     self._pending_attack = (attacker, target)
                     self._responded = "block"
-                    self.state.record(f"{blocker.name(self.db)} blocks"
+                    self.state.record(f"{blocker.label(self.db)} blocks"
                                       + (" and rests" if rest_self else ""))
                 else:
                     break
@@ -936,7 +952,8 @@ class Game:
         return target if target in defender.battle else None
 
     def deal_damage(self, cookie: Cookie, amount: int, *, source_player: int,
-                    kind: str = "effect", source: str = "") -> None:
+                    kind: str = "effect", source: str = "",
+                    source_label: str = "") -> None:
         """Take ``amount`` HP off this Cookie, one card at a time, firing any
         FLIP as it turns.
 
@@ -951,8 +968,11 @@ class Game:
         always ``amount``: the pile can run dry, or an effect can take the
         target off the board mid-hit.
         """
-        name = cookie.name(self.db)
-        by = f" from {source}" if source else ""
+        name = cookie.label(self.db)
+        # The log names the card with its id; the floating damage number over
+        # the board does not, so the two spellings travel separately.
+        source_label = source_label or source
+        by = f" from {source_label}" if source_label else ""
         if cookie.damage_immune:
             self.state.record(f"{name} takes no {kind} damage{by} (immune)")
             return
@@ -983,25 +1003,28 @@ class Game:
             # the trash, by which time the flip has already resolved.
             self.record_reveal(cookie, card, flip=defn.is_flip)
             if defn.is_flip and not cookie.flip_disabled:
-                self.state.record(f"FLIP! {defn.name}")
+                self.state.record(f"FLIP! {card_label(defn)}")
                 self._run_effect(card, Trigger.FLIP, owner, flip_host=cookie)
             # A flip effect can bounce or otherwise remove its own host;
             # the rest of the damage has nothing left to hit.
             if self.state.over or cookie not in owner.battle:
-                self._record_damage(name, dealt, amount, None, kind, cookie, source)
+                self._record_damage(name, dealt, amount, None, kind, cookie, source,
+                                    source_label)
                 return
             # "This Cookie's HP cannot reach 0": the card just spent is
             # replaced off the deck rather than the hit being stopped one
             # short. The damage keeps turning cards — every FLIP in the pile
             # still fires — and the Cookie is still standing at the end of it.
             self.hold_the_floor(cookie)
-        self._record_damage(name, dealt, amount, cookie, kind, cookie, source)
+        self._record_damage(name, dealt, amount, cookie, kind, cookie, source,
+                            source_label)
         if not cookie.hp_cards:
             self._faint(cookie)
 
     def _record_damage(self, name: str, dealt: int, asked: int,
                        cookie: Cookie | None, kind: str = "effect",
-                       target: Cookie | None = None, source: str = "") -> None:
+                       target: Cookie | None = None, source: str = "",
+                       source_label: str = "") -> None:
         """`kind` separates a swing from everything else — a "Then, ..." rider,
         a skill, a trap — so the log says which one hit you. `source` names
         the thing itself, for a swing: an effect already stamps its own name
@@ -1026,7 +1049,8 @@ class Game:
                 "sourceKind": self.state.source_kind() or kind,
                 "left": target.remaining_hp if cookie is not None else 0,
             })
-        by = f" from {source}" if source else ""
+        source_label = source_label or source
+        by = f" from {source_label}" if source_label else ""
         if dealt == 0:
             self.state.record(f"{name} takes no {kind} damage{by}")
             return
@@ -1052,7 +1076,7 @@ class Game:
         self._fill_hp(owner, cookie, 1)
         if not cookie.hp_cards:
             return False            # the deck could not supply one
-        self.state.record(f"{cookie.name(self.db)}'s HP cannot reach 0"
+        self.state.record(f"{cookie.label(self.db)}'s HP cannot reach 0"
                           f" — 1 HP restored")
         self._record_heal(cookie, len(cookie.hp_cards))
         return True
@@ -1099,7 +1123,7 @@ class Game:
         gained = len(cookie.hp_cards) - before
         if gained:
             owner.hp_gained_this_turn = True
-            self.state.record(f"{cookie.name(self.db)} gains +{gained} HP"
+            self.state.record(f"{cookie.label(self.db)} gains +{gained} HP"
                               f" — {cookie.remaining_hp} HP")
             self._record_heal(cookie, gained)
 
@@ -1112,7 +1136,7 @@ class Game:
         # Only the Cookie the effect names returns to hand; anything it was
         # 【Awaken】ed on top of is spent along with its HP pile.
         owner.trash.extend(cookie.spent_cards)
-        self.state.record(f"{self.db[cookie.card.card_id].name} returns to hand")
+        self.state.record(f"{card_label(self.db[cookie.card.card_id])} returns to hand")
         self._check_battle_area(owner)
 
     def move_cookie_to_support(self, cookie: Cookie, *, rested: bool = False) -> None:
@@ -1137,7 +1161,7 @@ class Game:
         owner.support.append(cookie.card)
         state = "rested" if rested else "active"
         self.state.record(
-            f"{self.db[cookie.card.card_id].name} moves to the support area as {state}")
+            f"{card_label(self.db[cookie.card.card_id])} moves to the support area as {state}")
         self._check_battle_area(owner)
 
     def faint(self, cookie: Cookie) -> None:
@@ -1160,7 +1184,7 @@ class Game:
         owner.battle.remove(cookie)
         owner.trash.append(cookie.card)
         owner.trash.extend(cookie.spent_cards)
-        self.state.record(f"{self.db[cookie.card.card_id].name} is trashed")
+        self.state.record(f"{card_label(self.db[cookie.card.card_id])} is trashed")
         self._check_battle_area(owner)
 
     def _faint(self, cookie: Cookie) -> None:
@@ -1185,7 +1209,7 @@ class Game:
                                 cookie.level(self.db)))
         owner.break_additions_this_turn += 1
         owner.trash.extend(cookie.spent_cards)
-        self.state.record(f"{self.db[cookie.card.card_id].name} faints")
+        self.state.record(f"{card_label(self.db[cookie.card.card_id])} faints")
         self._check_win()
         if not self.state.over:
             self._check_battle_area(owner)
@@ -1240,7 +1264,7 @@ class Game:
             player.trash.remove(card)
             player.break_area.append(card)
             player.break_additions_this_turn += 1
-            self.state.record(f"refresh — {self.db[card.card_id].name} to break area")
+            self.state.record(f"refresh — {card_label(self.db[card.card_id])} to break area")
         self._check_win()
         if self.state.over:
             return False
@@ -1293,7 +1317,8 @@ class Game:
         fn = get_effect(defn.id, trigger)
         if fn is None:
             return
-        with self._effect_source(defn.name, source_kind(self.db, cookie.card, trigger)):
+        with self._effect_source(defn.name, source_kind(self.db, cookie.card, trigger),
+                                 label=card_label(defn)):
             fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
                          trigger=trigger.value))
 
@@ -1302,8 +1327,9 @@ class Game:
         fn = get_effect(self.db[card.card_id].id, trigger)
         if fn is None:
             return
-        with self._effect_source(self.db[card.card_id].name,
-                                 source_kind(self.db, card, trigger)):
+        defn = self.db[card.card_id]
+        with self._effect_source(defn.name, source_kind(self.db, card, trigger),
+                                 label=card_label(defn)):
             fn(self._ctx(player, source_cookie=flip_host, source_card=card,
                          trigger=trigger.value))
 
@@ -1327,7 +1353,7 @@ class Game:
             self.state.viewing = previous
 
     @contextlib.contextmanager
-    def _effect_source(self, name: str, kind: str = ""):
+    def _effect_source(self, name: str, kind: str = "", label: str = ""):
         """Name the card whose effect is resolving, and what kind of thing it
         is, for the duration.
 
@@ -1339,7 +1365,7 @@ class Game:
         things to be on the wrong end of. Nested — a FLIP that fires mid-damage
         names the FLIP, not the attack that turned it over.
         """
-        self.state.effect_sources.append((name, kind) if kind else name)
+        self.state.effect_sources.append((name, kind, label or name))
         try:
             yield
         finally:

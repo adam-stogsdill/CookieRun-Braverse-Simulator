@@ -812,3 +812,132 @@ def test_returning_to_the_board_brings_the_menu_back_without_waiting():
     src = (VIEWER / "builder.js").read_text()
     show_tab = src[src.index("function showTab"):src.index("TABS.forEach((tab) => { el(tab.button)")]
     assert "Title.sync" in show_tab
+
+
+def test_the_log_previews_the_card_the_id_names():
+    """A hover on a log entry resolves the id, not just the name.
+
+    The name index the viewer matches against holds one card per *name*, and
+    271 of the 813 names are printed on more than one card — so a line about
+    one printing previewed whichever copy the index happened to keep. The
+    engine writes "Name (ST9-007)"; `logLine` has to read that id and ask
+    `/api/card` for the card behind it.
+
+    Two halves, both checked: the viewer asking, and the server answering.
+    """
+    src = (VIEWER / "app.js").read_text()
+    line = src[src.index("function logLine"):src.index("function renderLog")]
+    assert "/api/card?id=" in src, "nothing fetches a card by id"
+    assert "-[0-9]+" in line or r"-\d+" in line, (
+        "logLine does not read the id out of the log line")
+
+    from play_server import PUBLIC_ROUTES, card_json
+
+    assert '"/api/card"' in inspect.getsource(Handler.do_GET), (
+        "the viewer asks for /api/card and do_GET does not serve it")
+    # A joiner in a peer game reads the same log, so the route is theirs too.
+    assert "/api/card" in PUBLIC_ROUTES
+
+    db = default_db()
+    # Two cards, one name: the case the id exists for. It has to come back as
+    # itself and not as whichever one the name index would have found.
+    by_name = {}
+    for card in db.cards.values():
+        by_name.setdefault(card.name, []).append(card.id)
+    shared = next(ids for ids in by_name.values() if len(ids) > 1)
+    for card_id in shared:
+        assert card_json(db, card_id)["id"] == card_id
+
+
+def test_your_own_half_of_the_table_is_never_addressed_by_seat_number():
+    """A viewer zone is `.side.me`, never `#side-0`.
+
+    `seatPerspective` seats you at the bottom by moving the `me`/`opponent`
+    classes between the two sections; the ids stay bolted to their seat. So
+    `#side-0` means *seat 0's* half, which for a player in seat 1 is the
+    opponent's — and a drop target written that way asks them to drop a support
+    card into the other player's support area to place it in their own. It
+    reads as the board being mirrored and is invisible in seat 0, which is
+    where everything local is played and where every test above sits.
+
+    Static, because reproducing it needs two seats and a pointer drag.
+    """
+    for src in sorted(VIEWER.glob("*.js")):
+        text = re.sub(r'/\*.*?\*/', '', src.read_text(), flags=re.S)
+        text = re.sub(r'^\s*//.*$', '', text, flags=re.M)
+        # `"#side-" + seat` is the one legitimate use: it is the function that
+        # decides which section is which.
+        offenders = [line.strip() for line in text.splitlines()
+                     if re.search(r'#side-[01]', line)]
+        assert not offenders, (
+            f"{src.name} addresses a side of the table by seat number:\n  "
+            + "\n  ".join(offenders)
+            + "\nuse .side.me / .side.opponent — see seatPerspective")
+
+
+def attack_response_pending(seed: int = 4, timeout: float = 20.0):
+    """Run an online match until the human seat is asked about an attack.
+
+    Seat 0 is a bot so the attack arrives without a script; seat 1 answers
+    everything with its first option until the question it is handed is the
+    response window. `online=True` is what makes the two views differ, which is
+    the whole point of the test below.
+    """
+    config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
+                         pilots=["heuristic", "human"], seed=seed, delay=0.0,
+                         online=True)
+    match = Match(config, default_db())
+    match.start()
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        view = match.view(1)
+        pending = view.get("pending")
+        if view.get("over"):
+            break
+        if pending and pending["seat"] == 1 and not pending.get("waiting"):
+            if pending.get("responding"):
+                return match, pending
+            match.answer(0, seat=1)
+        time.sleep(0.01)
+    match.stop()
+    return match, None
+
+
+def test_an_attack_tells_both_seats_the_defender_may_still_answer():
+    """The response window is the one wait where something of yours is in the
+    air, and it used to be the least legible thing in the game: the defender
+    was asked "Your move" in the middle of someone else's turn, and the
+    attacker got a bare "waiting for your opponent" identical to every other
+    pause. Both seats now carry the attack itself."""
+    match, pending = attack_response_pending()
+    assert pending, "no attack was ever answered by the human seat"
+    try:
+        window = pending["responding"]
+        assert "trap" in pending["prompt"].lower(), pending["prompt"]
+
+        # Named by Cookie uid, which is what `data-cookie` on the board is, so
+        # either browser can point at the two Cookies involved.
+        board = {c["uid"] for p in match.view(1)["players"] for c in p["battle"]}
+        assert window["attacker"] in board and window["target"] in board
+        assert window["attackerName"] and window["targetName"]
+
+        # The attacker is told the same thing, without the defender's options.
+        theirs = match.view(0)["pending"]
+        assert theirs["waiting"] is True and theirs["options"] == []
+        assert theirs["responding"] == window
+    finally:
+        match.stop()
+
+
+def test_an_ordinary_question_carries_no_attack():
+    """`responding` is the marker for one window, not a field that is always
+    full — the seat bar chip and the panel line both switch on it."""
+    config = MatchConfig(decks=["st9_sea_fairy", "st8_wind_archer"],
+                         pilots=["human", "heuristic"], seed=5, delay=0.0)
+    match = Match(config, default_db())
+    match.start()
+    try:
+        pending = play_the_toss(match)
+        assert pending and pending.get("responding") is None
+    finally:
+        match.stop()
