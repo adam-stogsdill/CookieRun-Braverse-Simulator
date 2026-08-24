@@ -9,6 +9,8 @@ const el = (sel) => document.querySelector(sel);
 const state = {
   snap: null,
   version: -1,
+  build: "",            // the server build this page first heard from
+  staleShown: false,    // the "you are on an older page" bar, shown once
   pendingId: null,
   config: { decks: [], pilots: [] },
   busy: false,
@@ -173,7 +175,31 @@ async function api(path, body) {
     ? {}
     : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const res = await fetch(path, opts);
-  return res.json();
+  const data = await res.json();
+  if (data && data.build) checkBuild(data.build);
+  return data;
+}
+
+/* Is this page still the build the server is running?
+ *
+ * Every JSON answer names the build that sent it, so this is checked on
+ * whatever call the page was already making rather than on a call of its own.
+ *
+ * It matters most when someone joins a room: a room is two browsers on *one*
+ * engine — the joiner plays on the host's server — so the two seats cannot be
+ * running different rules the way two peers can. What they can be running is
+ * different *pages*, when a tab was left open across an upgrade and is now
+ * asking a newer server questions in an older dialect. That is not something
+ * to guess at fixing: say so, and offer the reload. */
+function checkBuild(build) {
+  if (!state.build) { state.build = build; return; }
+  if (build === state.build || state.staleShown) return;
+  state.staleShown = true;
+  const bar = el("#stale");
+  setText(el("#stale-text"),
+          `This page is from version ${state.build}; the game is now running `
+          + `${build}. Reload before playing so both sides are the same build.`);
+  bar.classList.remove("hidden");
 }
 
 /* Turning a card, rather than snapping it.
@@ -2826,6 +2852,8 @@ async function joinRoom(code) {
   if (res.error) { onlineError(res.error); return; }
   takeSeat(res.room, res.seat, res.token, res.pass);
 }
+
+el("#stale-reload").onclick = () => location.reload();
 
 el("#btn-host").onclick = hostRoom;
 el("#btn-join").onclick = () => joinRoom();

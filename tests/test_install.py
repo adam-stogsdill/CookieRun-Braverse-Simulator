@@ -284,3 +284,118 @@ def test_it_finds_the_game_next_to_itself(tmp_path: Path, monkeypatch):
     plain.write_text("game", encoding="utf-8")
     plain.chmod(0o755)
     assert install.find_binary(None) == plain     # the plain name wins
+
+
+# --- the game it carries ---------------------------------------------------
+def test_no_payload_when_running_from_a_checkout():
+    """`sys._MEIPASS` only exists inside a frozen build. From source there is
+    nothing carried, and `--binary` is how the build says what to install."""
+    assert install.payload() is None
+
+
+def test_the_carried_game_wins_over_one_lying_beside_it(tmp_path, monkeypatch):
+    """The whole point of the payload: the installer is the only file someone
+    needs, so it must not depend on — or be confused by — its surroundings."""
+    meipass = tmp_path / "unpacked"
+    (meipass / install.PAYLOAD_DIR).mkdir(parents=True)
+    carried = meipass / install.PAYLOAD_DIR / install.EXE_NAME
+    carried.write_text("the carried game", encoding="utf-8")
+
+    beside = tmp_path / "beside"
+    beside.mkdir()
+    (beside / install.EXE_NAME).write_text("some other build", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+    monkeypatch.setattr(sys, "executable", str(beside / "install-braverse"))
+
+    found = install.find_binary(None)
+    assert found == carried
+    # Unpacking does not preserve the executable bit; installing a game that
+    # cannot be run is a bug report about the game, not about the installer.
+    assert os.access(found, os.X_OK)
+
+
+def test_an_explicit_binary_still_wins(tmp_path, monkeypatch):
+    """`--binary` is what a checkout uses, and it has to beat a stale payload."""
+    meipass = tmp_path / "unpacked"
+    (meipass / install.PAYLOAD_DIR).mkdir(parents=True)
+    (meipass / install.PAYLOAD_DIR / install.EXE_NAME).write_text("old", encoding="utf-8")
+    asked = tmp_path / "fresh"
+    asked.write_text("new", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "_MEIPASS", str(meipass), raising=False)
+
+    assert install.find_binary(str(asked)) == asked
+
+
+def test_the_shortcut_wears_the_icon_when_there_is_one(tmp_path, monkeypatch):
+    """macOS draws a one-file binary with a generic icon whatever is inside it,
+    so this bundle is the only thing that can carry the game's face."""
+    icon = tmp_path / install.ICON_NAME
+    icon.write_bytes(b"icns" + b"\x00" * 32)
+    monkeypatch.setattr(install, "icon_file", lambda: icon)
+
+    installed = tmp_path / "Braverse" / "braverse"
+    installed.parent.mkdir()
+    installed.write_text("game", encoding="utf-8")
+
+    (app,) = install.macos_app(installed, tmp_path / "Applications")
+    plist = (app / "Contents" / "Info.plist").read_text(encoding="utf-8")
+    assert (app / "Contents" / "Resources" / install.ICON_NAME).is_file()
+    assert f"<string>{install.ICON_NAME}</string>" in plist
+
+
+def test_a_build_with_no_icon_still_makes_a_valid_bundle(tmp_path, monkeypatch):
+    """The icon is optional; the shortcut is not."""
+    monkeypatch.setattr(install, "icon_file", lambda: None)
+    installed = tmp_path / "Braverse" / "braverse"
+    installed.parent.mkdir()
+    installed.write_text("game", encoding="utf-8")
+
+    (app,) = install.macos_app(installed, tmp_path / "Applications")
+    plist = (app / "Contents" / "Info.plist").read_text(encoding="utf-8")
+    assert "CFBundleIconFile" not in plist
+    assert "<key>CFBundleExecutable</key><string>launch</string>" in plist
+    assert not (app / "Contents" / "Resources").exists()
+
+
+# --- what actually gets shipped --------------------------------------------
+def test_the_release_ships_the_installer_alone(tmp_path):
+    """The installer carries the game, so shipping the game beside it would
+    double a 200 MB download to say the same thing twice."""
+    import zipfile
+    from types import SimpleNamespace
+
+    import build_release
+
+    game = tmp_path / "braverse"
+    game.write_text("game", encoding="utf-8")
+    installer = tmp_path / "install-braverse"
+    installer.write_text("installer with a game inside", encoding="utf-8")
+    args = SimpleNamespace(out=str(tmp_path / "release"), no_zip=False, no_images=False)
+
+    archive = build_release.package(game, installer, args, "macos-arm64", "9.9.9")
+
+    names = sorted(zipfile.ZipFile(archive).namelist())
+    assert names == ["braverse-9.9.9-macos-arm64/README.txt",
+                     "braverse-9.9.9-macos-arm64/install-braverse"]
+    notes = zipfile.ZipFile(archive).read(names[0]).decode()
+    assert "Install it" in notes
+
+
+def test_without_an_installer_the_bare_game_ships(tmp_path):
+    import zipfile
+    from types import SimpleNamespace
+
+    import build_release
+
+    game = tmp_path / "braverse"
+    game.write_text("game", encoding="utf-8")
+    args = SimpleNamespace(out=str(tmp_path / "release"), no_zip=False, no_images=True)
+
+    archive = build_release.package(game, None, args, "macos-arm64", "9.9.9")
+    names = sorted(zipfile.ZipFile(archive).namelist())
+    assert names == ["braverse-9.9.9-macos-arm64/README.txt",
+                     "braverse-9.9.9-macos-arm64/braverse"]

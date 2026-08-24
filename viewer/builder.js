@@ -474,17 +474,18 @@ function exportSections() {
   return sections;
 }
 
-function deckFileName() {
-  const name = el("#deck-name").value.trim() || build.loaded || "decklist";
-  return name.replace(/[^\w.-]+/g, "_") + ".txt";
+function deckName() {
+  return el("#deck-name").value.trim() || build.loaded || "decklist";
 }
 
-el("#deck-export").onclick = () => {
-  const sections = exportSections();
-  if (!sections.length) { flash("nothing to export yet"); return; }
-  const text = sections
-    .map((section) => `--${section.label}--\n${section.rows.join("\n")}\n`)
-    .join("\n");
+function deckFileName() {
+  return deckName().replace(/[^\w.-]+/g, "_") + ".txt";
+}
+
+/* A browser download as a fallback, not the main path — see the export
+ * handler below for why. Kept for a player who reached this page from another
+ * machine, where the server will not write a file on their behalf. */
+function downloadExport(text) {
   const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
   const link = h("a");
   link.href = url;
@@ -494,8 +495,35 @@ el("#deck-export").onclick = () => {
   link.remove();
   // Revoked late: Safari reads the blob after the click returns.
   setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/* Export writes the file on the machine running the server, into `decks/`,
+ * rather than handing the browser a blob to download. The game is usually
+ * shown in a desktop window (`desktop.py`), and a web view has nowhere to put
+ * a download: it navigates to the blob instead, which paints the decklist over
+ * the board with no way back — the export looks like it hung the game. Writing
+ * it beside the game also lands it where a decklist has to be to be reloaded.
+ * Only a browser on another machine falls back to a real download. */
+el("#deck-export").onclick = async () => {
+  const sections = exportSections();
+  if (!sections.length) { flash("nothing to export yet"); return; }
+  const text = sections
+    .map((section) => `--${section.label}--\n${section.rows.join("\n")}\n`)
+    .join("\n");
   const lines = sections.reduce((sum, s) => sum + s.rows.length, 0);
-  flash(`exported ${lines} cards (${build.list.length + build.extra.length} copies)`);
+  const copies = build.list.length + build.extra.length;
+  let res = {};
+  try {
+    res = await api("/api/decks/export", { name: deckName(), text });
+  } catch (err) {
+    res = { error: String(err) };
+  }
+  if (res.ok) {
+    flash(`exported ${lines} cards (${copies} copies) to ${res.path}`);
+    return;
+  }
+  downloadExport(text);
+  flash(`exported ${lines} cards (${copies} copies)`);
 };
 
 el("#deck-name").addEventListener("input", () => { build.dirty = true; });

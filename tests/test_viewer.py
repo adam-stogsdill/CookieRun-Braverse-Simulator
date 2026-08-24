@@ -726,7 +726,10 @@ def test_every_asset_the_page_asks_for_is_served():
     wanted = set(re.findall(r'(?:src|href)="(/[^"]+)"', page))
     wanted = {p for p in wanted if not p.startswith("/card_images/")}
     source = inspect.getsource(Handler.do_GET)
-    served = set(re.findall(r'"(/[a-z0-9_.-]+\.(?:js|css))"', source))
+    # Any extension, not just js/css: the page also asks for its icon, and a
+    # test that only knew about scripts and stylesheets would go on passing
+    # while the tab showed a blank page icon.
+    served = set(re.findall(r'"(/[a-z0-9_.-]+\.[a-z0-9]+)"', source))
     missing = sorted(p for p in wanted if p not in served)
     assert not missing, f"not in the do_GET allowlist: {missing}"
 

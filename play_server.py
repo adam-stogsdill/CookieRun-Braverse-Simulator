@@ -74,6 +74,7 @@ ROOT = Path(__file__).resolve().parent
 VIEWER = ROOT / "viewer"
 IMAGES = ROOT / "card_images"
 CARD_DIR = "card_images"
+ICON_NAME = "ginger_brave_icon.ico"
 
 # Frozen by PyInstaller (see braverse.spec), ROOT is the throwaway directory the
 # bundle unpacks into — fine for the assets baked in, useless for the decklists
@@ -386,6 +387,36 @@ def write_saved_decks(decks: dict) -> None:
     tmp.write_text(json.dumps(blob, indent=2, sort_keys=True),
                encoding="utf-8")
     tmp.replace(path)          # never leave a half-written store behind
+
+
+def export_store() -> Path:
+    """Where an exported decklist is written: `decks/` beside the game.
+
+    The same directory a player drops decklists into, so a deck they exported
+    and a deck they were sent live together, and falling back to the home
+    directory exactly like the deck store when that one is read-only.
+    """
+    base = SIDE if writable(SIDE) else Path.home() / ".braverse"
+    path = base / DECK_DIR
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def export_path(name: str) -> Path:
+    """A free `.txt` path for `name` in `export_store()`.
+
+    Never returns a path that already exists: `decks/` also holds lists the
+    evolver wrote and lists somebody was sent, and an export is not worth
+    overwriting one of those because the names happened to match.
+    """
+    stem = re.sub(r"[^\w.-]+", "_", name).strip("._") or "decklist"
+    directory = export_store()
+    candidate = directory / f"{stem}.txt"
+    n = 2
+    while candidate.exists():
+        candidate = directory / f"{stem}-{n}.txt"
+        n += 1
+    return candidate
 
 
 def clean_deck_name(raw: Any) -> str:
@@ -2080,11 +2111,6 @@ class PeerLobby:
                 table = NP.join_handshake(
                     self.bridge, deck=cards, extra=extra, name=self.name,
                     app_version=__version__, surface=surface)
-            if table.app_version and table.app_version != __version__:
-                raise NP.Handshake(
-                    f"the other player is running {table.app_version} and you "
-                    f"are running {__version__} — the same build on both sides "
-                    f"is what keeps the two games identical")
             self.session = NP.Session(link=self.bridge, seat=self.seat)
             config = MatchConfig(
                 decks=[f"peer:{n or '?'}" for n in table.names],
@@ -2095,8 +2121,27 @@ class PeerLobby:
             self.match.start()
         except NP.NetplayError as exc:
             self.error = str(exc)
+            # Say why before the link goes quiet. A handshake we refused looks,
+            # from the other machine, exactly like a peer that never answered —
+            # and "they are on 0.2.31, you are on 0.2.37" is only useful if it
+            # reaches the person who has to update.
+            self._tell_peer(str(exc))
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
+            self._tell_peer(self.error)
+
+    def _tell_peer(self, why: str) -> None:
+        """Send the reason we are stopping, best effort.
+
+        There is no `Session` yet when a handshake fails — that is the object
+        that owns `goodbye` — so this writes the same message straight onto the
+        bridge. Failing to send it is not worth reporting: the other side times
+        out either way, it just learns less.
+        """
+        try:
+            self.bridge.send({"t": "bye", "why": why})
+        except Exception:
+            pass
 
     def status(self) -> dict:
         return {"seat": self.seat,
@@ -2439,6 +2484,17 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def _json(self, payload: Any, code: int = 200):
+        # Every JSON answer names the build that sent it. One line here rather
+        # than a field added to a dozen payloads, and it means any page can ask
+        # "is the server still the build I loaded from?" on whatever call it
+        # was already making — which is the only version gap a room can have.
+        #
+        # A room is two browsers on *one* engine: the person joining plays on
+        # the host's server, so the rules cannot differ between the seats the
+        # way they can in a peer game, where there are two engines. What can
+        # differ is a page left open across a restart onto a newer build.
+        if isinstance(payload, dict):
+            payload.setdefault("build", __version__)
         self._send(code, json.dumps(payload).encode(), "application/json")
 
     def _file(self, path: Path, cache: bool = False):
@@ -2691,6 +2747,12 @@ class Handler(BaseHTTPRequestHandler):
                       "/profile.js", "/profile.css",
                       "/netplay.js"):
             self._file(VIEWER / path.lstrip("/"))
+        elif path == "/icon.ico":
+            # The game's face: the browser tab, and the window a Chromium
+            # app-mode launch draws. It sits at the top of the bundle rather
+            # than in `viewer/`, because the build and the installer both want
+            # the same file and neither of them is the front end.
+            self._file(ROOT / ICON_NAME, cache=True)
         elif path.startswith("/card_images/"):
             name = Path(path).name
             if "/" in name or ".." in name:
@@ -2959,6 +3021,35 @@ class Handler(BaseHTTPRequestHandler):
             payload["saved"] = True
             payload["path"] = str(deck_store())
             self._json(payload)
+        elif path == "/api/decks/export":
+            # The file is written *here*, not handed to the browser as a
+            # download: the game is often shown in a desktop window (see
+            # `desktop.py`), and a web view has nowhere to put a downloaded
+            # blob — it navigates to it, paints the text over the board, and
+            # leaves no way back. Writing it beside the game is also where the
+            # player would have had to put it anyway.
+            if not self._is_local():
+                self._json({"error": "a deck can only be exported on the "
+                                     "machine running the server"}, 403)
+                return
+            text = body.get("text")
+            if not isinstance(text, str) or not text.strip():
+                self._json({"error": "nothing to export"}, 400)
+                return
+            if len(text) > MAX_IMPORT:
+                self._json({"error": "that is too big to be a decklist"}, 400)
+                return
+            name = clean_deck_name(body.get("name")) or "decklist"
+            try:
+                target = export_path(name)
+                # newline="\n" because a decklist is a file people send each
+                # other, and Windows would otherwise write CRLF into it.
+                with target.open("w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(text if text.endswith("\n") else text + "\n")
+            except OSError as exc:
+                self._json({"error": f"could not write the file: {exc}"}, 500)
+                return
+            self._json({"ok": True, "file": target.name, "path": str(target)})
         elif path == "/api/decks/import":
             # Local only, like every other route that writes decks: the file
             # being read is on this machine and the store it lands in is too.

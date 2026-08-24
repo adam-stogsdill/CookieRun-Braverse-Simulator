@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.39
+
+- **Playing someone directly now checks the version on both sides.** Before,
+  only the player who joined was told about a version gap; the one who started
+  the game just saw the other person stop responding. Now whoever is on the
+  older build is named, to both people, before a card is dealt — and the side
+  that refuses tells the other why instead of going quiet.
+- **A page left open across an update says so.** If the game restarts on a newer
+  version while you have it open, a bar appears with a Reload button rather than
+  letting you join a game with a stale page.
+
+## 0.2.38
+
+- **Export saves a file again.** Exporting a deck writes it straight into your
+  `decks/` folder next to the game and tells you the path, instead of opening
+  the decklist as a page you could not get out of. If a name is taken it
+  numbers the new file rather than writing over the old one.
+
+## 0.2.37
+
+- **The installer is now the only file you need to send anyone.** It carries
+  the game inside it, so there is no second file to keep next to it and nothing
+  to unzip in the right order — one download, double-click, done.
+- **The game has an icon.** GingerBrave shows up on the browser tab, on the
+  shortcut the installer makes, and on the window itself.
+
 ## 0.2.36
 
 - **You can import decks.** The deck builder has an **Import** button: choose a

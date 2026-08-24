@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.36
+Current Version: 0.2.39
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -213,9 +213,12 @@ python3 fetch_images.py             # the art goes inside the binary
 python3 build_release.py            # -> release/braverse-<version>-macos-arm64.zip
 ```
 
-The zip holds three files: the game, an installer, and a read-me. The game runs
-from wherever it is put — the installer exists because *where it is put* is
-where the game keeps things.
+The zip holds **one binary**: an installer that carries the game inside it.
+That is the file to send someone — one download, nothing to keep beside it,
+nothing to unzip in the right order. `build_release.py` embeds the built game
+as a payload and `install.find_binary` unpacks it from `sys._MEIPASS`; without
+a payload the installer falls back to a game sitting next to it, which is what
+a build straight from a checkout produces.
 
 ```bash
 ./install-braverse                  # asks where, then whether to make a shortcut
@@ -234,12 +237,26 @@ game saves. On macOS it also clears `com.apple.quarantine` from the copy it
 installs, which is the difference between the game opening and Gatekeeper
 refusing an unsigned binary outright.
 
+`ginger_brave_icon.ico` is the game's face, and each platform wants it
+somewhere different. Windows compiles it into both `.exe`s, and the Start Menu
+shortcut inherits it. macOS draws a one-file binary with a generic icon
+whatever is inside it and rejects a `.ico` outright, so `build_release.py`
+converts it to an `.icns` with `sips`/`iconutil` — every Mac has both — carries
+that inside the installer, and the `.app` the installer creates wears it. The
+page serves the same file as its favicon at `/icon.ico`, which is also the icon
+on a Chromium app-mode window. The source art is 32x29, so it is padded square
+and scaled up; a larger square source would look sharper and nothing else would
+have to change.
+
 Installing again over the same folder replaces only the program: that is the
 upgrade path, and why the installed binary is named `braverse` and not after a
 version. `--uninstall` leaves decks, profiles and replays where they are, and
 says so; `--purge` is how you ask for the other thing.
 
-`build_release.py` is the whole build: it checks the art library is complete,
+`build_release.py` is the whole build: it runs the spec **twice** — once for
+the game, once for the installer with that game as its payload, because a spec
+cannot embed a file the same spec has not written yet — and it checks the art
+library is complete,
 makes a throwaway `.venv-build/` holding `requirements-play.txt` and
 PyInstaller and *nothing else* — so there is no torch on the path for
 PyInstaller to find, rather than merely excluding it — runs the spec, proves
@@ -261,6 +278,7 @@ is not fatal: `open_window` says so and uses the browser window. The spec still 
 ```bash
 pip install pyinstaller
 pyinstaller braverse.spec           # -> dist/braverse  (208 MB)
+BRAVERSE_STAGE=installer BRAVERSE_PAYLOAD=dist/braverse pyinstaller braverse.spec
 ```
 
 It carries the engine, the browser front end, `braverse_cards.csv`, the
@@ -998,6 +1016,18 @@ own match, and the pacing controls — pause, step, speed, reveal — are refuse
 outright in a room. Pausing would freeze a person rather than a bot, and reveal
 would simply be cheating.
 
+**A room cannot be a version mismatch, and that is structural.** Both seats are
+played on *one* engine — the host's — so unlike a peer game there are not two
+rule sets that could disagree; the joiner's own copy of the game is not involved
+at all, and their decks come from the host's collection for the same reason.
+What can go stale is a *page*: a tab left open across a restart onto a newer
+build, asking a newer server questions in an older dialect. So every JSON answer
+names the build that sent it — one `setdefault` in `_json`, rather than a field
+added to a dozen payloads — and the page keeps the first build it heard from and
+says so, with a Reload, if the answer ever changes. It is checked on whatever
+call the page was already making, so joining a room is covered without a check
+of its own.
+
 What this is not, yet: there is no matchmaking, no accounts, no ranking, and no
 clock on a decision, so a player who wanders off leaves the game sitting there
 until someone hits **Leave**. Decks come from the host machine's collection
@@ -1067,6 +1097,25 @@ decklist off by one: each of them stops the match on the next message with a
 playing subtly different games. Version and protocol are checked in the
 handshake for the same reason, before a card is dealt.
 
+Those are two questions of two different fields, so they are two functions —
+`_check_protocol` and `_check_app` — and **both sides call both**. The protocol
+number is about the wire: a mismatch means the messages would be misread. The
+app version is about the rules: lockstep only holds while both machines are the
+same engine over the same cards, so any difference at all is refused, with both
+version strings in the message, because "we are on different builds" is
+something two people can act on and "fingerprint mismatch at decision 41" is
+not. A peer that names no version is let through — that is a build older than
+the field, and its protocol number has already had its say.
+
+Symmetry is the part worth stating, because it was missing: the host settles
+the table, so the version recorded in it is the host's own, and comparing that
+against itself always agreed. Only the joiner ever noticed a gap, and the host
+saw a peer that stopped talking. The host now checks the joiner's `hello` before
+it builds a table at all, and whichever side refuses sends the reason across
+before the link goes quiet — a refusal is indistinguishable from a peer that
+never answered, and the message is only useful if it reaches the person who has
+to update.
+
 Signalling is done by hand. One of you picks **I'll start** and gets a code; you
 send it over whatever you already use to talk to each other; they paste it, send
 back a reply code, and the game begins on its own. A signalling server would be
@@ -1131,6 +1180,21 @@ An illegal deck still saves. Half-built is the normal state of a deck you mean
 to come back to; it simply cannot be picked for a match until it is 60 cards.
 Loading a starter or generated list opens it as `<name> copy`, so editing one to
 see how it feels cannot silently shadow the deck it came from.
+
+#### Exporting a deck
+
+**Export** writes the list to a `.txt` file in `decks/` beside the game and
+tells you the path it took. It does *not* hand the browser a download, and that
+is the point: the game is normally shown in a desktop window (see
+[`desktop.py`](desktop.py)), and a web view has nowhere to put a downloaded
+file — it navigates to the blob instead, which paints the decklist over the
+board with no way back, so the export reads as the game having hung. Writing it
+beside the game also puts it where a decklist has to be for the game to read it
+again. A name already taken in `decks/` is numbered (`evolved_deck-2.txt`)
+rather than written over, because that folder also holds lists the evolver wrote
+and lists somebody was sent. `POST /api/decks/export` is local-only like every
+other route that writes; a browser on another machine falls back to an ordinary
+download, which is the one place a download works.
 
 #### Importing a deck
 

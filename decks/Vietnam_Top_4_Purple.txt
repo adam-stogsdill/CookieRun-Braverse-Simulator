@@ -1,0 +1,38 @@
+--COOKIE--
+1x Dark Cacao Cookie BS3-100 LV3
+2x Silent Salt Cookie BS10-122 LV3
+3x Crunchy Chip Cookie BS8-119 LV2
+4x Dark Cacao Cookie BS11-087 LV2
+2x Silent Salt Cookie BS11-089 LV2
+4x Blueberry Pie Cookie BS9-101 LV1
+2x Caramel Arrow Cookie BS8-120 LV1
+3x Milk Cookie BS8-116 LV1
+4x Salt Cellar Cookie BS10-120 LV1
+2x Seaweed Cookie BS10-117 LV1
+4x Starfruit Cookie BS2-062 LV1
+
+--FLIP--
+1x Prune Juice Cookie BS9-113 LV2
+2x Affogato Cookie BS11-076 LV1
+2x Black Sapphire Cookie P-155 LV1
+3x Blackberry Cookie BS10-100 LV1
+2x Candy Apple Cookie P-161 LV1
+4x Sugar Glass Cookie ST10-007 LV1
+
+--ITEM--
+2x Little Star ST10-013
+
+--TRAP--
+2x Abandoned Cloud Nest BS2-080
+4x Forbidden Grimoire ST5-020
+1x Seal Tree of the Fallen Emissaries BS10-116
+3x Spirit-cutting Sword BS10-113
+
+--STAGE--
+1x Catacombs of Silence BS10-115
+2x The Days of Resolution and Dignity BS8-125
+
+--EXTRA--
+2x Dark Cacao Cookie BS8-104 LV3
+1x Shadow Milk Cookie BS9-102 LV3
+2x Spectral Warmaster BS10-123 LV3

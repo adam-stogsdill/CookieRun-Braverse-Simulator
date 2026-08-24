@@ -1422,3 +1422,20 @@ body.online #settings-watch { display: none; }
 #peerplay .peer-status { flex: 1; font-size: 11px; color: var(--dim); min-height: 14px; }
 /* A handshake that failed must not read like one still in progress. */
 #peerplay .peer-status.bad { color: var(--bad); }
+
+/* The page is older than the server it is talking to — a tab left open across
+   an upgrade. Not a dialog: it must not take the window, because whatever the
+   person was doing is still worth finishing. */
+.stale {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 16px;
+  /* Above the title screen (60) and the tutorial's veil, because the moment
+     this matters most is on the front door, just before someone joins a room.
+     Below a <dialog>, which the browser paints in its own top layer anyway. */
+  z-index: 96; display: flex; align-items: center; gap: 12px;
+  max-width: min(680px, 92vw);
+  padding: 10px 14px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--accent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  font-size: 12px; line-height: 1.5;
+}
+.stale.hidden { display: none; }

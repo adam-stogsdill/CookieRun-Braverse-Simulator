@@ -247,3 +247,59 @@ def test_import_is_a_local_only_route():
     assert "_is_local()" in route
     assert "/api/decks/import" not in Handler.__dict__.get("PUBLIC_ROUTES", ())
     assert "/api/decks/import" not in play_server.PUBLIC_ROUTES
+
+
+# --- the way back out ------------------------------------------------------
+# Export is the other half of import, and it writes the file on this machine
+# rather than handing the browser a download: the game is usually shown in a
+# desktop window, where a download has nowhere to go and a blob link merely
+# navigates the window to the decklist, painting it over the board with no way
+# back. See `viewer/builder.js`.
+@pytest.fixture
+def exports(tmp_path, monkeypatch):
+    import play_server as PS
+
+    directory = tmp_path / "decks"
+    directory.mkdir()
+    monkeypatch.setattr(PS, "export_store", lambda: directory)
+    return directory
+
+
+def test_export_writes_the_file_here(server, exports, db):
+    code, res = post(server, "/api/decks/export",
+                     {"name": "Sea Fairy aggro", "text": "--COOKIE--\n4x ST9-007\n"})
+
+    assert code == 200 and res["ok"] is True
+    written = exports / "Sea_Fairy_aggro.txt"
+    assert res["path"] == str(written)
+    assert written.read_text(encoding="utf-8").endswith("4x ST9-007\n")
+
+
+def test_export_never_writes_over_a_decklist_already_there(server, exports):
+    """`decks/` also holds lists the evolver wrote and lists someone was sent;
+    an export is not worth losing one of those to a name clash."""
+    (exports / "evolved_deck.txt").write_text("keep me", encoding="utf-8")
+
+    code, res = post(server, "/api/decks/export",
+                     {"name": "evolved_deck", "text": "--COOKIE--\n4x ST9-007\n"})
+
+    assert code == 200
+    assert res["file"] == "evolved_deck-2.txt"
+    assert (exports / "evolved_deck.txt").read_text(encoding="utf-8") == "keep me"
+
+
+def test_an_empty_export_is_refused(server, exports):
+    assert post(server, "/api/decks/export", {"text": "  ", "name": "x"})[0] == 400
+    assert not list(exports.iterdir())
+
+
+def test_export_is_a_local_only_route():
+    """It writes a file on the machine running the server. Someone who joined
+    a game over the LAN does not get to do that."""
+    import play_server
+
+    source = open(play_server.__file__, encoding="utf-8").read()
+    route = source[source.index('elif path == "/api/decks/export"'):]
+    route = route[:route.index('elif path ==', 10)]
+    assert "_is_local()" in route
+    assert "/api/decks/export" not in play_server.PUBLIC_ROUTES

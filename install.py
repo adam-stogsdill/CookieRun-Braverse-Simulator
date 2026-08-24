@@ -30,10 +30,13 @@ Reinstalling over an existing install replaces the program and touches nothing
 else — that is the upgrade path, and it is why the installed binary is named
 `braverse` rather than after a version.
 
-Stdlib only, and it never needs the network. It runs from a checkout for
-testing (`python3 install.py --binary dist/braverse`), but the thing a player
-gets is this script frozen next to the game in the release zip, so installing
-needs no Python either.
+**The frozen installer carries the game inside it.** That is the file to send
+someone: one download, no second file to keep next to it, nothing to unzip in
+the right order. `build_release.py` embeds the built game as a payload, and
+`find_binary` unpacks it from there. Running from a checkout there is no
+payload, so `--binary dist/braverse` says which game to install.
+
+Stdlib only, and it never needs the network.
 """
 
 from __future__ import annotations
@@ -51,6 +54,11 @@ APP_NAME = "CookieRun Braverse"
 WINDOWS = os.name == "nt"
 MACOS = platform.system() == "Darwin"
 EXE_NAME = "braverse.exe" if WINDOWS else "braverse"
+# Where the frozen installer keeps the game it carries, and the icon it dresses
+# the shortcut with. `braverse.spec` puts them there.
+PAYLOAD_DIR = "payload"
+ROOT = Path(__file__).resolve().parent
+ICON_NAME = "braverse.icns"
 
 # The folders the layout is made of, and what each one is for. The text is
 # written into the folder as a read-me, because the folder is the interface: a
@@ -155,18 +163,44 @@ def default_dir() -> Path:
     return Path.home() / ".local" / "share" / "braverse"
 
 
-def find_binary(explicit: str | None) -> Path:
-    """The game to install: what was pointed at, or what sits beside us.
+def payload() -> Path | None:
+    """The game carried inside this installer, if it was built with one.
 
-    In the release zip that is the binary unzipped alongside this installer,
-    which is the whole of the expected case. From a checkout, `--binary
-    dist/braverse` after a build.
+    A one-file build unpacks itself into a temporary directory and points
+    `sys._MEIPASS` at it, so the game is an ordinary file by the time anyone
+    asks — it just has to be marked executable again, since the unpacking does
+    not preserve the bit.
+    """
+    if not getattr(sys, "frozen", False):
+        return None
+    base = getattr(sys, "_MEIPASS", None)
+    if not base:
+        return None
+    for name in (EXE_NAME, "braverse", "braverse.exe"):
+        found = Path(base) / PAYLOAD_DIR / name
+        if found.is_file():
+            found.chmod(found.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            return found
+    return None
+
+
+def find_binary(explicit: str | None) -> Path:
+    """The game to install: what was pointed at, what we carry, or what sits
+    beside us.
+
+    The carried copy is the normal case and the reason this file is worth
+    sending on its own. Beside-us is the fallback for a release built without a
+    payload; `--binary` is how a checkout says which build to install.
     """
     if explicit:
         path = Path(explicit).expanduser().resolve()
         if not path.is_file():
             die(f"no such file: {path}")
         return path
+
+    carried = payload()
+    if carried is not None:
+        return carried
 
     here = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
     names = [EXE_NAME, "braverse", "braverse.exe"]
@@ -186,7 +220,8 @@ def find_binary(explicit: str | None) -> Path:
                         else os.access(p, os.X_OK)))
     if loose:
         return loose[0]
-    die(f"cannot find the game next to {here} — pass --binary /path/to/{EXE_NAME}")
+    die(f"this installer carries no game and there is none next to {here} — "
+        f"pass --binary /path/to/{EXE_NAME}")
     raise AssertionError("unreachable")
 
 
@@ -322,13 +357,20 @@ MAC_PLIST = """\
   <key>CFBundleName</key><string>{app}</string>
   <key>CFBundleDisplayName</key><string>{app}</string>
   <key>CFBundleIdentifier</key><string>local.braverse.launcher</string>
-  <key>CFBundleExecutable</key><string>launch</string>
+  <key>CFBundleExecutable</key><string>launch</string>{icon}
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>10.13</string>
 </dict>
 </plist>
 """
+
+
+def icon_file() -> Path | None:
+    """The .icns this installer carries, if it was built with one."""
+    base = getattr(sys, "_MEIPASS", None) if getattr(sys, "frozen", False) else None
+    found = Path(base or ROOT) / ICON_NAME
+    return found if found.is_file() else None
 
 
 def macos_app(installed: Path, where: Path | None = None) -> list[Path]:
@@ -338,13 +380,27 @@ def macos_app(installed: Path, where: Path | None = None) -> list[Path]:
     can be kept in the Dock, which is what "shortcut" means on this platform.
     It holds a two-line script, not a copy of the game: upgrading replaces the
     binary and this keeps pointing at it.
+
+    The icon lives here rather than on the binary, because a one-file build is
+    a plain executable and macOS draws those with a generic icon no matter what
+    is inside them. This bundle is the only thing on the platform that can wear
+    the game's face.
     """
     base = where or (Path.home() / "Applications")
     base.mkdir(parents=True, exist_ok=True)
     app = base / f"{APP_NAME}.app"
     macos = app / "Contents" / "MacOS"
     macos.mkdir(parents=True, exist_ok=True)
-    write_text(app / "Contents" / "Info.plist", MAC_PLIST.format(app=APP_NAME))
+
+    art = icon_file()
+    icon_key = ""
+    if art is not None:
+        resources = app / "Contents" / "Resources"
+        resources.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(art, resources / ICON_NAME)
+        icon_key = f"\n  <key>CFBundleIconFile</key><string>{ICON_NAME}</string>"
+    write_text(app / "Contents" / "Info.plist",
+               MAC_PLIST.format(app=APP_NAME, icon=icon_key))
     launcher = macos / "launch"
     # cd first: the game keeps decks, profiles and replays beside the
     # executable, and a bundle launched from the Dock starts at /.

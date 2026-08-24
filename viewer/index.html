@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CookieRun: Braverse — visual player</title>
+<link rel="icon" href="/icon.ico">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/builder.css">
 <link rel="stylesheet" href="/table.css">
@@ -94,7 +95,7 @@
       <select id="deck-load"><option value="">load a deck…</option></select>
       <button id="deck-new" class="ghost tiny">New</button>
       <button id="deck-copy" class="ghost tiny" title="Copy the decklist to the clipboard">Copy</button>
-      <button id="deck-export" class="ghost tiny" title="Download the decklist as a text file, grouped by card type">Export</button>
+      <button id="deck-export" class="ghost tiny" title="Save the decklist as a text file in decks/, grouped by card type">Export</button>
       <button id="deck-import" class="ghost tiny" title="Load a decklist from a file, or paste one in">Import</button>
       <button id="deck-view" class="ghost tiny" title="Show the whole deck full screen, grouped by card type — for screenshots">View</button>
       <button id="deck-delete" class="ghost tiny">Delete</button>
@@ -106,6 +107,11 @@
     <div class="deck-hint">click a card to add · click a row's card to remove one</div>
   </aside>
 </section>
+
+<div id="stale" class="stale hidden">
+  <span id="stale-text"></span>
+  <button id="stale-reload" class="primary tiny">Reload</button>
+</div>
 
 <div id="lobby" class="lobby hidden">
   <div class="lobby-card">

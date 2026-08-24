@@ -217,9 +217,14 @@ def host_handshake(link: Link, *, deck: Sequence[str], extra: Sequence[str],
     arrives, so the order is fixed: the joiner speaks first with what it is
     bringing, the host answers with the whole agreed table, and both sides
     start from that one object rather than from two views of it.
+
+    The joiner's `hello` is also where a version gap is caught on this side —
+    before the table exists, so a mismatched peer is turned away at the door
+    rather than dealt into a game that cannot stay in step.
     """
     hello = _expect(link, "hello", timeout)
-    _check_version(hello)
+    _check_protocol(hello)
+    _check_app(hello.get("app", ""), app_version)
     table = Table(seed=int(seed),
                   decks=(tuple(deck), tuple(hello.get("deck", ()))),
                   extra=(tuple(extra), tuple(hello.get("extra", ()))),
@@ -245,8 +250,11 @@ def join_handshake(link: Link, *, deck: Sequence[str], extra: Sequence[str],
                "deck": list(deck), "extra": list(extra),
                "surface": list(surface), "name": name})
     reply = _expect(link, "table", timeout)
-    _check_version(reply)
+    _check_protocol(reply)
     table = Table.from_json(reply.get("table") or {})
+    # The table is where the host's version is recorded, so it is what this
+    # side checks — the same field that goes on to name the build in a replay.
+    _check_app(table.app_version, app_version)
     if table.decks[1] != tuple(deck) or table.extra[1] != tuple(extra):
         raise Handshake("the host dealt us a deck we did not bring")
     return table
@@ -269,12 +277,40 @@ def _expect(link: Link, kind: str, timeout: float) -> dict:
     return message
 
 
-def _check_version(message: dict) -> None:
+# Two things have to agree before a card is dealt, and they are different
+# questions asked of different fields — so they are two functions, each called
+# from both sides of the handshake. Between them they are the only place that
+# decides whether two machines may play each other.
+def _check_protocol(message: dict) -> None:
+    """The wire: a mismatch means the messages themselves would be misread."""
     theirs = message.get("protocol")
     if theirs != PROTOCOL:
         raise Handshake(
             f"the other side speaks netplay protocol {theirs}, this build "
             f"speaks {PROTOCOL} — one of you is on an older version")
+
+
+def _check_app(theirs: str, ours: str) -> None:
+    """The rules: both machines must be running the same build.
+
+    Lockstep works because two engines fed the same decisions from the same
+    seed produce the same game. That holds only while they *are* the same
+    engine over the same cards — a build that differs at all can disagree about
+    what a card does, and the disagreement surfaces several turns later as a
+    desync rather than as the version gap it actually is.
+
+    So any difference is refused, with both versions in the message: "we are on
+    different builds" is something two people can act on, and "fingerprint
+    mismatch at decision 41" is not. A peer that names no version at all is let
+    through — that is a build old enough to predate the field, and its protocol
+    number has already had its say.
+    """
+    theirs, ours = str(theirs or ""), str(ours or "")
+    if theirs and ours and theirs != ours:
+        raise Handshake(
+            f"the other player is running {theirs} and you are running {ours} — "
+            f"the same build on both sides is what keeps the two games "
+            f"identical, so whoever is behind should update")
 
 
 # ---------------------------------------------------------------------------

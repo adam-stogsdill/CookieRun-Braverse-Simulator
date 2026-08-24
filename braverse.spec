@@ -3,6 +3,17 @@
 #     pip install pyinstaller
 #     pyinstaller braverse.spec        # -> dist/braverse
 #
+# It builds one of two things, because the second one contains the first and a
+# spec cannot depend on its own output. `build_release.py` runs it twice:
+#
+#     (no env)                         the game            -> dist/braverse
+#     BRAVERSE_STAGE=installer         the installer       -> dist/install-braverse
+#         BRAVERSE_PAYLOAD=dist/braverse   the game to carry inside it
+#         BRAVERSE_ICON=...icns            the icon it dresses the shortcut with
+#
+# An installer built with a payload is the only file a player needs, which is
+# the point: one download, nothing to keep next to it.
+#
 # The binary carries the engine, the browser front end, the card database and
 # the full ~2000-card art library, so it runs on a machine with no Python and
 # no `card_images/` checkout, and any deck of any cards renders.
@@ -12,6 +23,7 @@
 # binary, and none is bundled, so the menu degrades to human/heuristic/random.
 
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(SPECPATH)
@@ -33,6 +45,14 @@ else:
             f"first, or edit this check if a partial library is what you want."
         )
 
+# The game's face. Windows compiles an icon into the .exe and the Start Menu
+# shortcut inherits it; macOS draws a plain one-file binary with a generic icon
+# whatever is inside it, and rejects a .ico outright — there the icon travels
+# in the installer as an .icns and lands on the .app bundle it creates. The
+# game also serves this file as its favicon (`/icon.ico`).
+ICON = ROOT / "ginger_brave_icon.ico"
+exe_icon = str(ICON) if (ICON.exists() and sys.platform == "win32") else None
+
 decklists = [(str(p), ".") for p in sorted(ROOT.glob("*.txt"))]
 
 # Optional: if pywebview is installed at build time, carry it so the binary
@@ -44,47 +64,64 @@ try:
 except Exception:
     web_datas, web_binaries, web_hidden = [], [], []
 
-a = Analysis(
-    ["play_server.py"],
-    pathex=[str(ROOT)],
-    datas=[
-        (str(ROOT / "viewer"), "viewer"),
-        (str(ROOT / "braverse_cards.csv"), "."),
-        *decklists,
-        *images,
-        *web_datas,
-    ],
-    binaries=web_binaries,
-    hiddenimports=web_hidden,
-    excludes=["torch", "tqdm", "pytest", "PIL", "tkinter", "matplotlib"],
-    noarchive=False,
-)
-pyz = PYZ(a.pure)
+STAGE = os.environ.get("BRAVERSE_STAGE", "game")
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    name="braverse",
-    console=True,
-    onefile=True,
-    upx=False,
-    target_arch=None,
-)
+if STAGE == "game":
+    a = Analysis(
+        ["play_server.py"],
+        pathex=[str(ROOT)],
+        datas=[
+            (str(ROOT / "viewer"), "viewer"),
+            (str(ROOT / "braverse_cards.csv"), "."),
+            *([(str(ICON), ".")] if ICON.exists() else []),
+            *decklists,
+            *images,
+            *web_datas,
+        ],
+        binaries=web_binaries,
+        hiddenimports=web_hidden,
+        excludes=["torch", "tqdm", "pytest", "PIL", "tkinter", "matplotlib"],
+        noarchive=False,
+    )
+    pyz = PYZ(a.pure)
 
-# The installer, built beside the game as its own small binary: it copies the
-# game into a chosen folder and makes the folders a player drops decks and card
-# art into. It ships next to the game so installing needs no Python either — a
-# script would not help someone who has none, which is the whole audience for a
-# frozen build. It carries no data and needs no numpy, so it costs a few MB.
-#
-# `BRAVERSE_INSTALLER=0` skips it, for a build of only the game.
-if os.environ.get("BRAVERSE_INSTALLER", "1") != "0":
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        name="braverse",
+        console=True,
+        onefile=True,
+        upx=False,
+        target_arch=None,
+        icon=exe_icon,
+    )
+
+else:
+    # The installer. It copies the game into a chosen folder and makes the
+    # folders a player drops decks and card art into — and it carries the game
+    # itself, so the file someone is sent is the only file they need. Without a
+    # payload it is a few MB and installs whatever sits beside it, which is what
+    # a build run straight from a checkout produces.
+    payload = os.environ.get("BRAVERSE_PAYLOAD", "")
+    if payload and not Path(payload).is_file():
+        raise SystemExit(f"BRAVERSE_PAYLOAD is set to {payload}, which is not a file")
+    icon_data = os.environ.get("BRAVERSE_ICON", "")
+
     inst = Analysis(
         ["install.py"],
         pathex=[str(ROOT)],
-        datas=[],
+        datas=[
+            # "payload" is `install.PAYLOAD_DIR`; the game is unpacked from
+            # there at install time. Named rather than guessed, because the
+            # installer looks it up by that name.
+            *([(payload, "payload")] if payload else []),
+            *([(icon_data, ".")] if icon_data and Path(icon_data).is_file() else []),
+        ],
+        # No numpy: the installer copies a file and writes some text, and
+        # dragging the game's dependencies into it would double a binary that
+        # already carries the game.
         excludes=["numpy", "torch", "tqdm", "pytest", "PIL", "tkinter", "matplotlib"],
         noarchive=False,
     )
@@ -99,4 +136,5 @@ if os.environ.get("BRAVERSE_INSTALLER", "1") != "0":
         onefile=True,
         upx=False,
         target_arch=None,
+        icon=exe_icon,
     )

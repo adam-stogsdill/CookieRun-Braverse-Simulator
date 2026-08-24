@@ -180,6 +180,50 @@ def test_a_peer_on_another_build_is_refused_before_a_card_is_dealt(base):
     assert "0.0.1-ancient" in status.get("error", "")
 
 
+def test_the_host_refuses_a_joiner_on_another_build_too(base):
+    """Both seats check, not just the one that happens to receive a table.
+
+    The host settles the table, so for a long time it compared its own version
+    against its own — always equal — and only the joiner ever noticed a gap.
+    The host would then see a peer that simply stopped talking.
+    """
+    call(base, "/api/peer/new", {"host": True, "deck": DECKS[0]})
+    inbox(base, {"t": "hello", "protocol": NP.PROTOCOL, "app": "0.0.1-ancient",
+                 "deck": available_deck(DECKS[0]), "extra": [],
+                 "surface": list(NP.SURFACE), "name": "Guest"})
+
+    status = peer_state(base).get("peer") or {}
+    assert status.get("state") == "failed"
+    assert "0.0.1-ancient" in status.get("error", "")
+
+
+def test_the_refused_side_is_told_why(base):
+    """A handshake we turned down looks, from the other machine, exactly like a
+    peer that never answered — so the reason is sent before the link goes
+    quiet. It is the only way the person who has to update hears about it."""
+    call(base, "/api/peer/new", {"host": True, "deck": DECKS[0]})
+    inbox(base, {"t": "hello", "protocol": NP.PROTOCOL, "app": "0.0.1-ancient",
+                 "deck": available_deck(DECKS[0]), "extra": [],
+                 "surface": list(NP.SURFACE), "name": "Guest"})
+
+    byes = [m for m in outbox(base, "bye") if m.get("t") == "bye"]
+    assert byes, "the peer was left waiting with no reason"
+    assert "0.0.1-ancient" in byes[0].get("why", "")
+
+
+def test_a_peer_that_names_no_version_is_still_played(base):
+    """The field is not ancient history yet: a build from before it existed
+    sends no `app` at all, and its protocol number has already had its say.
+    Refusing it as well would turn one check into two failure modes."""
+    call(base, "/api/peer/new", {"host": True, "deck": DECKS[0]})
+    inbox(base, {"t": "hello", "protocol": NP.PROTOCOL,
+                 "deck": available_deck(DECKS[0]), "extra": [],
+                 "surface": list(NP.SURFACE), "name": "Guest"})
+
+    status = peer_state(base).get("peer") or {}
+    assert status.get("state") != "failed", status.get("error")
+
+
 def test_a_deck_that_is_not_legal_never_opens_a_connection(base):
     status, payload = call(base, "/api/peer/new", {"host": True, "deck": "nonsense"})
     assert status == 400 and payload.get("error")

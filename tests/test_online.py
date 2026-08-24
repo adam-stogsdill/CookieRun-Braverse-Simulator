@@ -459,7 +459,12 @@ def test_joining_from_outside_needs_the_key(base, public):
 def test_the_hosts_solo_game_is_not_on_the_internet(public):
     """A request with no room names the local match; there is none out here."""
     code, payload = out(public, "/api/state")
-    assert code == 200 and payload == {"version": 0, "idle": True}
+    assert code == 200
+    # By key rather than by whole dict: every answer also names the build that
+    # sent it, and this test is about what a stranger can see of the host's own
+    # game — which is nothing.
+    assert payload["idle"] is True and payload["version"] == 0
+    assert "players" not in payload and "log" not in payload
 
 
 def test_the_front_end_itself_is_still_served(public):
@@ -510,3 +515,35 @@ def call_with_host(base: str, path: str, host: str):
             return res.status, res.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
+
+
+# ---------------------------------------------------------------------------
+# which build each side is running
+# ---------------------------------------------------------------------------
+def test_every_answer_names_the_build_that_sent_it(base):
+    """One stamp, applied in `_json`, rather than a field on a dozen payloads.
+
+    A room is two browsers on *one* engine — whoever joins plays on the host's
+    server — so unlike a peer game there are no two rule sets to disagree.
+    What can disagree is a page left open across an upgrade, and this is what
+    lets any page notice, on whatever call it was already making.
+    """
+    from braverse import __version__
+
+    for path in ("/api/config", "/api/state", "/api/decks"):
+        code, payload = call(base, path)
+        assert code == 200, path
+        assert payload.get("build") == __version__, path
+
+
+def test_joining_a_room_says_which_build_you_joined(base):
+    """The moment the question is asked out loud: a joiner whose page came
+    from an older build learns it here, before the first turn."""
+    from braverse import __version__
+
+    _, host = call(base, "/api/room/new", {"deck": DECKS[0], "name": "Host"})
+    code, joined = call(base, "/api/room/join",
+                        {"room": host["room"], "deck": DECKS[1], "name": "Guest"})
+    assert code == 200
+    assert joined["build"] == __version__
+    call(base, "/api/room/leave", {"room": host["room"], "token": joined["token"]})

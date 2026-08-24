@@ -4,10 +4,10 @@
     python3 build_release.py                 # -> release/braverse-0.2.33-macos-arm64.zip
     python build_release.py --no-images      # same, ~190 MB smaller, cards as text
 
-What comes out is a folder holding two binaries — the game and an installer
-that puts it somewhere permanent — and a read-me. Only what a *player* needs is
-in them: the engine, the browser front end, the card database, the card art,
-and (optionally) the native-window backend.
+What comes out is **one file to send someone**: an installer that carries the
+game inside it, zipped with a read-me. Only what a *player* needs is in it: the
+engine, the browser front end, the card database, the card art, and (on macOS)
+the native-window backend. `--no-installer` ships the bare game instead.
 Everything the project uses to *develop* the game — torch, the RL pilots, the
 evolution and training scripts, the tests, the card scrapers — is left out.
 
@@ -27,7 +27,7 @@ Options:
 
     --no-venv       build with the current interpreter, no throwaway venv
     --no-images     leave out card_images/ (cards render as text)
-    --no-installer  ship the game alone, without install-braverse
+    --no-installer  ship the bare game instead of an installer carrying it
     --webview       bundle pywebview, for the game's own window (default on macOS)
     --no-webview    leave it out; the game borrows a Chromium window instead
     --no-zip        leave the bare binary in release/, do not archive it
@@ -190,31 +190,95 @@ def check_lean(py: Path) -> None:
             f"them, but a clean venv build is the safer bundle")
 
 
+ICON = "ginger_brave_icon.ico"
+
+
+def macos_icns(work: Path) -> Path | None:
+    """The .ico turned into the .icns macOS insists on, via tools every Mac has.
+
+    Not a nicety: a one-file binary on macOS is drawn with a generic icon
+    whatever is inside it, so the `.app` the installer creates is the only
+    thing that can wear the game's face — and `iconutil` will only build one
+    from a folder of *square* PNGs. The source here is 32x29, so it is padded
+    square and scaled up; a bigger square source would look better and nothing
+    else would have to change.
+    """
+    source = ROOT / ICON
+    if platform.system() != "Darwin" or not source.exists():
+        return None
+    if not shutil.which("sips") or not shutil.which("iconutil"):
+        say("note: sips/iconutil missing — the shortcut gets the generic icon")
+        return None
+
+    iconset = work / "braverse.iconset"
+    if iconset.exists():
+        shutil.rmtree(iconset)
+    iconset.mkdir(parents=True)
+    square = work / "square.png"
+    quiet = {"capture_output": True}
+    # Two steps, because `sips` reads the .ico but pads and scales separately:
+    # -p sets the canvas (transparent), -z resizes into it.
+    subprocess.run(["sips", "-s", "format", "png", str(source),
+                    "--out", str(square)], **quiet)
+    subprocess.run(["sips", "-p", "32", "32", str(square),
+                    "--out", str(square)], **quiet)
+    for size in (16, 32, 64, 128, 256, 512, 1024):
+        subprocess.run(["sips", "-z", str(size), str(size), str(square),
+                        "--out", str(iconset / f"icon_{size}x{size}.png")], **quiet)
+        # Retina names are what iconutil actually looks for at each size.
+        half = size // 2
+        if half >= 16:
+            shutil.copy2(iconset / f"icon_{size}x{size}.png",
+                         iconset / f"icon_{half}x{half}@2x.png")
+    icns = work / "braverse.icns"
+    done = subprocess.run(["iconutil", "-c", "icns", str(iconset),
+                           "-o", str(icns)], capture_output=True, text=True)
+    if done.returncode != 0 or not icns.exists():
+        say(f"note: could not build an .icns ({done.stderr.strip()})")
+        return None
+    return icns
+
+
 def pyinstaller(py: Path, args, work: Path, dist: Path) -> tuple[Path, Path | None]:
-    """The game, and the installer that puts it somewhere — one PyInstaller run
-    over `braverse.spec`, which builds both."""
+    """The game, then the installer that carries it.
+
+    Two runs over the same spec rather than one, because the second contains
+    the first: a spec cannot embed a file the same spec has not written yet.
+    """
     env = dict(os.environ)
     env["BRAVERSE_BUNDLE_IMAGES"] = "0" if args.no_images else "1"
-    env["BRAVERSE_INSTALLER"] = "0" if args.no_installer else "1"
+    suffix = ".exe" if WINDOWS else ""
+    base = [str(py), "-m", "PyInstaller", "braverse.spec", "--noconfirm",
+            "--distpath", str(dist), "--workpath", str(work), "--log-level", "WARN"]
+
     say("running PyInstaller — this takes a few minutes")
     started = time.time()
-    run([py, "-m", "PyInstaller", "braverse.spec", "--noconfirm",
-         "--distpath", str(dist), "--workpath", str(work),
-         "--log-level", "WARN"], env=env)
-
-    suffix = ".exe" if WINDOWS else ""
+    run(base, env={**env, "BRAVERSE_STAGE": "game"})
     exe = dist / f"braverse{suffix}"
     if not exe.exists():
         die(f"PyInstaller reported success but {exe} is not there")
-    installer = dist / f"install-braverse{suffix}"
-    if not args.no_installer and not installer.exists():
-        die(f"PyInstaller reported success but {installer} is not there")
-
     say(f"built {exe.name} — {exe.stat().st_size / 1e6:.0f} MB "
         f"in {time.time() - started:.0f}s")
-    if installer.exists():
-        say(f"built {installer.name} — {installer.stat().st_size / 1e6:.0f} MB")
-    return exe, (installer if installer.exists() else None)
+
+    if args.no_installer:
+        return exe, None
+
+    icns = macos_icns(work)
+    say("packing the game inside the installer")
+    run(base, env={**env,
+                   "BRAVERSE_STAGE": "installer",
+                   # The payload: this is what makes the installer the only
+                   # file a player needs.
+                   "BRAVERSE_PAYLOAD": str(exe),
+                   "BRAVERSE_ICON": str(icns) if icns else ""})
+    installer = dist / f"install-braverse{suffix}"
+    if not installer.exists():
+        die(f"PyInstaller reported success but {installer} is not there")
+    say(f"built {installer.name} — {installer.stat().st_size / 1e6:.0f} MB")
+    if installer.stat().st_size < exe.stat().st_size:
+        die("the installer is smaller than the game it should be carrying — "
+            "the payload did not go in")
+    return exe, installer
 
 
 def smoke_test(exe: Path, what: str) -> None:
@@ -235,35 +299,20 @@ def smoke_test(exe: Path, what: str) -> None:
 NOTES = """\
 CookieRun: Braverse Simulator {ver} — {tag}
 
-Install it
-----------
-{install_line}
-
-It asks where to put the game, makes the folders you drop decks and card art
-into, and offers to make a shortcut. Nothing is installed system-wide and it
-never asks for an administrator; uninstalling is deleting the folder.
-
-Or just run it
---------------
+{headline}
+{underline}
 {run_line}
 
-The game runs from wherever it sits — installing only decides *where*, and the
-game keeps decks, profiles and replays in that same folder. Run it out of
-Downloads and that is where they go.
-
-Either way it starts a local server and opens the game in a window (or a
-browser tab at http://127.0.0.1:8080). Everything runs on this machine;
-nothing is uploaded.
-
+{body}
   --port N      serve on another port
   --lan         let other machines on your network join (off by default)
   --no-browser  just serve, do not open anything
 
 First launch
 ------------
-macOS: these binaries are unsigned, so the first launch is refused — right-click
-and choose Open. The installer clears that flag on the copy it installs, so
-this only bites the two files in this folder.
+macOS: this file is unsigned, so the first launch is refused — right-click it
+and choose Open. The installer clears that flag on the game it installs, so it
+only happens once, to this one file.
 Windows: SmartScreen shows "unknown publisher" — More info -> Run anyway.
 
 What is in here
@@ -275,11 +324,31 @@ built-in heuristic and random bots, and another person.
 Unofficial fan project, not affiliated with Devsisters.
 """
 
+INSTALLER_BODY = """\
+It asks where to put the game, makes the folders you drop decks and card art
+into, and offers to make a shortcut. Nothing is installed system-wide and it
+never asks for an administrator; uninstalling is deleting the folder it made.
+It can start the game when it is done.
+
+The game keeps decks, profiles and replays in the folder it is installed to.
+Once it is installed you can run it with:
+"""
+
+GAME_BODY = """\
+It starts a local server and opens the game in its own window (or a browser tab
+at http://127.0.0.1:8080). Everything runs on this machine; nothing is
+uploaded. The game keeps decks, profiles and replays beside itself, so put it
+somewhere you can write to before you start saving decks.
+"""
+
 
 def package(exe: Path, installer: Path | None, args, tag: str, ver: str) -> Path:
-    """A folder holding the game, the installer and a read-me — zipped, with
-    that folder inside the zip rather than its three files loose, so unzipping
-    into Downloads leaves one thing behind instead of three."""
+    """The one file a player needs, plus a read-me, in a folder inside a zip.
+
+    When there is an installer it is the *only* binary shipped: it carries the
+    game inside it, so shipping the game beside it would double a 200 MB
+    download to say the same thing twice.
+    """
     out = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
     stem = f"braverse-{ver}-{tag}"
     suffix = ".exe" if WINDOWS else ""
@@ -288,28 +357,33 @@ def package(exe: Path, installer: Path | None, args, tag: str, ver: str) -> Path
         shutil.rmtree(staged)
     staged.mkdir(parents=True)
 
-    # Plain names inside the folder: the folder is what carries the version and
-    # the platform, and the installer looks for `braverse` by name.
-    copies = [(exe, staged / f"braverse{suffix}")]
     if installer is not None:
-        copies.append((installer, staged / f"install-braverse{suffix}"))
-    for src, dst in copies:
-        shutil.copy2(src, dst)
-        dst.chmod(dst.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        name = f"install-braverse{suffix}"
+        shipped = staged / name
+        shutil.copy2(installer, shipped)
+        notes = dict(
+            headline="Install it", underline="-" * len("Install it"),
+            run_line=f"  {name}" if WINDOWS else f"  ./{name}",
+            body=INSTALLER_BODY + f"\n  braverse{suffix}\n")
+    else:
+        name = f"braverse{suffix}"
+        shipped = staged / name
+        shutil.copy2(exe, shipped)
+        notes = dict(
+            headline="Run it", underline="------",
+            run_line=f"  {name}" if WINDOWS else f"  ./{name}",
+            body=GAME_BODY)
+    shipped.chmod(shipped.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    notes = NOTES.format(
-        ver=ver, tag=tag,
-        install_line=("  install-braverse.exe" if WINDOWS else
-                      "  ./install-braverse") if installer is not None else
-                     "  (this build has no installer — run the game where you like)",
-        run_line=f"  braverse{suffix}" if WINDOWS else "  ./braverse",
-        art=" and the full card art library" if not args.no_images else
-            " (no card art in this build — cards render as text)")
     readme = staged / "README.txt"
     # newline="\n" explicitly: this file is read on Windows too, and
     # `write_text`'s newline argument does not exist before Python 3.10.
     with open(readme, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(notes)
+        fh.write(NOTES.format(
+            ver=ver, tag=tag,
+            art=" and the full card art library" if not args.no_images else
+                " (no card art in this build — cards render as text)",
+            **notes))
 
     if args.no_zip:
         say(f"folder: {staged}")
@@ -339,7 +413,7 @@ def main() -> None:
     ap.add_argument("--no-images", action="store_true",
                     help="leave out card_images/ (~190 MB smaller, cards as text)")
     ap.add_argument("--no-installer", action="store_true",
-                    help="ship the game alone, without install-braverse")
+                    help="ship the bare game instead of an installer carrying it")
     ap.add_argument("--webview", dest="webview", action="store_true", default=None,
                     help="bundle pywebview so the game opens in a native window "
                          "(the default on macOS)")
