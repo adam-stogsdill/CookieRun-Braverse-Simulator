@@ -336,14 +336,19 @@ def board():
 
 def test_the_offer_a_code_points_at_can_be_collected(base, board):
     key = board.publish("v=0 the offer")
-    status, got = call(base, f"/api/signal/offer?key={key}")
-    assert status == 200 and got["offer"] == "v=0 the offer"
+    status, got = call(base, f"/api/signal/offer?id={RZ.lookup_id(key)}")
+    assert status == 200
+    # Sealed on the wire, and only the code opens it: the tunnel carries a name
+    # and a blob, which is what lets one without TLS be used at all.
+    assert "v=0" not in got["offer"]
+    assert RZ.open_signal(key, got["offer"], role="offer") == "v=0 the offer"
 
 
 def test_the_answer_finds_its_way_back_over_http(base, board):
     key = board.publish("v=0 offer")
+    sealed = RZ.seal_signal(key, "v=0 answer", role="answer")
     status, got = call(base, "/api/signal/answer",
-                       {"key": key, "answer": "v=0 answer"})
+                       {"id": RZ.lookup_id(key), "answer": sealed})
     assert status == 200 and got.get("ok")
     assert board.take_answer(key) == "v=0 answer"
 
@@ -351,33 +356,38 @@ def test_the_answer_finds_its_way_back_over_http(base, board):
 def test_the_host_polls_for_the_answer_on_its_own_route(base, board):
     key = board.publish("v=0 offer")
     assert call(base, f"/api/peer/answer?key={key}")[1]["answer"] == ""
-    board.answer(key, "v=0 answer")
+    board.answer(RZ.lookup_id(key), RZ.seal_signal(key, "v=0 answer", role="answer"))
     assert call(base, f"/api/peer/answer?key={key}")[1]["answer"] == "v=0 answer"
 
 
 def test_a_wrong_key_is_indistinguishable_from_an_expired_game(base, board):
     board.publish("v=0 offer")
-    status, got = call(base, "/api/signal/offer?key=ZZZZZZ")
+    status, got = call(base, "/api/signal/offer?id=" + "z" * 24)
     assert status == 404 and "no game with that code" in got["error"]
 
 
 def test_a_second_joiner_cannot_take_a_seat_already_answered(base, board):
     key = board.publish("v=0 offer")
-    assert call(base, "/api/signal/answer", {"key": key, "answer": "first"})[1].get("ok")
-    status, got = call(base, "/api/signal/answer", {"key": key, "answer": "second"})
+    ident = RZ.lookup_id(key)
+    first = RZ.seal_signal(key, "first", role="answer")
+    second = RZ.seal_signal(key, "second", role="answer")
+    assert call(base, "/api/signal/answer", {"id": ident, "answer": first})[1].get("ok")
+    status, got = call(base, "/api/signal/answer", {"id": ident, "answer": second})
     assert status == 404 and got.get("error")
     assert board.take_answer(key) == "first"
 
 
 def test_an_empty_answer_is_not_an_answer(base, board):
     key = board.publish("v=0 offer")
-    assert call(base, "/api/signal/answer", {"key": key, "answer": ""})[0] == 400
+    assert call(base, "/api/signal/answer",
+                {"id": RZ.lookup_id(key), "answer": ""})[0] == 400
 
 
 def test_an_absurdly_large_signal_is_refused(base, board):
     key = board.publish("v=0 offer")
     huge = "x" * (RZ.MAX_SIGNAL + 1)
-    assert call(base, "/api/signal/answer", {"key": key, "answer": huge})[0] == 400
+    assert call(base, "/api/signal/answer",
+                {"id": RZ.lookup_id(key), "answer": huge})[0] == 400
     assert call(base, "/api/peer/publish", {"offer": huge})[0] == 400
 
 
@@ -403,6 +413,8 @@ def test_a_joiner_collects_and_replies_through_its_own_machine(base, board, monk
     """
     key = board.publish("v=0 the offer")
     monkeypatch.setattr(RZ, "parse_code", lambda code: (base, key))
+    # `collect` and `reply` seal and open for themselves, so this drives the
+    # real thing end to end with only the address stubbed.
 
     status, got = call(base, "/api/peer/collect", {"code": "c.KEY.whatever"})
     assert status == 200 and got["offer"] == "v=0 the offer"
@@ -428,4 +440,127 @@ def test_the_signalling_routes_are_the_ones_a_stranger_may_reach(path):
                                   "/api/peer/reply", "/api/peer/answer"])
 def test_our_own_half_of_the_arrangement_is_not_public(path):
     """These spend this machine: they open tunnels and dial out to others."""
+    assert path not in PS.PUBLIC_ROUTES
+
+
+# ---------------------------------------------------------------------------
+# setting the machine up from the machine
+# ---------------------------------------------------------------------------
+# Configuring a tunnel used to be a command-line flag. It is now a screen, and
+# the screen talks to these — so what matters is that they are reachable only
+# from this machine, and that a token goes *in* and never comes back out.
+import tunnel as TUN                                          # noqa: E402
+
+
+@pytest.fixture
+def fake_home(tmp_path, monkeypatch):
+    """A throwaway home, and an ngrok that accepts whatever it is given.
+
+    Saving a token now runs `ngrok config add-authtoken`, so without this the
+    routes correctly refuse on any machine that has no ngrok — which is most of
+    them, this one included. `tests/test_tunnel.py` is where the real command
+    building and its refusals are pinned; here the subject is the route.
+    """
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.delenv(TUN.AUTHTOKEN_ENV, raising=False)
+    monkeypatch.setattr(PS, "NGROK_TOKEN", "")
+    monkeypatch.setattr(TUN, "configure_token", lambda token, **kw: "")
+    yield tmp_path
+
+
+def test_a_token_is_refused_when_ngrok_will_not_take_it(base, fake_home, monkeypatch):
+    """Whatever ngrok says about it is what the player is told."""
+    monkeypatch.setattr(TUN, "configure_token",
+                        lambda token, **kw: "ngrok refused it: bad token")
+    status, got = call(base, "/api/tunnel/authtoken", {"token": "SUPER-SECRET"})
+    assert status == 400 and "refused" in got["error"]
+    assert TUN.read_token() == ""       # nothing kept from a token that failed
+
+
+def test_the_status_never_carries_the_token_itself(base, fake_home):
+    """A browser can set one and has no use for reading one.
+
+    A value that is never sent cannot be read out of the page, logged by
+    something in between, or left behind in a screenshot of this screen.
+    """
+    TUN.save_token("SUPER-SECRET-TOKEN")
+    status, got = call(base, "/api/tunnel")
+    assert status == 200
+    assert "SUPER-SECRET-TOKEN" not in json.dumps(got)
+    # It still says one exists, which is all the screen needs to know.
+    assert got["savedToken"] is True
+
+
+def test_saving_a_token_does_not_echo_it_back(base, fake_home):
+    status, got = call(base, "/api/tunnel/authtoken", {"token": "SUPER-SECRET"})
+    assert status == 200 and got.get("ok")
+    assert "SUPER-SECRET" not in json.dumps(got)
+    assert TUN.read_token() == "SUPER-SECRET"
+
+
+def test_a_saved_token_is_used_for_this_run_too(base, fake_home):
+    """Save and "it works now" should be the same moment, not a restart apart."""
+    call(base, "/api/tunnel/authtoken", {"token": "SUPER-SECRET"})
+    assert PS.NGROK_TOKEN == "SUPER-SECRET"
+
+
+def test_an_empty_token_is_refused_rather_than_saved(base, fake_home):
+    TUN.save_token("real")
+    for blank in ("", "   "):
+        assert call(base, "/api/tunnel/authtoken", {"token": blank})[0] == 400
+    assert TUN.read_token() == "real"
+
+
+def test_forgetting_clears_the_run_as_well_as_the_file(base, fake_home):
+    call(base, "/api/tunnel/authtoken", {"token": "SUPER-SECRET"})
+    status, got = call(base, "/api/tunnel/forget", {})
+    assert status == 200 and got["had"] is True
+    assert TUN.read_token() == "" and PS.NGROK_TOKEN == ""
+    assert got["savedToken"] is False
+
+
+def test_forgetting_nothing_is_not_an_error(base, fake_home):
+    status, got = call(base, "/api/tunnel/forget", {})
+    assert status == 200 and got["had"] is False
+
+
+def test_a_machine_with_no_client_is_told_what_to_install(base, fake_home, monkeypatch):
+    monkeypatch.setattr(TUN, "find_backend", lambda: None)
+    got = call(base, "/api/tunnel")[1]
+    assert got["client"] == "" and "cloudflared" in got["install"]
+    # Written for a settings screen, so it must not talk in command-line flags
+    # at somebody who opened the game by double-clicking it.
+    assert "--online" not in got["install"] and "--lan" not in got["install"]
+
+
+def test_a_machine_with_cloudflared_is_never_asked_for_a_token(base, fake_home, monkeypatch):
+    """It has no account to have a token for; asking would be asking for nothing."""
+    monkeypatch.setattr(TUN, "find_backend",
+                        lambda: next(b for b in TUN.BACKENDS if b.name == "cloudflared"))
+    got = call(base, "/api/tunnel")[1]
+    assert got["client"] == "cloudflared" and got["needsToken"] is False
+
+
+def test_ngrok_without_a_token_reports_that_it_needs_one(base, fake_home, monkeypatch):
+    monkeypatch.setattr(TUN, "find_backend",
+                        lambda: next(b for b in TUN.BACKENDS if b.name == "ngrok"))
+    got = call(base, "/api/tunnel")[1]
+    assert got["needsToken"] is True and got["haveToken"] is False
+    call(base, "/api/tunnel/authtoken", {"token": "SUPER-SECRET"})
+    assert call(base, "/api/tunnel")[1]["haveToken"] is True
+
+
+def test_a_failed_test_reports_why_rather_than_claiming_success(base, fake_home, monkeypatch):
+    monkeypatch.setattr(PS, "ensure_public",
+                        lambda: (_ for _ in ()).throw(TUN.TunnelError(TUN.AUTH_HINT)))
+    status, got = call(base, "/api/tunnel/test", {})
+    assert status == 503 and "authtoken" in got["error"]
+
+
+@pytest.mark.parametrize("path", ["/api/tunnel", "/api/tunnel/authtoken",
+                                  "/api/tunnel/forget", "/api/tunnel/test"])
+def test_no_stranger_can_configure_this_machine(path):
+    """Setting up the host is the host's business, and one route writes a
+    credential — neither belongs on a port the internet can reach."""
     assert path not in PS.PUBLIC_ROUTES

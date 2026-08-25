@@ -1,7 +1,55 @@
 # Changelog
 
+## 0.2.46
+
+- **playit.gg now works as well**, alongside cloudflared and ngrok, on both
+  Windows and macOS. It is free and is built for people behind the kind of
+  home internet connection the other two struggle with. Two things are done
+  once on your playit account rather than here — claiming the agent, and adding
+  a TCP tunnel pointed at `127.0.0.1:8071` — and Settings tells you both.
+- **Invitations are now sealed, whichever service you use.** The offer and reply
+  that set up a game are encrypted with the code itself, so what travels only
+  ever contains a meaningless name and a locked box. Nobody in between can read
+  your invitation or swap themselves in as your opponent — including the tunnel
+  service. This is what makes playit safe to use, since its free tunnels have
+  no encryption of their own.
+- **Codes are longer, because the code is now the key.** Still one line, still
+  something you can send in a message — but keep sending it the way you would
+  send an invitation, since whoever has it can take the seat.
+
+## 0.2.45
+
+- **Setting up online play is now a screen, not a command line.** Settings has a
+  **Playing online** section that tells you what this computer is missing and
+  fixes it: one button installs what is needed, and a box takes your ngrok
+  authtoken if you use ngrok. **Check it works** actually opens a connection
+  rather than guessing, and **Start a game** takes you straight there.
+- **The install button shows the command it is about to run** and the output
+  while it runs, so nothing happens to your computer that you cannot see. If
+  there is no package manager it can drive, it offers the download page instead
+  of fetching anything itself.
+- **Your authtoken is saved into ngrok itself**, the same as running
+  `ngrok config add-authtoken` by hand, so it is set up once and everything on
+  the machine can use it. It is never displayed again, never sent back to the
+  page, and never appears in an error message.
+- Trying to start a game on a computer that is not set up now offers to set it
+  up, instead of only reporting what is missing.
+
 ## 0.2.44
 
+- **ngrok now works without setting it up by hand first.** If you use ngrok
+  rather than cloudflared, you can hand the game your authtoken with
+  `--ngrok-authtoken <token>`, or leave it in `NGROK_AUTHTOKEN`, and add
+  `--save-ngrok-authtoken` once to have it remembered for future runs.
+  `--forget-ngrok-authtoken` removes it again. If you already ran
+  `ngrok config add-authtoken`, nothing changes and you need none of this.
+- **A token you save is kept in your home folder, readable only by you**, and
+  is never written next to the game — where it would be copied along with it if
+  you ever sent someone a build.
+- **"ngrok needs an authtoken" now says so.** Starting a tunnel with an
+  unauthenticated ngrok used to fail with "printed no address in 30s", which is
+  true and useless; it now names the problem and links where to get a token.
+  The token is also kept out of any error message the game shows or logs.
 - **Playing someone directly now takes one short code.** Whoever starts the
   game gets something like `c.K7QP9X.neither-founded-marks-suse` — one line,
   short enough to type — and the other player just enters it. That is the whole

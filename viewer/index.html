@@ -200,6 +200,12 @@
 
     </div>
 
+    <div id="peer-fix" class="peer-step hidden">
+      <p class="peer-hint">Starting a game needs one thing set up on this
+        computer first. It takes a minute and is only ever done once.</p>
+      <button id="peer-setup" class="primary" type="button">Set it up</button>
+    </div>
+
     <div class="peer-foot">
       <span id="peer-status" class="peer-status"></span>
       <button id="peer-close" class="ghost">Close</button>
@@ -331,6 +337,45 @@
       <label class="check" id="reveal-label" title="Show both hands (HP piles stay face down until revealed)">
         <input id="reveal" type="checkbox"> reveal both hands
       </label>
+    </div>
+
+    <h3>Playing online</h3>
+    <div id="tunnel-box">
+      <p class="tun-what" id="tunnel-what">checking…</p>
+
+      <div id="tunnel-install" class="hidden">
+        <div class="tun-row">
+          <button id="tunnel-get" class="primary" type="button">Install it for me</button>
+          <a id="tunnel-page" class="tun-alt" target="_blank" rel="noopener noreferrer">download it myself</a>
+        </div>
+        <p class="tun-note">Runs <code id="tunnel-cmd"></code> on this computer.
+          It takes a minute or two.</p>
+        <pre id="tunnel-log" class="tun-log hidden"></pre>
+      </div>
+
+      <div id="tunnel-token" class="hidden">
+        <ol class="tun-steps">
+          <li>Make a free ngrok account and copy your authtoken —
+            <a id="tunnel-token-page" class="tun-alt" target="_blank" rel="noopener noreferrer">open that page</a></li>
+          <li>Paste it here:</li>
+        </ol>
+        <input id="tunnel-input" type="password" autocomplete="off"
+               spellcheck="false" placeholder="paste your authtoken">
+        <p class="tun-note">
+          Saved into ngrok itself, so it is set up once and for good. It stays on
+          this computer, and is never shown again.
+        </p>
+        <div class="tun-row">
+          <button id="tunnel-save" class="primary" type="button">Save it</button>
+          <button id="tunnel-forget" class="ghost hidden" type="button">Forget it</button>
+        </div>
+      </div>
+
+      <div class="tun-row">
+        <button id="tunnel-test" class="ghost" type="button">Check it works</button>
+        <button id="tunnel-host" class="primary hidden" type="button">Start a game</button>
+      </div>
+      <p class="tun-status" id="tunnel-status"></p>
     </div>
 
     <h3>Presentation</h3>

@@ -419,12 +419,14 @@ const PeerUI = {
   showStep(which) {
     el("#peer-step-host").classList.toggle("hidden", which !== "host");
     el("#peer-step-guest").classList.toggle("hidden", which !== "guest");
+    el("#peer-fix").classList.toggle("hidden", which !== "fix");
     if (!which) return;
     // The dialog is taller than it can show — the warning above is worth its
     // space and is not going anywhere — so the step that just opened has to be
     // scrolled to, or its Copy button sits below the fold and the code looks
     // like something you are meant to select by hand.
-    const step = el(which === "host" ? "#peer-step-host" : "#peer-step-guest");
+    const step = el({ host: "#peer-step-host", guest: "#peer-step-guest",
+                      fix: "#peer-fix" }[which]);
     requestAnimationFrame(() => step.scrollIntoView({ block: "end" }));
   },
 
@@ -469,6 +471,19 @@ const PeerUI = {
   },
 
   async beHost() {
+    // Ask before trying. Hosting needs a tunnel client, and one of the two
+    // needs an account token; discovering that as a 503 in the middle of
+    // starting a game turns a five-minute setup into a wall. Checking first
+    // costs one local request and lets the answer be a button.
+    await TunnelUI.refresh();
+    if (!TunnelUI.ready()) {
+      PeerUI.showStep("fix");
+      const s = TunnelUI.state;
+      Peer.note(s && s.client
+        ? "ngrok needs a free account token before it can connect."
+        : "this computer needs a tunnel client installed first.");
+      return;
+    }
     PeerUI.showStep("host");
     Peer.note("opening a way in for them…");
     try {
@@ -545,4 +560,220 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof Title !== "undefined") Title.show();
     });
   }
+});
+
+/* ---------------------------------------------------------------------------
+ * setting the machine up, from the machine
+ *
+ * Playing over the internet needs a tunnel client, and one of the two needs an
+ * account token. That used to be a command-line flag, which is a fine answer
+ * for the person who wrote it and a wall for everybody else — the people most
+ * likely to want to play a friend are the least likely to want to restart a
+ * server with an argument in it.
+ *
+ * So the token is set here, from the settings screen, and the failure path in
+ * the peer dialog points at it rather than just reporting that something is
+ * missing. Two rules hold throughout: the browser can *set* a token and never
+ * read one back, and nothing here ever puts a token in a status line, because
+ * status lines end up in screenshots.
+ * ------------------------------------------------------------------------ */
+const TunnelUI = {
+  state: null,
+  client: "cloudflared",   // which one "Install it for me" would fetch
+  FALLBACK_PAGE: "https://ngrok.com/download",
+
+  async refresh() {
+    try {
+      TunnelUI.state = await Peer.reach("/api/tunnel");
+    } catch (err) {
+      TunnelUI.state = null;
+    }
+    TunnelUI.render();
+    return TunnelUI.state;
+  },
+
+  /** Whether hosting a game would work right now, without trying it. */
+  ready() {
+    const s = TunnelUI.state;
+    return !!s && !!s.client && (!s.needsToken || s.haveToken);
+  },
+
+  /* One screen, three states, and the button that moves you on from each:
+   * nothing installed → install it; ngrok with no token → paste one; ready →
+   * start a game. Anything the buttons cannot do (making an account, a machine
+   * with no package manager) is a link rather than a dead end. */
+  render() {
+    const box = el("#tunnel-box");
+    if (!box) return;
+    const s = TunnelUI.state;
+    const what = el("#tunnel-what");
+    const token = el("#tunnel-token");
+    const install = el("#tunnel-install");
+    const ready = TunnelUI.ready();
+
+    el("#tunnel-host").classList.toggle("hidden", !ready);
+    el("#tunnel-test").classList.toggle("hidden", !s || !s.client);
+
+    if (!s) { what.textContent = "could not ask this computer about it."; return; }
+
+    if (!s.client) {
+      what.textContent = s.install;
+      token.classList.add("hidden");
+      install.classList.remove("hidden");
+      // cloudflared first: it needs no account at all, so the shortest road
+      // from here to a game is the one that skips the token entirely.
+      // A page can outlive the server it was loaded from — a restart onto an
+      // older build, a tab left open across an update — so nothing here
+      // assumes a field is present. A missing one costs a button, not a
+      // screenful of "cannot read properties of undefined".
+      const installs = s.installs || {};
+      const pages = s.pages || {};
+      const pick = installs.cloudflared ? "cloudflared" : "ngrok";
+      TunnelUI.client = pick;
+      el("#tunnel-cmd").textContent = installs[pick] || "";
+      el("#tunnel-page").href = pages[pick] || TunnelUI.FALLBACK_PAGE;
+      el("#tunnel-get").classList.toggle("hidden", !s.canInstall);
+      el("#tunnel-cmd").parentElement.classList.toggle("hidden", !s.canInstall);
+      return;
+    }
+    install.classList.add("hidden");
+
+    if (s.setup) {
+      // playit: the parts that are left happen on their account, not here, so
+      // this says what they are rather than pretending a button could do them.
+      what.textContent = s.setup;
+      token.classList.add("hidden");
+      return;
+    }
+    if (!s.needsToken) {
+      what.textContent = `Ready — using ${s.client}, which needs no account.`;
+      token.classList.add("hidden");
+      return;
+    }
+    token.classList.remove("hidden");
+    el("#tunnel-forget").classList.toggle("hidden", !s.savedToken);
+    el("#tunnel-token-page").href =
+      s.tokenPage || "https://dashboard.ngrok.com/get-started/your-authtoken";
+    what.textContent = s.haveToken
+      ? (s.fromEnv
+        ? "Ready — using ngrok, with a token from this computer's environment."
+        : "Ready — using ngrok, and it has your authtoken.")
+      : "Using ngrok, which needs a free account token before it can connect.";
+  },
+
+  /** Install a client, and keep saying what is happening while it runs. */
+  async install() {
+    const log = el("#tunnel-log");
+    log.classList.remove("hidden");
+    log.textContent = "";
+    TunnelUI.note("installing… this takes a minute or two");
+    try {
+      const started = await Peer.reach("/api/tunnel/install",
+                                       { client: TunnelUI.client });
+      if (started.error) { TunnelUI.note(started.error, true); return; }
+      // Poll rather than hold a request open for the length of a package
+      // install, and show the output as it comes: an install that fails says
+      // why, and hiding that leaves nobody anything to act on.
+      for (;;) {
+        const s = await TunnelUI.refresh();
+        const job = s && s.job;
+        if (!job) break;
+        log.textContent = job.output;
+        log.scrollTop = log.scrollHeight;
+        if (!job.running) {
+          TunnelUI.note(job.ok ? "installed — you can start a game now"
+                               : (job.error || "that did not work; the output is above"),
+                        !job.ok);
+          break;
+        }
+        await new Promise((done) => setTimeout(done, 1200));
+      }
+    } catch (err) {
+      TunnelUI.note(err.message || String(err), true);
+    }
+  },
+
+  note(message, bad) {
+    const line = el("#tunnel-status");
+    if (!line) return;
+    line.textContent = message;
+    line.classList.toggle("bad", !!bad);
+  },
+
+  async save() {
+    const box = el("#tunnel-input");
+    const token = box.value.trim();
+    if (!token) { TunnelUI.note("paste your authtoken first", true); return; }
+    TunnelUI.note("saving…");
+    try {
+      const got = await Peer.reach("/api/tunnel/authtoken", { token });
+      if (got.error) { TunnelUI.note(got.error, true); return; }
+      // Out of the page as soon as it is out of our hands: a token left in a
+      // field is a token in the next screenshot of this screen.
+      box.value = "";
+      TunnelUI.state = got;
+      TunnelUI.render();
+      TunnelUI.note("saved into ngrok — you can start a game now");
+    } catch (err) {
+      TunnelUI.note(err.message || String(err), true);
+    }
+  },
+
+  async forget() {
+    try {
+      const got = await Peer.reach("/api/tunnel/forget", {});
+      TunnelUI.state = got;
+      TunnelUI.render();
+      TunnelUI.note(got.had ? "forgotten" : "there was nothing saved");
+    } catch (err) {
+      TunnelUI.note(err.message || String(err), true);
+    }
+  },
+
+  /** Open a real tunnel, because a token can be well-formed and still refused. */
+  async test() {
+    TunnelUI.note("connecting… this takes a few seconds");
+    try {
+      const got = await Peer.reach("/api/tunnel/test", {});
+      if (got.error) { TunnelUI.note(got.error, true); return; }
+      TunnelUI.state = got;
+      TunnelUI.render();
+      TunnelUI.note("it works — you can start a game now");
+    } catch (err) {
+      TunnelUI.note(err.message || String(err), true);
+    }
+  },
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+  const bind = (sel, fn) => { const node = el(sel); if (node) node.onclick = fn; };
+  bind("#tunnel-save", () => TunnelUI.save());
+  bind("#tunnel-forget", () => TunnelUI.forget());
+  bind("#tunnel-test", () => TunnelUI.test());
+  bind("#tunnel-get", () => TunnelUI.install());
+  // The end of setting up is the thing you were trying to do in the first place.
+  bind("#tunnel-host", () => {
+    el("#settings").close();
+    PeerUI.open();
+    PeerUI.beHost();
+  });
+  // Enter in a single field means the one button next to it.
+  const box = el("#tunnel-input");
+  if (box) {
+    box.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") { event.preventDefault(); TunnelUI.save(); }
+    });
+  }
+  // Opening settings is the moment the answer has to be current: a token may
+  // have been added in a terminal since the page loaded.
+  const gear = el("#settings-open") || document.querySelector('[aria-label="Settings"]');
+  if (gear) gear.addEventListener("click", () => TunnelUI.refresh());
+
+  // The failure path: from "this needs setting up" straight to setting it up.
+  bind("#peer-setup", () => {
+    el("#peerplay").close();
+    const dialog = el("#settings");
+    if (dialog && !dialog.open) dialog.showModal();
+    TunnelUI.refresh();
+  });
 });

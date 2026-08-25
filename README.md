@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.44
+Current Version: 0.2.46
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -1069,7 +1069,53 @@ rather than the joiner's, which is the sharpest edge left on the room mode.
 
 `--lan` only reaches machines on your network. `--online` puts the same room on
 a public `https://` address by running a tunnel client — `cloudflared`'s quick
-tunnel by preference, since it needs no account, and `ngrok` otherwise. The
+tunnel by preference, since it needs no account, and `ngrok` otherwise.
+
+ngrok is the one that needs an authtoken, because it will not open a tunnel for
+an account it cannot identify. It can come from four places, tried in order: the
+`--ngrok-authtoken` flag, `$NGROK_AUTHTOKEN`, a token this app was asked to
+remember, or ngrok's own store — a machine already set up with
+`ngrok config add-authtoken` needs nothing from us and never touches any of
+this. `--save-ngrok-authtoken` writes one to `~/.braverse/ngrok.token` at mode
+`0600`, in the *home* directory rather than beside the game the way decklists
+are: a build gets zipped up and handed to people, and a credential that travels
+with it is a credential that has been given away.
+
+None of that is something to make a player discover from a flag, so it is also
+a screen: **Settings → Playing online** reports what this machine can do, offers
+to install a client, takes an authtoken, and opens a real tunnel to check. The
+shape of it is one state and one button — nothing installed offers an install,
+ngrok without a token offers a box, and a machine that is ready offers to start
+a game.
+
+Two rules hold across it. **The browser can set a token and can never read one
+back**: `tunnel.status` is deliberately assembled field by field and the token
+is not among them, because a value that is never sent cannot be read out of the
+page, logged in between, or left in a screenshot of this screen. And **nothing
+the browser says reaches a command line**: it names *which* client to install
+and that name is checked against the backends we know, while the install
+commands themselves are fixed strings. The token is matched against `TOKEN_RE`
+before it goes anywhere near `ngrok config add-authtoken`, which is run as an
+argument list and never through a shell — `tests/test_tunnel.py` throws the
+usual `;`, backtick and newline payloads at it and asserts nothing ran.
+
+Installing runs the platform's own package manager and nothing else — `brew` or
+`winget` — and a machine with neither is sent to the official download page
+rather than having a binary fetched for it. It runs as a `Job` on a thread with
+its output kept and shown, because an install that fails says why, and a
+spinner that ends in "that did not work" leaves nobody anything to act on.
+
+The token reaches the client in its **environment**, never on its command line.
+ngrok accepts `--authtoken` and this deliberately does not use it — arguments
+are world-readable in `ps` and land in shell history the moment anyone copies
+the command. An environment variable is not secret either, but it is visible
+only to this user, which is the difference that matters. For the same reason a
+failing run scrubs the token out of the client output it quotes back: an error
+message becomes a screenshot and a pasted bug report, and a client that ever
+echoed its own token would put it in both. And because "it printed no address
+in 30s" is useless advice for the failure a first-time ngrok user actually
+hits, an authentication failure is recognised and answered with where to get a
+token instead. The
 client dials *out*, so nothing is forwarded on the router, no port is opened,
 and TLS is the provider's problem rather than ours: a seat token never crosses
 the internet in the clear. `tunnel.py` has the details, and `available()`
@@ -1189,6 +1235,58 @@ Three things about that are deliberate:
 Anyone holding a code can answer the offer and become your opponent, exactly as
 anyone holding a room code can take the free seat. It is an invitation, so send
 it the way you would send an invitation.
+
+#### The invitation is sealed, so the tunnel does not have to be trusted
+
+The first version leaned on the tunnel for TLS — cloudflared's docstring still
+says TLS is the provider's problem rather than ours. That is fine until the
+tunnel has none: **playit.gg's free tier is plain TCP**, and HTTPS there is a
+paid feature. Rather than rule playit out, the exchange is sealed before it is
+handed over, which removes the dependence on the pipe for all three backends at
+once.
+
+The key in a code does two jobs and must do them with two values, because one
+of them travels. `rendezvous` derives both from it by HMAC: `lookup_id` names
+*which* exchange to fetch and goes in the URL, while the sealing key never
+leaves the two machines. Someone who watches the tunnel — or runs it — learns
+which exchange is being collected and nothing about how to read it.
+`braverse.secretbox` does the sealing, the same encrypt-then-MAC construction
+the profile store uses; `subkey` rather than `derive`, because a code key is a
+hundred bits of `os.urandom` and there is nothing to slow a guesser down *to*.
+
+The role — `offer` or `answer` — is bound in as associated data. The two are
+the same shape and would otherwise be interchangeable to anyone able to move
+bytes around, so without it an offer could be played straight back as an
+answer.
+
+A wrong key and an altered message therefore fail identically, and both fail
+*before* a byte is decrypted. One consequence is worth stating: an answer is
+not opened when it is posted, only when the host reads it. Refusing at the
+moment of posting would tell whoever posted it that they had guessed a valid
+id.
+
+The cost is code length — a hundred-bit key rather than six characters, so
+about fifty characters rather than thirty-five. Still one line, still typeable,
+and it buys not having to trust anybody's tunnel with your session description.
+
+#### playit.gg
+
+The odd one out, and the only backend whose address is not `https://` —
+`Backend.scheme` exists so nothing else has to special-case a name. Its agent
+prints a bare `host:port` rather than a URL, and the `t` tag in a code carries
+that shape; it is the only tag allowed a port, and the scheme is written into
+the tag rather than inferred, so cleartext can never be smuggled in under one
+of the others.
+
+Two differences from the others are worth knowing. playit is configured **on
+your account**, not on the command line: the agent is claimed once through a
+browser, and the tunnel itself is added on playit.gg pointed at a local port.
+That port therefore has to be one that does not move between runs
+(`PLAYIT_LOCAL_PORT`), where cloudflared and ngrok are simply told which
+ephemeral port to forward. And it is not offered as a one-click install —
+its package-manager name was not something I could verify, and a wrong `brew
+install` fails in a way that looks like the app is broken, so it links to its
+own download page and setup wizard instead.
 
 Everything waiting on that exchange is still paced by *people* — somebody has
 to read a code, find the app and type it — so `SIGNAL_TIMEOUT` is half an hour,

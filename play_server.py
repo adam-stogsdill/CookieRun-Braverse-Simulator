@@ -164,6 +164,13 @@ PUBLIC_HOST = ""
 # routes have to end up with the same one rather than a second of each.
 PUBLIC_SERVER = None
 PUBLIC_LINK = None
+# An ngrok authtoken given on the command line, for this run only. Empty means
+# "look in the usual places" — `tunnel.resolve_token` handles the environment
+# variable, the remembered file and ngrok's own store, in that order.
+NGROK_TOKEN = ""
+# A running install, started from the settings screen. One at a time: there are
+# only two clients and either is enough.
+INSTALL_JOB = None
 PUBLIC_LOCK = threading.Lock()
 # Offers waiting to be collected by whoever was sent the code (rendezvous.py).
 SIGNAL_BOARD = RZ.Board()
@@ -191,9 +198,21 @@ def ensure_public() -> str:
         PublicHandler.app = Handler.app
         server = PUBLIC_SERVER
         if server is None:
-            server = Viewer(("127.0.0.1", 0), PublicHandler)
+            # cloudflared and ngrok are *told* which port to forward, so the OS
+            # can pick one. playit is the other way round: the tunnel is
+            # configured on your account against a fixed local port, so letting
+            # the OS choose would leave it aimed at last night's number.
+            backend = TUN.find_backend()
+            want = (TUN.PLAYIT_LOCAL_PORT
+                    if backend is not None and backend.name == "playit" else 0)
+            try:
+                server = Viewer(("127.0.0.1", want), PublicHandler)
+            except OSError as exc:
+                raise TUN.TunnelError(
+                    f"could not listen on 127.0.0.1:{want} for playit "
+                    f"({exc}) — something else is using it") from exc
             threading.Thread(target=server.serve_forever, daemon=True).start()
-        link = TUN.open_tunnel(server.server_address[1])
+        link = TUN.open_tunnel(server.server_address[1], authtoken=NGROK_TOKEN)
         PUBLIC_SERVER, PUBLIC_LINK = server, link
         PUBLIC_URL = link.url.rstrip("/") + "/"
         PUBLIC_HOST = link.host
@@ -2852,6 +2871,27 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(400, b"bad path", "text/plain")
                 return
             self._file(card_image(name), cache=True)
+        elif path == "/api/tunnel":
+            # Setting this machine up is the machine's own business, and the
+            # token is a credential — so this is gated like the deck store
+            # rather than like the board, and is not in `PUBLIC_ROUTES`.
+            if not self._is_local():
+                self._json({"error": "only on the machine running the server"}, 403)
+                return
+            state = TUN.status(NGROK_TOKEN)
+            state["open"] = bool(PUBLIC_URL)
+            state["url"] = PUBLIC_URL
+            # What a one-click install would actually run, so the screen can
+            # show the command rather than asking anyone to trust a button.
+            plan = TUN.installer("cloudflared") or TUN.installer("ngrok")
+            state["canInstall"] = bool(plan)
+            state["installs"] = {name: " ".join(TUN.installer(name) or [])
+                                 for name in ("cloudflared", "ngrok")}
+            state["pages"] = TUN.DOWNLOAD_PAGES
+            state["tokenPage"] = TUN.TOKEN_PAGE
+            if INSTALL_JOB is not None:
+                state["job"] = INSTALL_JOB.poll()
+            self._json(state)
         elif path == "/api/signal/offer":
             # Reached by the *other player's machine*, holding a code. Rate
             # limited on its own account: a key is six characters out of an
@@ -2860,7 +2900,7 @@ class Handler(BaseHTTPRequestHandler):
             if not JOIN_LIMIT.allow(self._client()):
                 self._json({"error": "too many requests; slow down"}, 429)
                 return
-            found = SIGNAL_BOARD.offer_for(self._query().get("key", ""))
+            found = SIGNAL_BOARD.offer_for(self._query().get("id", ""))
             if found is None:
                 # A wrong key and an expired game are the same answer, so a
                 # stranger cannot use this to learn which keys exist.
@@ -2869,8 +2909,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"offer": found.offer})
         elif path == "/api/peer/answer":
             # The host's own browser, waiting for the reply to be collected.
-            key = self._query().get("key", "")
-            self._json({"answer": SIGNAL_BOARD.take_answer(key)})
+            # Loopback, so the key may be named here — it is the one place it
+            # never leaves the machine.
+            try:
+                answer = SIGNAL_BOARD.take_answer(self._query().get("key", ""))
+            except RZ.RendezvousError as exc:
+                # Something was posted that this key cannot open. Whoever it
+                # was did not have the code, so the game is not going to
+                # happen and saying so beats waiting forever.
+                self._json({"error": str(exc)}, 409)
+                return
+            self._json({"answer": answer})
         elif path == "/api/peer/out":
             # Held rather than polled: a decision the other player is waiting
             # on must leave as soon as our seat produces it.
@@ -3225,16 +3274,79 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
         elif path == "/api/signal/answer":
             # The other player's machine, handing back what it answered with.
-            key = str(body.get("key") or "")
+            ident = str(body.get("id") or "")
             answer = str(body.get("answer") or "")
             if not answer or len(answer) > RZ.MAX_SIGNAL:
                 self._json({"error": "no answer in that"}, 400)
                 return
-            if not SIGNAL_BOARD.answer(key, answer):
+            if not SIGNAL_BOARD.answer(ident, answer):
                 self._json({"error": "no game with that code, or somebody "
                                      "else already joined it"}, 404)
                 return
             self._json({"ok": True})
+        elif path in ("/api/tunnel/authtoken", "/api/tunnel/forget",
+                      "/api/tunnel/test", "/api/tunnel/install"):
+            if not self._is_local():
+                self._json({"error": "only on the machine running the server"}, 403)
+                return
+            if path == "/api/tunnel/install":
+                global INSTALL_JOB
+                if INSTALL_JOB is not None and INSTALL_JOB.running:
+                    self._json({"ok": True, "job": INSTALL_JOB.poll()})
+                    return
+                # The browser names a client and nothing else. `installer`
+                # builds the command from fixed strings and refuses a name that
+                # is not one of ours, so nothing from the request reaches a
+                # command line.
+                plan = TUN.installer(str(body.get("client") or ""))
+                if plan is None:
+                    self._json({"error": "this computer has no package manager "
+                                         "I know how to drive — use the "
+                                         "download page instead"}, 501)
+                    return
+                INSTALL_JOB = TUN.Job(plan).start()
+                self._json({"ok": True, "job": INSTALL_JOB.poll()})
+            elif path == "/api/tunnel/authtoken":
+                token = str(body.get("token") or "").strip()
+                if not token:
+                    self._json({"error": "paste your authtoken first"}, 400)
+                    return
+                # Hand it to ngrok's own store, which is what the manual
+                # `ngrok config add-authtoken` does — after this ngrok finds it
+                # by itself, for every tunnel, without us being involved. The
+                # value is checked against `TOKEN_RE` in there before it goes
+                # anywhere near an argument list.
+                why = TUN.configure_token(token)
+                if why:
+                    self._json({"error": why}, 400)
+                    return
+                # And kept here as well, so a machine whose ngrok config is
+                # wiped — or replaced by a fresh install — does not silently
+                # stop working.
+                try:
+                    TUN.save_token(token)
+                except OSError:
+                    pass        # ngrok has it; our copy is the belt, not the braces
+                # Used for this run too, so "Save" and "it works now" are the
+                # same moment rather than one needing a restart.
+                globals()["NGROK_TOKEN"] = token
+                # The reply says *that* it worked, never what was saved.
+                self._json({"ok": True, **TUN.status(token)})
+            elif path == "/api/tunnel/forget":
+                globals()["NGROK_TOKEN"] = ""
+                had = TUN.forget_token()
+                self._json({"ok": True, "had": had, **TUN.status("")})
+            else:
+                # Opening one for real is the only honest test: a token can be
+                # well-formed and still be rejected. The tunnel is kept rather
+                # than thrown away, because the next thing this player does is
+                # host a game with it.
+                try:
+                    url = ensure_public()
+                except TUN.TunnelError as exc:
+                    self._json({"error": str(exc)}, 503)
+                    return
+                self._json({"ok": True, "url": url, **TUN.status(NGROK_TOKEN)})
         elif path == "/api/peer/publish":
             # Host: put our offer somewhere the code can point at, and hand
             # back the code. Opening the tunnel is what can actually fail here,
@@ -3583,6 +3695,18 @@ def main() -> None:
                         help="also put a room on a public https address, via a "
                              "tunnel client, so someone off this network can "
                              "join (needs cloudflared or ngrok)")
+    # ngrok will not open a tunnel for an account it cannot identify, so a
+    # machine that uses ngrok rather than cloudflared needs a token from
+    # somewhere. Passing one here is for a one-off or a script; `--save-…` is
+    # for a machine you use, and after that neither flag is needed again.
+    parser.add_argument("--ngrok-authtoken", default="", metavar="TOKEN",
+                        help="use this ngrok authtoken (also read from "
+                             f"${TUN.AUTHTOKEN_ENV}, or from --save-ngrok-authtoken)")
+    parser.add_argument("--save-ngrok-authtoken", action="store_true",
+                        help="remember --ngrok-authtoken for future runs, in "
+                             "your home directory and readable only by you")
+    parser.add_argument("--forget-ngrok-authtoken", action="store_true",
+                        help="delete the remembered ngrok authtoken and exit")
     parser.add_argument("--no-browser", action="store_true",
                         help="serve, but do not open anything")
     # The game is a desktop game as far as anyone playing it is concerned, so a
@@ -3594,6 +3718,25 @@ def main() -> None:
     parser.add_argument("--browser", action="store_true",
                         help="open a browser tab instead of a window")
     args = parser.parse_args()
+
+    global NGROK_TOKEN
+    if args.forget_ngrok_authtoken and args.save_ngrok_authtoken:
+        # Both were asked for and only one can happen; doing the destructive
+        # one silently and dropping the other is the wrong way to guess.
+        parser.error("--save-ngrok-authtoken and --forget-ngrok-authtoken are "
+                     "opposites; pick one")
+    if args.forget_ngrok_authtoken:
+        print("forgot the saved ngrok authtoken" if TUN.forget_token()
+              else "there was no saved ngrok authtoken")
+        raise SystemExit(0)
+    NGROK_TOKEN = args.ngrok_authtoken.strip()
+    if args.save_ngrok_authtoken:
+        if not NGROK_TOKEN:
+            parser.error("--save-ngrok-authtoken needs --ngrok-authtoken TOKEN")
+        # The path, never the token: this line ends up in terminal scrollback,
+        # in screenshots and in pasted bug reports.
+        print(f"saved the ngrok authtoken to {TUN.save_token(NGROK_TOKEN)}")
+
     if args.window and args.browser:
         parser.error("--window and --browser are opposites; pick one")
     if args.lan and args.host == "127.0.0.1":
@@ -3626,7 +3769,8 @@ def main() -> None:
         PublicHandler.app = Handler.app
         public = Viewer(("127.0.0.1", 0), PublicHandler)
         try:
-            link = TUN.open_tunnel(public.server_address[1])
+            link = TUN.open_tunnel(public.server_address[1],
+                                   authtoken=NGROK_TOKEN)
         except TUN.TunnelError as exc:
             public.server_close()
             print(f"could not open a tunnel: {exc}")

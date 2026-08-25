@@ -1483,3 +1483,39 @@ body.online #settings-watch { display: none; }
   font-size: 12px; line-height: 1.5;
 }
 .stale.hidden { display: none; }
+
+/* Setting up online play, from the settings screen rather than a command line.
+ * See TunnelUI in viewer/netplay.js. */
+#tunnel-box { margin-bottom: 4px; }
+#tunnel-box .tun-what {
+  margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: var(--dim);
+  /* The "no client installed" case is two shell commands, and collapsing them
+   * onto one line makes them unreadable as commands. */
+  white-space: pre-line;
+}
+#tunnel-box input[type="password"] {
+  width: 100%; background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px;
+}
+#tunnel-box .tun-note { margin: 6px 0 10px; font-size: 11px; line-height: 1.5; color: var(--dim); }
+#tunnel-box .tun-link { color: var(--accent2); word-break: break-all; }
+#tunnel-box .tun-row { display: flex; gap: 8px; align-items: center; }
+#tunnel-box .tun-status { margin: 8px 0 0; font-size: 11px; color: var(--dim); min-height: 14px; }
+#tunnel-box .tun-status.bad { color: var(--bad); }
+#peer-fix.peer-step .peer-hint { margin-bottom: 10px; }
+#tunnel-box .tun-alt { color: var(--accent2); font-size: 11px; text-decoration: underline; }
+#tunnel-box .tun-steps { margin: 0 0 8px; padding-left: 18px; font-size: 11px; color: var(--dim); line-height: 1.7; }
+#tunnel-box code {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+}
+/* The installer's own output. Shown rather than summarised: an install that
+ * fails says why, and a spinner that ends in "that did not work" leaves
+ * nobody anything to act on. */
+#tunnel-box .tun-log {
+  max-height: 130px; overflow: auto; margin: 8px 0 0; padding: 8px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 10px;
+  line-height: 1.45; color: var(--dim); white-space: pre-wrap; word-break: break-all;
+}
