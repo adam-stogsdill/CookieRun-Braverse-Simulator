@@ -26,7 +26,7 @@ from .cost import Cost, plan_payment
 from .effects import (Ctx, Trigger, ask_many, cannot_attack, effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
                       may_play, modified_attack_cost)
-from .enums import CardType, Color, Marker, Phase
+from .enums import CardType, Color, Keyword, Marker, Phase
 from .state import (CardInstance, Cookie, GameState, PlayerState,
                     card_label)
 
@@ -307,6 +307,7 @@ class Game:
             # here and only takes effect when that turn actually begins.
             cookie.attack_bonus = cookie.attack_bonus_next_turn
             cookie.attack_bonus_next_turn = 0
+            cookie.hp_reduced_this_turn = False
             cookie.used_markers.clear()
         player.supported_this_turn = False
         player.activated_this_turn.clear()
@@ -317,6 +318,7 @@ class Game:
         player.played_from_trash_this_turn.clear()
         player.support_trashed_this_turn = 0
         player.cookies_to_deck_bottom_this_turn = 0
+        player.cookies_to_deck_this_turn = 0
         player.hp_gain_locked = False
         state.opponent.blockers_disabled = False
         player.blockers_disabled = False
@@ -328,6 +330,9 @@ class Game:
         for side in state.players:
             side.cookies_fainted_this_turn = 0
             side.break_additions_this_turn = 0
+            side.arena_break_additions_this_turn = 0
+            for cookie in side.battle:
+                cookie.hp_reduced_this_turn = False
         for opp_cookie in state.opponent.battle:
             opp_cookie.attack_bonus = opp_cookie.attack_bonus_next_turn
             opp_cookie.attack_bonus_next_turn = 0
@@ -808,7 +813,8 @@ class Game:
             # An item that placed itself somewhere — "place this card in your
             # support area as rested" — has already chosen its zone. Filing it
             # in the trash as well would leave one CardInstance in two zones.
-            if self.state.find_card(card.uid) is None:
+            if (self.state.find_card(card.uid) is None
+                    and not self.state.is_attached(card.uid)):
                 player.trash.append(card)
 
     def _do_activate(self, action: A.ActivateSkill) -> None:
@@ -996,6 +1002,7 @@ class Game:
             card.face_up = True
             owner.trash.append(card)
             dealt += 1
+            cookie.hp_reduced_this_turn = True
             defn = self.db[card.card_id]
             # Recorded *before* the FLIP runs, so the viewer can turn the card
             # over and only then play whatever it did. A diff of the HP pile
@@ -1164,6 +1171,38 @@ class Game:
             f"{card_label(self.db[cookie.card.card_id])} moves to the support area as {state}")
         self._check_battle_area(owner)
 
+    def _count_break_addition(self, owner: PlayerState, card: CardInstance) -> None:
+        """One card arriving in a break area, for the "during this turn" asks.
+
+        Two counters rather than one: cards ask about additions in general and
+        about 【Arena】 additions in particular, and the keyword can only be
+        read off the card as it arrives — the break area itself is a pile of
+        cards with no memory of which turn each one landed on.
+        """
+        owner.break_additions_this_turn += 1
+        if Keyword.ARENA in self.db[card.card_id].keywords:
+            owner.arena_break_additions_this_turn += 1
+
+    def cookie_to_deck(self, cookie: Cookie, *, bottom: bool = True) -> None:
+        """A Cookie leaving the battle area for its owner's deck.
+
+        The one place that happens, because two cards count it — BS9-088 asks
+        only about the bottom, BS9-083 about either end — and a second copy of
+        the move would be a counter that silently stops counting.
+        """
+        owner = self.state.players[cookie.owner]
+        if cookie not in owner.battle:
+            return
+        owner.battle.remove(cookie)
+        if bottom:
+            owner.deck.append(cookie.card)
+            owner.cookies_to_deck_bottom_this_turn += 1
+        else:
+            owner.deck.insert(0, cookie.card)
+        owner.cookies_to_deck_this_turn += 1
+        owner.trash.extend(cookie.spent_cards)
+        self._check_battle_area(owner)
+
     def faint(self, cookie: Cookie) -> None:
         """Public entry point for effects that destroy a Cookie directly."""
         self._faint(cookie)
@@ -1207,7 +1246,7 @@ class Game:
         owner.faint_log.append((self.state.turn_counter,
                                 cookie.defn(self.db).color,
                                 cookie.level(self.db)))
-        owner.break_additions_this_turn += 1
+        self._count_break_addition(owner, cookie.card)
         owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{card_label(self.db[cookie.card.card_id])} faints")
         self._check_win()
@@ -1263,7 +1302,7 @@ class Game:
             ) or options[0]
             player.trash.remove(card)
             player.break_area.append(card)
-            player.break_additions_this_turn += 1
+            self._count_break_addition(player, card)
             self.state.record(f"refresh — {card_label(self.db[card.card_id])} to break area")
         self._check_win()
         if self.state.over:
@@ -1315,12 +1354,35 @@ class Game:
                            player: PlayerState) -> None:
         defn = cookie.defn(self.db)
         fn = get_effect(defn.id, trigger)
-        if fn is None:
-            return
-        with self._effect_source(defn.name, source_kind(self.db, cookie.card, trigger),
-                                 label=card_label(defn)):
-            fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
-                         trigger=trigger.value))
+        if fn is not None:
+            with self._effect_source(defn.name,
+                                     source_kind(self.db, cookie.card, trigger),
+                                     label=card_label(defn)):
+                fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
+                             trigger=trigger.value))
+        self._run_equipment_effects(cookie, trigger, player)
+
+    def _run_equipment_effects(self, cookie: Cookie, trigger: Trigger,
+                               player: PlayerState) -> None:
+        """Triggers a Cookie has only because of what is 【Equip】ped to it.
+
+        The Soul Jams print a rider on their host — "when that Cookie attacks,
+        draw 1 card" — which belongs to the jam, not to the Cookie: strip the
+        jam or move the Cookie and the rider goes with it. So it is registered
+        against the *jam's* card id and looked up here, with the host as
+        `source_cookie` and the jam as `source_card`, which is what the rider's
+        own text means by "that Cookie" and "this card".
+        """
+        for card in list(cookie.equipment):
+            fn = get_effect(self.db[card.card_id].id, trigger)
+            if fn is None:
+                continue
+            defn = self.db[card.card_id]
+            with self._effect_source(defn.name,
+                                     source_kind(self.db, card, trigger),
+                                     label=card_label(defn)):
+                fn(self._ctx(player, source_cookie=cookie, source_card=card,
+                             trigger=trigger.value))
 
     def _run_effect(self, card: CardInstance, trigger: Trigger,
                     player: PlayerState, *, flip_host: Cookie | None = None) -> None:

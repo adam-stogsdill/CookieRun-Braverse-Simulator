@@ -10,7 +10,7 @@ import pytest
 from braverse import STARTER_DECKS, Game, HeuristicAgent, SeatedAgent, default_db
 from braverse import actions as A
 from braverse.compiler import (CompileError, compile_card, compile_text,
-                               split_clauses)
+                               parse_card_filter, split_clauses)
 from braverse.cost import Cost
 from braverse.effects import Ctx, Trigger, get_effect
 from braverse.enums import Color
@@ -343,6 +343,25 @@ def test_trashing_a_cookie_grants_no_break_area_level(ctx):
     assert ctx.opp.break_level_total(ctx.db) == 0
 
 
+def test_self_trash_cost_does_not_faint_the_cookie(ctx):
+    """"<Place this Cookie in the trash.>" is a cost, not a faint.
+
+    Crunchy Chip Cookie (BS8-119) pays itself to play a [Dark Cacao Cookie]
+    from the trash; if that reached the break area the opponent would bank a
+    Level for a card they never beat.
+    """
+    from braverse.compiler import parse_cost
+
+    mine = ctx.me.battle[0]
+    card = mine.card
+    for op in parse_cost("<Place this Cookie in the trash.>"):
+        assert op.run(ctx, {})
+
+    assert mine not in ctx.me.battle
+    assert card in ctx.me.trash
+    assert not ctx.me.break_area, "a trashed Cookie must not reach the break area"
+
+
 def test_fainting_the_same_cookie_does_grant_level(ctx):
     """Contrast with the test above: damage-to-zero goes to the break area."""
     victim = ctx.opp.battle[0]
@@ -520,9 +539,9 @@ KNOWN_UNCODED = {
     "ST1-018", "ST2-016", "ST2-019", "ST2-021",
     "ST3-021", "ST3-022",
     "ST4-016", "ST4-019", "ST5-022",
-    "BS1-023", "BS1-024", "BS1-025", "BS1-026", "BS1-048", "BS1-050", "BS1-078",
-    "BS2-014", "BS2-020", "BS2-021", "BS2-048", "BS2-049", "BS2-051",
-    "BS6-019", "BS6-021", "BS6-107",
+    "BS1-024", "BS1-025", "BS1-050", "BS1-078",
+    "BS2-014", "BS2-020", "BS2-021", "BS2-049", "BS2-051",
+    "BS6-019", "BS6-021",
     "BS7-020", "BS7-063", "BS7-065", "BS7-107", "BS7-108",
 }
 
@@ -1093,12 +1112,16 @@ def test_modal_item_offers_both_branches(db):
 
 
 def test_equip_item_stays_unimplemented(db):
-    """BS3-043's second sentence is an 【Equip】, which the engine does not
-    model. Sweeping without it would silently misreport the card."""
+    """The 【Equip】 cards that are written are written by hand, one at a time.
+
+    The five Soul Jams have their attachments and their riders; BS5-111 has
+    neither, and its 【Dragon】 keyword and conditional aura are still nothing
+    the compiler can read. Sweeping it in would silently misreport the card.
+    """
     from braverse.effects import is_implemented
 
-    assert not is_implemented("BS3-043")
-    assert db["BS3-043"].play_cost == Cost.parse("{Y}{Y}{Y}")
+    assert not is_implemented("BS5-111")
+    assert db["BS5-111"].play_cost == Cost.parse("{N}")
 
 
 def test_trash_to_support_as_active_arrives_active(ctx, db):
@@ -1185,3 +1208,562 @@ def test_when_your_turn_ends_untap_is_banked_against_its_card(db):
 
     assert me.support[0].rested, "untapped on the spot instead of at end of turn"
     assert me.end_turn_untaps == [("BS5-060", 3)]
+
+
+# --- "During this turn, if ..." event guards --------------------------------
+def test_a_mid_sentence_timing_phrase_does_not_end_the_guard(ctx):
+    """"If A and, during this turn, B, do X." — the comma after "and" used to
+    close the guard, and the rest of the condition was read as the verb."""
+    program = compile_text("If this Cookie's remaining HP is 4 or less and, "
+                           "during this turn, an Item card was activated, "
+                           "this Cookie gains +1 HP.")
+    mine = ctx.me.battle[0]
+    del mine.hp_cards[4:]
+    before = mine.remaining_hp
+
+    program(ctx)
+    assert mine.remaining_hp == before, "no item played: the guard must hold"
+
+    ctx.me.items_played_this_turn = 1
+    program(ctx)
+    assert mine.remaining_hp == before + 1
+
+
+def test_or_if_is_a_choice_not_a_second_requirement(ctx):
+    """Sour Belt Cookie (P-110) opens on either half, not on both."""
+    program = compile_text("If there are 4 【Arena】 Cookies or more in your "
+                           "break area or if, during this turn, an 【Arena】 "
+                           "Cookie has been placed in your break area, during "
+                           "this turn, this Cookie gains +2 attack damage.")
+    mine = ctx.source_cookie
+    base = mine.attack_damage(ctx.db)
+
+    program(ctx)
+    assert mine.attack_damage(ctx.db) == base, "neither half is true yet"
+
+    ctx.me.arena_break_additions_this_turn = 1     # the second half alone
+    program(ctx)
+    assert mine.attack_damage(ctx.db) == base + 2
+
+
+def test_hp_reduced_this_turn_is_set_by_damage_and_cleared_by_the_turn(db):
+    """White Peach Cookie (P-093) asks whether its own HP came off this turn."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=21)
+    game.setup()
+    _plain_hp(game, db)
+    mine = game.state.players[0].battle[0]
+    assert not mine.hp_reduced_this_turn
+
+    game.deal_damage(mine, 1, source_player=1, kind="effect")
+    assert mine.hp_reduced_this_turn
+
+    game._begin_turn()
+    assert not mine.hp_reduced_this_turn, "the flag is per turn, not per game"
+
+
+def test_a_cookie_sent_to_either_end_of_the_deck_is_counted(db):
+    """BS9-083 asks about "the top or bottom", BS9-088 only about the bottom,
+    so `cookie_to_deck` keeps the two counts apart."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=22)
+    game.setup()
+    me = game.state.players[0]
+
+    game.cookie_to_deck(me.battle[0], bottom=False)
+    assert me.cookies_to_deck_this_turn == 1
+    assert me.cookies_to_deck_bottom_this_turn == 0
+
+    game.cookie_to_deck(me.battle[0], bottom=True)
+    assert me.cookies_to_deck_this_turn == 2
+    assert me.cookies_to_deck_bottom_this_turn == 1
+
+
+def test_arena_break_additions_are_counted_apart_from_the_rest(db):
+    """P-109/P-110 ask about 【Arena】 Cookies arriving, not any card."""
+    from braverse.enums import Keyword
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=23)
+    game.setup()
+    _plain_hp(game, db)
+    me = game.state.players[0]
+    victim = me.battle[0]
+    is_arena = Keyword.ARENA in victim.defn(db).keywords
+
+    game.faint(victim)
+
+    assert me.break_additions_this_turn == 1
+    assert me.arena_break_additions_this_turn == (1 if is_arena else 0)
+
+
+# --- "Select 1 of the following." ------------------------------------------
+class _PickBranch:
+    """A controller that always takes the branch whose label contains a word."""
+
+    def __init__(self, word):
+        self.word = word
+        self.offered: list = []
+
+    def choose_action(self, state, options):
+        return options[0] if options else None
+
+    def choose(self, state, prompt, options, *, optional):
+        if options and all(isinstance(o, str) for o in options):
+            self.offered = list(options)
+            for option in options:
+                if self.word in option:
+                    return option
+        return options[0] if options else None
+
+
+def test_a_modal_card_runs_only_the_branch_that_was_chosen(ctx):
+    program = compile_text(
+        "Select 1 of the following.\n"
+        "・Draw up to 2 cards from your deck.\n"
+        "・Place 1 random card from your opponent's hand into the trash.")
+    controller = _PickBranch("Draw")
+    _seat(ctx, controller)
+    hand_before = len(ctx.me.hand)
+    their_hand = len(ctx.opp.hand)
+
+    program(ctx)
+
+    assert len(controller.offered) == 2, "both options should be offered"
+    assert len(ctx.me.hand) == hand_before + 2
+    assert len(ctx.opp.hand) == their_hand, "the other branch must not run"
+
+
+def test_a_modal_branch_can_span_more_than_one_sentence(ctx):
+    """First Watcher's Bow (BS3-116): "Select ... Place 1 card from the top of
+    that Cookie's HP" is one option made of two sentences, sharing a target."""
+    program = compile_text(
+        "Select 1 of the following.\n"
+        "・Select up to 1 of your opponent's Cookies. Place 1 card from the "
+        "top of that Cookie's HP in the trash.\n"
+        "・Place 1 random card from your opponent's hand into the trash.")
+    _seat(ctx, _PickBranch("top of that"))
+    victim = ctx.opp.battle[0]
+    before = victim.remaining_hp
+
+    program(ctx)
+
+    assert victim.remaining_hp == before - 1
+
+
+def test_a_modal_does_not_offer_a_branch_that_cannot_do_anything(ctx):
+    """A line the board makes impossible is not a choice, it is a way to throw
+    the card away by mistake."""
+    program = compile_text(
+        "Select 1 of the following.\n"
+        "・Draw up to 1 card from your deck.\n"
+        "・Place 1 random card from your opponent's hand into the trash.")
+    ctx.opp.hand.clear()                        # nothing to discard at random
+    controller = _PickBranch("Draw")
+    _seat(ctx, controller)
+    before = len(ctx.me.hand)
+
+    program(ctx)
+
+    # One live branch is not a decision, so the question is never put — and
+    # `offered` staying empty is what proves the dead one was filtered out.
+    assert controller.offered == []
+    assert len(ctx.me.hand) == before + 1
+
+
+def test_a_modal_needs_at_least_two_options(ctx):
+    with pytest.raises(CompileError):
+        compile_text("Select 1 of the following.\n・Draw up to 1 card from "
+                     "your deck.")
+
+
+# --- negation and stripped markers -----------------------------------------
+def test_there_are_no_x_is_not_read_as_there_is_an_x(ctx):
+    """The negation used to be dropped, so the guard meant its own opposite."""
+    program = compile_text("If there are no Cookies in your opponent's battle "
+                           "area, draw up to 1 card from your deck.")
+    before = len(ctx.me.hand)
+
+    program(ctx)
+    assert len(ctx.me.hand) == before, "their battle area is not empty"
+
+    ctx.opp.battle.clear()
+    program(ctx)
+    assert len(ctx.me.hand) == before + 1
+
+
+def test_a_filter_that_lost_its_marker_is_refused(db):
+    """"Cookies that have 【Blocker】" arrives here as "Cookies that have" —
+    the property is gone and an empty filter would match every Cookie, so the
+    card is refused rather than read as something it does not say."""
+    from braverse.effects import is_implemented
+
+    with pytest.raises(CompileError):
+        parse_card_filter("Cookie that has")
+    # BS11-105's attack rider gates on a 【Special Play】 Cookie being present;
+    # without the marker it read as "any Cookie", which is always true while
+    # you are attacking.
+    assert not is_implemented("BS11-105")
+
+
+# --- "for each"/"for every" scaling ----------------------------------------
+def _bank_break(ctx, card_id, n):
+    """Put N copies of a card in my break area, where the counts are read."""
+    for _ in range(n):
+        ctx.me.break_area.append(CardInstance.make(card_id, ctx.me.index))
+
+
+def test_attack_buff_scales_with_the_break_area(ctx):
+    """Golden City's Control Chamber (BS3-048): +1 per {Y} LV.3 in the break."""
+    program = compile_text("Select up to 1 of your Cookies. During this turn, "
+                           "that Cookie gains +1 attack damage for each {Y} "
+                           "LV.3 Cookie in your break area.")
+    mine = ctx.me.battle[0]
+    base = mine.attack_damage(ctx.db)
+    _bank_break(ctx, "ST7-010", 3)             # {Y} LV.3 Cookies
+
+    program(ctx)
+
+    assert mine.attack_damage(ctx.db) == base + 3
+
+
+def test_attack_debuff_scales_the_same_way(ctx):
+    """Seasick Canoeing (BS5-043) is the same op with the printed sign."""
+    program = compile_text("Select up to 1 of your opponent's Cookies. During "
+                           "this turn, that Cookie deals -1 attack damage for "
+                           "each LV.3 Cookie in your break area.")
+    theirs = ctx.opp.battle[0]
+    base = theirs.attack_damage(ctx.db)
+    _bank_break(ctx, "ST7-010", 2)
+
+    program(ctx)
+
+    assert theirs.attack_damage(ctx.db) == max(0, base - 2)
+
+
+def test_for_every_two_pays_once_per_pair(ctx):
+    """Jelly Pom-Poms (BS1-048): "for every 2" is a divisor, not a synonym.
+
+    Three Cookies in the break area are worth one bonus, not three — the odd
+    one over buys nothing until it has a partner.
+    """
+    text = ("Select up to 1 of your Cookies. During this turn, that Cookie "
+            "gains +1 attack damage for every 2 {Y} LV.1 Cookies in your "
+            "break area.")
+    mine = ctx.me.battle[0]
+    base = mine.attack_damage(ctx.db)
+
+    _bank_break(ctx, "ST7-012", 3)             # {Y} LV.1 Cookies
+    compile_text(text)(ctx)
+    assert mine.attack_damage(ctx.db) == base + 1
+
+    _bank_break(ctx, "ST7-012", 1)             # four now: a second pair
+    mine.attack_bonus = 0
+    compile_text(text)(ctx)
+    assert mine.attack_damage(ctx.db) == base + 2
+
+
+def test_gain_hp_scaling_can_target_a_selected_cookie(ctx):
+    """Millennial Twig (BS4-041) says "that Cookie", not "this Cookie"."""
+    program = compile_text("Select up to 1 of your Cookies. That Cookie gains "
+                           "+1 HP for each {Y} LV.3 Cookie in your break area.")
+    mine = ctx.me.battle[0]
+    before = mine.remaining_hp
+    _bank_break(ctx, "ST7-010", 2)
+
+    program(ctx)
+
+    assert mine.remaining_hp == before + 2
+
+
+def test_draw_scaling_counts_either_battle_area(ctx):
+    """Old Vanilla Orchid Locket (BS3-092) counts the whole table."""
+    program = compile_text("Draw up to 1 card from your deck for each LV.2 "
+                           "Cookie in either battle area.")
+    # One on each side, so a rule that read only one of them would be caught.
+    ctx.game._deploy_cookie(ctx.me, CardInstance.make("ST9-007", 0),
+                            run_on_play=False)
+    ctx.game._deploy_cookie(ctx.opp, CardInstance.make("ST9-007", 1),
+                            run_on_play=False)
+    expected = sum(1 for side in ctx.state.players for c in side.battle
+                   if c.level(ctx.db) == 2)
+    assert expected == 2
+    before = len(ctx.me.hand)
+
+    program(ctx)
+
+    assert len(ctx.me.hand) == before + expected
+
+
+def test_draw_scaling_counts_cookies_that_fainted_this_turn(ctx):
+    """Jellied Jellyfish Potion (BS2-048) counts an event, not a pile."""
+    program = compile_text("Draw up to 1 card for each of your opponent's "
+                           "Cookies that fainted during this turn.")
+    before = len(ctx.me.hand)
+    program(ctx)
+    assert len(ctx.me.hand) == before, "nothing has fainted yet"
+
+    ctx.opp.cookies_fainted_this_turn = 2
+    program(ctx)
+    assert len(ctx.me.hand) == before + 2
+
+
+def test_either_is_refused_for_zones_that_do_not_print_it(ctx):
+    """"either trash" is nothing the pool prints; guessing a side of it would
+    misreport the card, so the clause is refused instead."""
+    with pytest.raises(CompileError):
+        compile_text("Draw up to 1 card from your deck for each LV.2 Cookie "
+                     "in either trash.")
+
+
+# --- a Cookie's own HP as a cost -------------------------------------------
+def test_hp_drain_cost_takes_the_cookie_down_to_its_floor(ctx):
+    """Spicy Power Juice (BS1-023): the price is however much HP is above 1.
+
+    A drain, not a fixed number of cards — the same card is cheap on a nearly
+    dead Cookie and expensive on a fresh one.
+    """
+    program = compile_text(
+        "<Place 1 of your Cookies' HP cards in the trash until the Cookie's HP "
+        "reaches 1.> Select up to 1 of your Cookies. During this turn, that "
+        "Cookie gains +2 attack damage.")
+    ctx.trigger = Trigger.ACTIVATE.value
+    mine = ctx.me.battle[0]
+    assert mine.remaining_hp > 1, "need something to drain"
+    paid = mine.remaining_hp - 1
+    trash_before = len(ctx.me.trash)
+
+    program(ctx)
+
+    assert mine.remaining_hp == 1
+    assert len(ctx.me.trash) == trash_before + paid
+    assert mine in ctx.me.battle, "a drain to 1 must never faint the Cookie"
+
+
+def test_hp_drain_cost_charges_nothing_at_the_floor(ctx):
+    """A Cookie already at 1 pays nothing, which is what the text says."""
+    program = compile_text(
+        "<Place 1 of your Cookies' HP cards in the trash until the Cookie's HP "
+        "reaches 1.> Select up to 1 of your Cookies. During this turn, that "
+        "Cookie gains +2 attack damage.")
+    ctx.trigger = Trigger.ACTIVATE.value
+    mine = ctx.me.battle[0]
+    del mine.hp_cards[1:]
+    trash_before = len(ctx.me.trash)
+
+    program(ctx)
+
+    assert mine.remaining_hp == 1
+    assert len(ctx.me.trash) == trash_before
+    assert mine in ctx.me.battle
+
+
+def test_flat_hp_cost_charges_exactly_one_card(ctx):
+    """Sniffly Cocoa Palm (BS5-042) prices itself at a single HP card, and the
+    drain's regex must not swallow this shorter sentence."""
+    program = compile_text(
+        "<Place 1 of your Cookies' HP cards in the trash.> Draw up to 2 cards "
+        "from your deck.")
+    ctx.trigger = Trigger.ACTIVATE.value
+    mine = ctx.me.battle[0]
+    before = mine.remaining_hp
+    assert before > 2
+
+    program(ctx)
+
+    assert mine.remaining_hp == before - 1
+
+
+def test_hp_to_hand_cost_returns_the_card_rather_than_trashing_it(ctx):
+    """Squishy Jelly Watch (BS6-019): the HP card comes back to hand, so the
+    cost is a tempo loss rather than a card loss."""
+    from braverse.compiler import parse_cost
+
+    mine = ctx.me.battle[0]
+    top = mine.hp_cards[-1]
+    hand_before = len(ctx.me.hand)
+    trash_before = len(ctx.me.trash)
+
+    env = {}
+    for op in parse_cost("<Return 1 card from the top of your Cookie's HP to "
+                         "your hand.>"):
+        assert op.run(ctx, env)
+
+    assert top in ctx.me.hand
+    assert len(ctx.me.hand) == hand_before + 1
+    assert len(ctx.me.trash) == trash_before
+
+
+# --- the Soul Jams (BS3-019/043/066/091/115) ---------------------------------
+def _jam_table(db, host_id, seed=17):
+    """A game with one named host of P0's and two LV.2 Cookies of P1's."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=seed)
+    game.setup()
+    _plain_hp(game, db)
+    me, opp = game.state.players
+    me.battle.clear()
+    host = game._deploy_cookie(me, CardInstance.make(host_id, 0),
+                               run_on_play=False)
+    opp.battle.clear()
+    for _ in range(2):
+        game._deploy_cookie(opp, CardInstance.make("BS9-097", 1),
+                            run_on_play=False)
+    return game, me, opp, host
+
+
+def _play_jam(game, me, card_id):
+    """Run one item's body the way `_do_play_support_card` would."""
+    card = CardInstance.make(card_id, me.index)
+    game._run_effect(card, Trigger.ITEM, me)
+    if (game.state.find_card(card.uid) is None
+            and not game.state.is_attached(card.uid)):
+        me.trash.append(card)
+    return card
+
+
+# --- BS3-115 Soul Jam: Light of Resolution ----------------------------------
+def test_soul_jam_resolution_trashes_hp_and_equips(db):
+    game, me, opp, cacao = _jam_table(db, "BS3-100")
+    victims = [c for c in opp.battle if c.level(db) <= 2][:2]
+    assert len(victims) >= 1, "need a LV.2 or lower Cookie to aim at"
+    before = {c.uid: c.remaining_hp for c in victims}
+
+    card = _play_jam(game, me, "BS3-115")
+
+    for victim in victims:
+        assert victim.remaining_hp == before[victim.uid] - 1
+    assert card in cacao.equipment, "the jam should ride Dark Cacao Cookie"
+    assert card not in me.trash, "an equipped jam must not also sit in the trash"
+
+
+def test_soul_jam_resolution_shields_its_host_from_selection(db):
+    from braverse.effects import Ctx
+
+    game, me, opp, cacao = _jam_table(db, "BS3-100")
+    theirs = Ctx(game=game, state=game.state, db=db, me=opp, opp=me,
+                 source_cookie=opp.battle[0], source_card=opp.battle[0].card)
+    assert cacao in theirs.enemy_cookies(), "unprotected before the jam lands"
+
+    _play_jam(game, me, "BS3-115")
+
+    assert cacao not in theirs.enemy_cookies(), \
+        "an equipped Cookie cannot be selected by the opponent's effects"
+    theirs.trash_cookie(cacao)
+    assert cacao in me.battle, "an equipped Cookie cannot be trashed"
+
+
+def test_soul_jam_resolution_does_not_shield_from_its_own_controller(db):
+    """"cannot be selected by *your opponent's* effects" — mine still reach it."""
+    from braverse.effects import Ctx
+
+    game, me, opp, cacao = _jam_table(db, "BS3-100")
+    _play_jam(game, me, "BS3-115")
+    mine = Ctx(game=game, state=game.state, db=db, me=me, opp=opp,
+               source_cookie=cacao, source_card=cacao.card)
+
+    assert cacao in mine.own_cookies()
+    mine.trash_cookie(cacao)
+    assert cacao not in me.battle
+
+
+def test_soul_jam_passion_damages_then_equips_for_attack(db):
+    game, me, opp, holly = _jam_table(db, "BS3-017")     # Hollyberry Cookie
+    victim = opp.battle[0]
+    before = victim.remaining_hp
+    printed = holly.attack_damage(db)
+
+    card = _play_jam(game, me, "BS3-019")
+
+    assert victim.remaining_hp == before - 2
+    assert card in holly.equipment
+    game._run_cookie_effect(holly, Trigger.ATTACK_START, me)
+    assert holly.attack_damage(db) == printed + 1
+
+
+def test_soul_jam_passion_aura_leaves_with_the_jam(db):
+    """The rider belongs to the jam, so stripping it takes the +1 away."""
+    game, me, opp, holly = _jam_table(db, "BS3-017")
+    printed = holly.attack_damage(db)
+    _play_jam(game, me, "BS3-019")
+    holly.equipment.clear()
+
+    game._run_cookie_effect(holly, Trigger.ATTACK_START, me)
+    assert holly.attack_damage(db) == printed
+
+
+def test_soul_jam_abundance_sweeps_then_heals_its_host(db):
+    game, me, opp, cheese = _jam_table(db, "BS3-025")    # Golden Cheese Cookie
+    before = {c.uid: c.remaining_hp for c in opp.battle}
+    cheese.hp_cards.pop()                                # room to be healed
+    hurt = cheese.remaining_hp
+
+    card = _play_jam(game, me, "BS3-043")
+
+    for cookie in opp.battle:
+        assert cookie.remaining_hp == before[cookie.uid] - 1
+    assert card in cheese.equipment
+    assert cheese.remaining_hp == hurt + 2
+
+
+def test_soul_jam_abundance_heals_nobody_when_it_does_not_equip(db):
+    """"That Cookie gains +2 HP" is the equip's rider, not the sweep's."""
+    game, me, opp, other = _jam_table(db, "BS3-017")     # no Golden Cheese
+    other.hp_cards.pop()
+    hurt = other.remaining_hp
+
+    card = _play_jam(game, me, "BS3-043")
+
+    assert card in me.trash
+    assert other.remaining_hp == hurt
+
+
+def test_soul_jam_freedom_cycles_support_and_refunds_on_attack(db):
+    game, me, opp, lily = _jam_table(db, "BS3-055")      # White Lily Cookie
+    while len(me.support) < 3:                           # something to give back
+        me.support.append(me.deck.pop(0))
+    support_before = len(me.support)
+    hand_before = len(me.hand)
+
+    card = _play_jam(game, me, "BS3-066")
+
+    assert len(me.support) == support_before, "one out, one in"
+    assert len(me.hand) == hand_before + 1
+    assert not me.support[-1].rested, "the new support card arrives active"
+    assert card in lily.equipment
+
+    for support in me.support:
+        support.rested = True
+    game._run_cookie_effect(lily, Trigger.ATTACK_START, me)
+    assert len(me.active_support()) == 1
+
+
+def test_soul_jam_truth_digs_and_draws_on_attack(db):
+    game, me, opp, vanilla = _jam_table(db, "BS3-088")   # Pure Vanilla Cookie
+    hand_before = len(me.hand)
+    deck_before = len(me.deck)
+    top_three = me.deck[:3]
+
+    card = _play_jam(game, me, "BS3-091")
+
+    assert len(me.hand) == hand_before + 2
+    assert len(me.deck) == deck_before - 2
+    assert me.deck[0] in top_three, "the leftover goes back on top, not the bottom"
+    assert card in vanilla.equipment
+
+    hand = len(me.hand)
+    game._run_cookie_effect(vanilla, Trigger.ATTACK_START, me)
+    assert len(me.hand) == hand + 1
+
+
+def test_a_soul_jam_that_does_not_equip_is_spent(db):
+    """With no Cookie of the right name, the jam is an ordinary item."""
+    game, me, opp, other = _jam_table(db, "BS3-017")     # not Pure Vanilla
+    card = _play_jam(game, me, "BS3-091")
+
+    assert card in me.trash
+    assert not any(c.equipment for c in me.battle)

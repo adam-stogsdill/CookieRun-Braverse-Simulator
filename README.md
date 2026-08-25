@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.48
+Current Version: 0.2.51
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 

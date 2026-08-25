@@ -146,6 +146,23 @@ def cannot_attack(db, cookie) -> bool:
 def is_move_protected(db, owner, cookie) -> bool:
     return any(rule(db, owner, cookie) for rule in MOVEMENT_PROTECTORS)
 
+# "this Cookie cannot be selected by your opponent's effects" and "this Cookie
+# cannot be trashed". Two registries rather than one, because cards print the
+# two sentences separately and a Cookie can have either without the other; both
+# take (db, owner, cookie) like MOVEMENT_PROTECTORS and read the owner's zones.
+# They are consulted only when the *opponent* is acting: a Cookie's own
+# controller may still pick it up and may still trash it.
+SELECTION_PROTECTORS: list = []
+TRASH_PROTECTORS: list = []
+
+
+def is_select_protected(db, owner, cookie) -> bool:
+    return any(rule(db, owner, cookie) for rule in SELECTION_PROTECTORS)
+
+
+def is_trash_protected(db, owner, cookie) -> bool:
+    return any(rule(db, owner, cookie) for rule in TRASH_PROTECTORS)
+
 
 def forced_attack_target(db, defender):
     for provider in TAUNT_PROVIDERS:
@@ -426,7 +443,10 @@ class Ctx:
         log, and the ones left behind never are. The log is public, and what
         you saw and did not take is yours.
 
-        `rest` is where the leftovers go — "bottom" of the deck, or "trash".
+        `rest` is where the leftovers go — "bottom" of the deck, "top" of it,
+        or "trash". "top" is the one where the order is a real decision: those
+        cards are the next ones drawn and their controller has just seen them,
+        so more than one leftover is ordered by hand rather than silently.
         """
         viewed = self.me.deck[:n]
         if not viewed:
@@ -470,6 +490,8 @@ class Ctx:
         leftovers = [c for c in viewed if c not in taken]
         if rest == "trash":
             self.me.trash.extend(leftovers)
+        elif rest == "top":
+            self.me.deck[:0] = self._ordered_for_top(leftovers)
         else:
             # "in any order" — the printed text lets the controller order them
             # and this does not ask, because the deck is face down and the only
@@ -477,10 +499,32 @@ class Ctx:
             # memory of what they just saw.
             self.me.deck.extend(leftovers)
         if leftovers:
-            where = "the trash" if rest == "trash" else "the bottom of the deck"
+            where = {"trash": "the trash",
+                     "top": "the top of the deck"}.get(rest, "the bottom of the deck")
             self.state.record(f"places {len(leftovers)} viewed card"
                               f"{'' if len(leftovers) == 1 else 's'} in {where}")
         return taken
+
+    def _ordered_for_top(self, cards: list[CardInstance]) -> list[CardInstance]:
+        """Put cards back on the deck "in any order", top of the list first.
+
+        Unlike the bottom of the deck, this order is worth asking about: these
+        are the next cards drawn. One card has only one order, so that case
+        never asks.
+        """
+        if len(cards) < 2:
+            return list(cards)
+        remaining = list(cards)
+        ordered: list[CardInstance] = []
+        while len(remaining) > 1:
+            with self.game.showing(remaining):
+                pick = self.choose("Put which card on top of your deck?",
+                                   remaining, optional=False)
+            pick = pick if pick is not None else remaining[0]
+            remaining.remove(pick)
+            ordered.append(pick)
+        ordered.extend(remaining)
+        return ordered
 
     def reveal_top(self, n: int = 1) -> list[CardInstance]:
         """"Reveal N cards from the top of your deck" — and put them back.
@@ -541,14 +585,25 @@ class Ctx:
             moved += 1
         return moved
 
-    def return_support_to_hand(self, *, predicate=None) -> bool:
+    def return_support_to_hand(self, *, predicate=None,
+                               optional: bool = True) -> bool:
+        """"Return 1 card from your support area to your hand."
+
+        `optional` is the difference between "return up to 1" and "return 1":
+        the latter is part of a bargain the controller already agreed to, and
+        declining it would hand them the upside without the cost.
+        """
         options = [c for c in self.me.support
                    if predicate is None or predicate(self.db[c.card_id])]
         if not options:
             return False
-        card = self.choose("Return a support card to hand", options, optional=True)
+        card = self.choose("Return a support card to hand", options,
+                           optional=optional)
         if card is None:
-            return False
+            if not optional:
+                card = options[0]
+            else:
+                return False
         self.me.support.remove(card)
         card.rested = False
         self.me.hand.append(card)
@@ -596,8 +651,16 @@ class Ctx:
 
     # -- combat ----------------------------------------------------------
     def enemy_cookies(self, predicate=None) -> list[Cookie]:
+        """The opponent's Cookies my effect is allowed to pick.
+
+        The one funnel every "select up to N of your opponent's Cookies" goes
+        through, which is why the selection protections are filtered here: a
+        Cookie that cannot be selected is not on offer at all, rather than
+        being offered and then silently doing nothing.
+        """
         return [c for c in self.opp.battle
-                if predicate is None or predicate(c)]
+                if not is_select_protected(self.db, self.opp, c)
+                and (predicate is None or predicate(c))]
 
     def own_cookies(self, predicate=None) -> list[Cookie]:
         return [c for c in self.me.battle
@@ -703,6 +766,9 @@ class Ctx:
         """
         if not self._may_move(cookie):
             return
+        owner = self.state.players[cookie.owner]
+        if owner.index != self.me.index and is_trash_protected(self.db, owner, cookie):
+            return
         self.game.trash_cookie(cookie)
 
     def opponent_discards(self, n: int = 1) -> int:
@@ -766,6 +832,8 @@ class Ctx:
             card = cookie.hp_cards.pop()
             card.face_up = True
             destination.trash.append(card)
+            # A pile that got shorter is HP that was reduced, however it went.
+            cookie.hp_reduced_this_turn = True
             # Face up on the table, so the board shows it — but not as a FLIP,
             # because no FLIP fires on this path.
             self.game.record_reveal(cookie, card)

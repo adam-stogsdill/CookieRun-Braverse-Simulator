@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.2.51
+
+- **Cards that ask what happened earlier in the turn now work.** Space Doughnut
+  (P-098) counts support cards you spent into the trash, Tiger Lily Cookie
+  (P-095) checks whether you played an Item, White Peach Cookie (P-093) fires
+  when its own HP came off, Choco Cup Cookie (BS9-083) when a Cookie went into
+  your deck, TBD Machine Room (BS6-107) when you replayed a Cookie out of your
+  trash, Puppet Theater Stage (BS9-070) on support cards trashed, and Dino-Sour
+  Cookie (P-109) and Sour Belt Cookie (P-110) on 【Arena】 Cookies reaching your
+  break area — each of those two opening on *either* of its two conditions, as
+  printed.
+- **"Select 1 of the following" cards work.** First Watcher's Bow (BS3-116),
+  Passionate Hollyberry Kingdom (BS3-023) and Glorious Crème Republic (BS3-095)
+  put both printed lines in front of you and run the one you pick. A line the
+  board makes impossible is not offered, so a card cannot be thrown away on an
+  option that could never have done anything.
+- **Fixed: "if there are no ..." meant its own opposite.** Any card gated on
+  something *not* being on the board was reading the condition backwards. Red
+  Velvet Dragon (BS11-105) was the card this actually broke — its attack rider
+  needed a 【Special Play】 Cookie in your battle area and fired every swing
+  instead. It is now held back rather than played wrongly.
+
+## 0.2.50
+
+- **Nine more cards are playable.** Cards that pay with a Cookie's own HP now
+  work: Spicy Power Juice (BS1-023) and Desert Oasis (BS1-026) drain a Cookie
+  down to its last HP for the attack bonus, and Sniffly Cocoa Palm (BS5-042)
+  costs a single HP card. A drain never faints the Cookie paying it, and a
+  Cookie already at 1 HP pays nothing.
+- **Cards whose numbers scale with the board work too.** Golden City's Control
+  Chamber (BS3-048) and Seasick Canoeing (BS5-043) count LV.3 Cookies in your
+  break area, Millennial Twig (BS4-041) heals per {Y} LV.3 there, Jelly
+  Pom-Poms (BS1-048) pays +1 attack for every *two* {Y} LV.1 Cookies, Old
+  Vanilla Orchid Locket (BS3-092) draws per LV.2 Cookie anywhere on the table,
+  and Jellied Jellyfish Potion (BS2-048) draws for each of your opponent's
+  Cookies that fainted this turn.
+
+## 0.2.49
+
+- **Fixed: a Cookie that pays itself as a cost no longer counts as a knockout.**
+  Cards whose cost reads "Place this Cookie in the trash" — Crunchy Chip Cookie
+  (BS8-119) among them — were sending themselves to the break area instead of
+  the trash, handing the opponent a free Level toward winning. They now go to
+  the trash, as printed.
+- **Soul Jam: Light of Resolution (BS3-115) now works.** It trims 1 HP from up
+  to two of your opponent's LV.2 or lower Cookies, then equips itself to your
+  Dark Cacao Cookie — and while it rides there, that Cookie cannot be selected
+  by your opponent's effects and cannot be trashed by them. Your own cards can
+  still target it.
+- **The other four Soul Jams work too.** Light of Passion (BS3-019) burns a
+  Cookie for 2 and then rides Hollyberry Cookie for +1 attack damage; Light of
+  Abundance (BS3-043) sweeps the other side for 1 and gives Golden Cheese
+  Cookie +2 HP; Light of Freedom (BS3-066) cycles a support card and then sets
+  1 support card active every time White Lily Cookie attacks; Light of Truth
+  (BS3-091) digs 3 for 2, puts the leftover back on top of your deck, and draws
+  you a card every time Pure Vanilla Cookie attacks.
+- **An equipped card now shows on the board.** A Cookie wearing a Soul Jam
+  carries an EQUIP badge naming what is attached — it is public, and it is the
+  reason that Cookie is hitting harder or drawing you cards.
+- **Fixed: an equipped Soul Jam was also being filed in the trash**, so the
+  same card sat in two places at once and came back a second time when its
+  Cookie left the battle area. This affected every 【Equip】 card.
+
 ## 0.2.48
 
 - **You can now set how big the board is drawn.** Settings has a **Sizes**

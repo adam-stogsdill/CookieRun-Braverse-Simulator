@@ -80,6 +80,10 @@ class Cookie:
     attack_cost_surcharge: int = 0      # extra {N} added to the attack
     level_override: int | None = None   # "this Cookie's LV. becomes N"
     activate_locked: bool = False       # its 【Activate】 is suppressed
+    # "During this turn, if this Cookie's HP was reduced" — set by damage and
+    # by any effect that takes cards off the pile, cleared with the rest of the
+    # per-turn Cookie flags.
+    hp_reduced_this_turn: bool = False
     effect_damage_reduction: int = 0    # "-N damage from effects"
     equipment: list = field(default_factory=list)  # 【Equip】 attachments
     # 【Awaken】: the cards this Cookie was stacked on top of, oldest first.
@@ -175,6 +179,14 @@ class PlayerState:
     # BS9-088's 【Awaken】 gate is the only card that asks, and it asks because
     # the two BS9 Cookies that bury themselves are what set it up.
     cookies_to_deck_bottom_this_turn: int = 0
+    # The same, counting the top of the deck as well. BS9-083 asks "top or
+    # bottom" and BS9-088 asks only about the bottom, so the two are counted
+    # separately rather than one being derived from the other.
+    cookies_to_deck_this_turn: int = 0
+    # 【Arena】 Cookies added to your break area this turn. A subset of
+    # `break_additions_this_turn`, kept apart because the break area holds
+    # cards and this asks about the keyword on them as they arrive.
+    arena_break_additions_this_turn: int = 0
     hp_gain_locked: bool = False      # "cannot add HP via card effects"
     # (turn_counter, colour, level) for every Cookie of yours that fainted,
     # so cards can ask about "your opponent's previous turn".
@@ -324,6 +336,18 @@ class GameState:
             if cookie is not None:
                 return player, cookie
         return None
+
+    def is_attached(self, uid: int) -> bool:
+        """Whether this card is 【Equip】ped to a Cookie in the battle area.
+
+        Equipment is not a `Zone` — it hangs off a Cookie and leaves play with
+        it — so `find_card` cannot see it. An item that equipped itself has
+        chosen where it lives just as surely as one that placed itself in the
+        support area, and filing it in the trash as well would leave one
+        CardInstance in two places at once.
+        """
+        return any(any(card.uid == uid for card in cookie.equipment)
+                   for player in self.players for cookie in player.battle)
 
     def find_card(self, uid: int) -> tuple[PlayerState, Zone, CardInstance] | None:
         for player in self.players:

@@ -7,7 +7,8 @@ few once-per-game and damage-capping abilities with no equivalent elsewhere.
 from __future__ import annotations
 
 from braverse.cost import Cost
-from braverse.effects import (STATIC_ABILITY_CARDS, Ctx, Trigger, effect)
+from braverse.effects import (SELECTION_PROTECTORS, STATIC_ABILITY_CARDS,
+                              TRASH_PROTECTORS, Ctx, Trigger, effect)
 from braverse.enums import Color, Marker
 
 
@@ -400,3 +401,167 @@ def prune_juice_purple_activate(ctx: Ctx) -> None:
     if card is not None:
         ctx.me.trash.remove(card)
         ctx.me.hand.append(card)
+
+
+# --- BS3-019/043/066/091/115 the Soul Jams ----------------------------------
+# One 【Equip】 item per Ancient Hero, all built the same way: the item does
+# something on the way down, and then *may* attach itself to the one Cookie it
+# names, where it grants that Cookie a rider for as long as it rides there.
+# The rider is registered against the jam's own card id — as a trigger for the
+# ones that fire on an event, in a protection registry for the ones that are
+# continuous — and `Game._run_equipment_effects` is what reaches it. Strip the
+# jam (BS9-090) or move the Cookie and the rider leaves with it, which is what
+# makes attaching the card the whole of the mechanic.
+
+
+def _equip_soul_jam(ctx: Ctx, holder_name: str) -> bool:
+    """"You can 【Equip】 this card to your [named Cookie]."
+
+    Optional, and it does not ask when there is nobody to equip: with no such
+    Cookie in the battle area, `select_own` has nothing to offer and the jam
+    goes to the trash like any other spent item.
+    """
+    card = ctx.source_card
+    if card is None:
+        return False
+    holder = ctx.select_own(lambda c: c.name(ctx.db) == holder_name,
+                            prompt=f"Equip to {holder_name}?")
+    if holder is None:
+        return False
+    if card in ctx.me.trash:
+        ctx.me.trash.remove(card)
+    holder.equipment.append(card)
+    return True
+
+
+def _wearing(cookie, card_id: str) -> bool:
+    return any(c.card_id.split("@")[0] == card_id for c in cookie.equipment)
+
+
+# --- BS3-019 Soul Jam: Light of Passion -------------------------------------
+@effect("BS3-019", Trigger.ITEM)
+def soul_jam_passion(ctx: Ctx) -> None:
+    """<{R}{R}{R}> Select up to 1 of your opponent's Cookies. That Cookie
+    receives 2 damage. Then, you can 【Equip】 this card to your [Hollyberry
+    Cookie]. That Cookie gains +1 attack damage."""
+    target = ctx.select_enemy()
+    if target is not None:
+        ctx.deal_damage(target, 2)
+    _equip_soul_jam(ctx, "Hollyberry Cookie")
+
+
+@effect("BS3-019", Trigger.ATTACK_START)
+def soul_jam_passion_aura(ctx: Ctx) -> None:
+    """"That Cookie gains +1 attack damage." — the rider on the host.
+
+    Read as the swing is worked out, the way every other continuous attack
+    aura in this set is (BS3-001, BS3-006), so the number the log prints is
+    the number that lands.
+    """
+    if ctx.source_cookie is not None:
+        ctx.modify_attack(ctx.source_cookie, 1)
+
+
+# --- BS3-043 Soul Jam: Light of Abundance -----------------------------------
+@effect("BS3-043", Trigger.ITEM)
+def soul_jam_abundance(ctx: Ctx) -> None:
+    """<{Y}{Y}{Y}> Deals 1 damage to all of your opponent's Cookies. Then, you
+    can 【Equip】 this card to your [Golden Cheese Cookie]. That Cookie gains
+    +2 HP.
+
+    The HP is the equip's rider, so it is paid once, when the jam lands — a
+    Cookie that was never equipped gains nothing.
+    """
+    for cookie in list(ctx.opp.battle):
+        ctx.deal_damage(cookie, 1)
+    holder = ctx.select_own(lambda c: c.name(ctx.db) == "Golden Cheese Cookie",
+                            prompt="Equip to Golden Cheese Cookie?")
+    card = ctx.source_card
+    if holder is None or card is None:
+        return
+    if card in ctx.me.trash:
+        ctx.me.trash.remove(card)
+    holder.equipment.append(card)
+    ctx.gain_hp(holder, 2)
+
+
+# --- BS3-066 Soul Jam: Light of Freedom -------------------------------------
+@effect("BS3-066", Trigger.ITEM)
+def soul_jam_freedom(ctx: Ctx) -> None:
+    """<{G}{G}{G}> Return 1 card from your support area to your hand, and place
+    1 card from the top of your deck into your support area as active. Then,
+    you can 【Equip】 this card to your [White Lily Cookie]. When that Cookie
+    attacks, set up to 1 card from your support area as active."""
+    ctx.return_support_to_hand(optional=False)
+    ctx.mill_to_support(1, rested=False)
+    _equip_soul_jam(ctx, "White Lily Cookie")
+
+
+@effect("BS3-066", Trigger.ATTACK_START)
+def soul_jam_freedom_rider(ctx: Ctx) -> None:
+    """"When that Cookie attacks, set up to 1 card from your support area as
+    active." — so the swing is paid for out of a support area that refills."""
+    ctx.set_support_active(1)
+
+
+# --- BS3-091 Soul Jam: Light of Truth ---------------------------------------
+@effect("BS3-091", Trigger.ITEM)
+def soul_jam_truth(ctx: Ctx) -> None:
+    """<{B}{B}{B}> View 3 cards from the top of your deck. Add up to 2 of them
+    to your hand and return the remaining cards to the top of your deck in any
+    order. Then, you can 【Equip】 this card to your [Pure Vanilla Cookie].
+    When that Cookie attacks, draw 1 card from your deck.
+
+    The remainder goes back on *top*, not the bottom: those are the next cards
+    drawn, and their controller has just seen them.
+    """
+    ctx.view_top(3, take=2, rest="top",
+                 prompt="Add up to 2 of these to your hand")
+    _equip_soul_jam(ctx, "Pure Vanilla Cookie")
+
+
+@effect("BS3-091", Trigger.ATTACK_START)
+def soul_jam_truth_rider(ctx: Ctx) -> None:
+    """"When that Cookie attacks, draw 1 card from your deck."
+    """
+    ctx.draw(1)
+
+
+# --- BS3-115 Soul Jam: Light of Resolution ----------------------------------
+def _dark_cacao_jam_holder(db, owner, cookie) -> bool:
+    """Whether this Cookie is wearing Soul Jam: Light of Resolution.
+
+    The protections are the jam's, not the Cookie's, so they are read off the
+    attachment rather than off a flag: strip the equipment (BS9-090 does) or
+    move the Cookie, and the Cookie is a normal Cookie again.
+    """
+    return _wearing(cookie, "BS3-115")
+
+
+SELECTION_PROTECTORS.append(_dark_cacao_jam_holder)
+TRASH_PROTECTORS.append(_dark_cacao_jam_holder)
+
+
+@effect("BS3-115", Trigger.ITEM)
+def soul_jam_resolution(ctx: Ctx) -> None:
+    """<{P}{P}{P}> Select up to 2 of your opponent's LV.2 or lower Cookies.
+    Place up to 1 card from the top of each Cookie's HP into the trash. Then,
+    you can 【Equip】 this card to your [Dark Cacao Cookie]. That Cookie cannot
+    be selected by your opponent's effects and cannot be trashed.
+
+    Two selections rather than one prompt for two, because "up to 2" lets its
+    controller stop after one, and the second pick must not offer a Cookie the
+    first already took.
+    """
+    remaining = ctx.enemy_cookies(lambda c: c.level(ctx.db) <= 2)
+    for _ in range(2):
+        if not remaining:
+            break
+        target = ctx.choose("Trash 1 HP from which Cookie?", remaining,
+                            optional=True)
+        if target is None:
+            break
+        remaining.remove(target)
+        ctx.trash_hp(target, 1)
+
+    _equip_soul_jam(ctx, "Dark Cacao Cookie")

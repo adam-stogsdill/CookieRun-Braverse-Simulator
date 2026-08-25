@@ -17,7 +17,8 @@ from dataclasses import dataclass
 
 from .cards import CardDB, CardDef
 from .cost import Cost
-from .effect_ir import (REF_HOST, REF_IT, REF_SELF, SCOPE_ALL, SCOPE_OPPONENT,
+from .effect_ir import (AnyOf, Modal, REF_HOST, REF_IT, REF_SELF, SCOPE_ALL,
+                        SCOPE_OPPONENT,
                         SCOPE_OWN, ZONE_BATTLE, ZONE_BREAK, ZONE_DECK_BOTTOM,
                         ZONE_DECK_TOP, ZONE_HAND, ZONE_SUPPORT, ZONE_TRASH,
                         CardFilter,
@@ -26,7 +27,7 @@ from .effect_ir import (REF_HOST, REF_IT, REF_SELF, SCOPE_ALL, SCOPE_OPPONENT,
                         GainHP, Guard, MillDeck, MillToSupport, ModifyAttack,
                         Op, PayCost, Program, RestSupport, ReturnSupportToHand,
                         ReturnToHand, Select, SetSupportActive, TrashHP,
-                        TrashStage)
+                        TrashHPUntil, TrashStage)
 from .effects import Trigger
 from .enums import SYMBOL_TO_COLOR, CardType, Color, Keyword
 
@@ -217,8 +218,32 @@ _CONDITION_RULES = [
      lambda m: Condition("cookies_fainted", ">=", 1, who=SCOPE_OPPONENT)),
     (re.compile(r"your cookie fainted", re.I),
      lambda m: Condition("cookies_fainted", ">=", 1)),
+    (re.compile(r"an? (?:【)?(Arena|Ancient|Beast|Dragon)(?:】)? cookie has been "
+                r"placed in your break area", re.I),
+     lambda m: Condition("arena_break_additions", ">=", 1)),
     (re.compile(r"an? cookie has been placed in your break area", re.I),
      lambda m: Condition("break_additions", ">=", 1)),
+    (re.compile(r"there (?:are|is) (\d+) (?:【)?(Arena|Ancient|Beast|Dragon)(?:】)?"
+                r" cookies? or more in your break area", re.I),
+     lambda m: Condition("zone_count", ">=", int(m.group(1)), zone="break",
+                         card_filter=CardFilter(
+                             keyword=Keyword[m.group(2).upper()]))),
+    (re.compile(r"(\d+) or more cards? in your support area were placed in "
+                r"your trash", re.I),
+     lambda m: Condition("support_trashed", ">=", int(m.group(1)))),
+    (re.compile(r"(\d+) cards? or more have been placed from your support area "
+                r"into your trash", re.I),
+     lambda m: Condition("support_trashed", ">=", int(m.group(1)))),
+    (re.compile(r"an? cookie from your battle area was placed on the top or "
+                r"bottom of your deck", re.I),
+     lambda m: Condition("cookies_to_deck", ">=", 1)),
+    (re.compile(r"an? cookie was placed from your battle area on the bottom of "
+                r"your deck", re.I),
+     lambda m: Condition("cookies_to_deck_bottom", ">=", 1)),
+    (re.compile(r"an? cookie was played from your trash", re.I),
+     lambda m: Condition("played_from_trash", ">=", 1)),
+    (re.compile(r"this cookie'?s hp was reduced", re.I),
+     lambda m: Condition("self_hp_reduced")),
     (re.compile(r"your break area is LV\.(\d+) or (?:higher|above)", re.I),
      lambda m: Condition("break_level", ">=", int(m.group(1)))),
     (re.compile(r"your break area is LV\.(\d+) or lower", re.I),
@@ -329,8 +354,13 @@ _ZONE_WORDS = {
 }
 
 # "there is a {Y} LV.3 Cookie in your break area"
+# "there is a {R} Cookie in your battle area", and its negation. `no` has to be
+# matched here rather than left in `what`: `parse_card_filter` has no way to
+# express it, so it read the word as noise and the card came out meaning the
+# exact opposite of what it prints.
 _ZONE_HAS = re.compile(
-    r"there (?:is|are) (?:an?|another|\d+)?\s*(?P<what>.*?)\s*(?:cards?|cookies?)?\s+"
+    r"there (?:is|are) (?P<none>no )?(?:an?|another|\d+)?\s*(?P<what>.*?)\s*"
+    r"(?:cards?|cookies?)?\s+"
     r"in (?P<who>your opponent's|your|their|both players'?)\s*"
     r"(?P<zone>battle area|break area|support area|trash|hand|deck)$", re.I)
 # "there are 3 {R} cards or more in your support area"
@@ -362,7 +392,8 @@ def _zone_condition(phrase: str) -> Condition | None:
         if "both" in (groups["who"] or "").lower():
             return None
         who = SCOPE_OPPONENT if "opponent" in groups["who"] else SCOPE_OWN
-        return Condition("zone_has", ">=", 1, who=who,
+        op, value = ("==", 0) if groups.get("none") else (">=", 1)
+        return Condition("zone_has", op, value, who=who,
                          card_filter=parse_card_filter(groups["what"]),
                          zone=_ZONE_WORDS[groups["zone"].lower()])
     return None
@@ -535,6 +566,32 @@ def parse_cost(token: str) -> list[Op]:
         return [FilteredDiscard(_number(match.group(1)),
                                 parse_card_filter(match.group(0)))]
 
+    # A Cookie's own HP as the price. Three shapes, and the drain must be tried
+    # before the flat one — its text starts with the flat one's, so the flat
+    # pattern would match the prefix and quietly charge a single card for a
+    # cost that is meant to take the Cookie down to its last.
+    match = re.search(r"place (?:\d+ )?(?:of )?(?:your|this|that) cookies?'?s?'? hp "
+                      r"cards? in(?:to)? (?:the|your) trash until "
+                      r"(?:the|that|this) cookie'?s?'? hp reaches (\d+)", lowered)
+    if match:
+        return [Select(SCOPE_OWN, count=1, optional=False, ref="hp_cost"),
+                RequireSelected("hp_cost"),
+                TrashHPUntil(int(match.group(1)), ref="hp_cost")]
+
+    match = re.search(r"place (\d+) of (?:your|this|that) cookies?'?s?'? hp cards? "
+                      r"in(?:to)? (?:the|your) trash", lowered)
+    if match:
+        return [Select(SCOPE_OWN, count=1, optional=False, ref="hp_cost"),
+                RequireSelected("hp_cost"),
+                TrashHP(int(match.group(1)), ref="hp_cost")]
+
+    match = re.search(r"return (\d+) cards? from the top of (?:one of )?"
+                      r"(?:your|this|that) cookie'?s?'? hp to your hand", lowered)
+    if match:
+        return [Select(SCOPE_OWN, count=1, optional=False, ref="hp_cost"),
+                RequireSelected("hp_cost"),
+                HPToHand(int(match.group(1)), ref="hp_cost")]
+
     match = re.search(r"place (\d+) cards? from the top of (?:one of )?(?:your|this|that) "
                       r"(.*?)cookie'?s?'? hp(?: card| in your battle area)? "
                       r"into (?:the|your) trash", lowered)
@@ -597,8 +654,15 @@ class TrashSelf(Op):
     def run(self, ctx, env) -> bool:
         cookie = ctx.source_cookie
         if cookie is not None:
-            ctx.faint(cookie)
-            return True
+            # "Place this Cookie in the trash" is not fainting: it never
+            # reaches the break area, so the opponent banks no Level for it
+            # (Crunchy Chip Cookie BS8-119 pays itself as a cost). A movement
+            # lock stops it, and this is a cost, so say so rather than letting
+            # it be paid for free.
+            if not ctx._may_move(cookie):
+                return False
+            ctx.trash_cookie(cookie)
+            return cookie not in ctx.me.battle
         card = ctx.source_card
         if card is not None and card in ctx.me.stage:
             ctx.me.stage.remove(card)
@@ -664,12 +728,10 @@ class SelfToDeckBottom(Op):
         cookie = ctx.source_cookie
         if cookie is None or cookie not in ctx.me.battle:
             return False
-        ctx.me.battle.remove(cookie)
-        ctx.me.deck.append(cookie.card)
-        ctx.me.trash.extend(cookie.spent_cards)
-        # BS9-088 【Awaken】s off the back of exactly this happening.
-        ctx.me.cookies_to_deck_bottom_this_turn += 1
-        ctx.game._check_battle_area(ctx.me)
+        # BS9-088 【Awaken】s off the back of exactly this happening, and
+        # BS9-083 off either end of the deck; `cookie_to_deck` is where both
+        # are counted.
+        ctx.game.cookie_to_deck(cookie, bottom=True)
         return True
 
 
@@ -680,6 +742,17 @@ def _zone_cards(ctx, zone: str, opponent: bool):
 
 
 def _zone_count(ctx, filt, zone: str, opponent: bool) -> int:
+    if zone == "battle_both":
+        # "in either battle area" — the whole table, not one side of it.
+        return sum(1 for player in ctx.state.players for c in player.battle
+                   if filt.matches(c.defn(ctx.db)))
+    if zone == "fainted":
+        # "for each of your opponent's Cookies that fainted during this turn".
+        # Not a zone at all: the engine keeps a running count rather than the
+        # cards, so a filter cannot be applied here and none is printed on the
+        # cards that ask.
+        player = ctx.opp if opponent else ctx.me
+        return player.cookies_fainted_this_turn
     if zone == "battle":
         player = ctx.opp if opponent else ctx.me
         return sum(1 for c in player.battle if filt.matches(c.defn(ctx.db)))
@@ -941,6 +1014,32 @@ class SelectedTrashToDeckBottom(Op):
 
 
 @dataclass
+class SelfCardToDeck(Op):
+    """"place this card at the bottom of your deck" — the card resolving.
+
+    A stage card recycling itself, so it is looked for wherever it currently
+    is rather than assumed into one zone: the stage area while it is in play,
+    the trash for an item already filed there.
+    """
+
+    bottom: bool = True
+
+    def run(self, ctx, env) -> bool:
+        card = ctx.source_card
+        if card is None:
+            return False
+        for zone in (ctx.me.stage, ctx.me.trash, ctx.me.support, ctx.me.hand):
+            if card in zone:
+                zone.remove(card)
+                break
+        if self.bottom:
+            ctx.me.deck.append(card)
+        else:
+            ctx.me.deck.insert(0, card)
+        return True
+
+
+@dataclass
 class SelfCardToBreak(Op):
     def run(self, ctx, env) -> bool:
         card = ctx.source_card
@@ -1024,6 +1123,9 @@ class RandomOpponentDiscard(Op):
             ctx.opp.trash.append(card)
         return True
 
+    def is_live(self, ctx, env) -> bool:
+        return bool(ctx.opp.hand)
+
 
 @dataclass
 class DrawToHandSize(Op):
@@ -1037,18 +1139,33 @@ class DrawToHandSize(Op):
 
 
 @dataclass
-class ScaledDamage(Op):
-    """"receives 1 damage for each LV.3 Cookie in your break area"."""
+class Scaled(Op):
+    """Base for "N per X" effects: how much, worked out from a count.
+
+    `divisor` is the "for every 2 ..." case — the count is floor-divided before
+    it is multiplied, so a pair pays once and an odd one over pays nothing.
+    """
 
     per: int = 1
     filter: object = None
     zone: str = "break"
     opponent: bool = False
+    divisor: int = 1
+
+    def amount(self, ctx) -> int:
+        count = _zone_count(ctx, self.filter, self.zone, self.opponent)
+        return self.per * (count // max(1, self.divisor))
+
+
+@dataclass
+class ScaledDamage(Scaled):
+    """"receives 1 damage for each LV.3 Cookie in your break area"."""
+
     ref: str = REF_IT
 
     def run(self, ctx, env) -> bool:
         from .effect_ir import _resolve
-        amount = self.per * _zone_count(ctx, self.filter, self.zone, self.opponent)
+        amount = self.amount(ctx)
         if amount:
             for cookie in _resolve(self.ref, ctx, env):
                 ctx.deal_damage(cookie, amount)
@@ -1056,31 +1173,78 @@ class ScaledDamage(Op):
 
 
 @dataclass
-class ScaledGainHP(Op):
-    per: int = 1
-    filter: object = None
-    zone: str = "break"
-    opponent: bool = False
+class ScaledGainHP(Scaled):
+    """"gains +1 HP for each ..." — on this Cookie, or on a selected one.
+
+    `ref` is which: the cards that say "this Cookie" leave it at `REF_SELF`,
+    the ones that say "that Cookie" have already selected their target.
+    """
+
+    ref: str = REF_SELF
 
     def run(self, ctx, env) -> bool:
-        amount = self.per * _zone_count(ctx, self.filter, self.zone, self.opponent)
-        if amount and ctx.source_cookie is not None:
-            ctx.gain_hp(ctx.source_cookie, amount)
+        from .effect_ir import _resolve
+        amount = self.amount(ctx)
+        if not amount:
+            return True
+        for cookie in _resolve(self.ref, ctx, env):
+            ctx.gain_hp(cookie, amount)
         return True
 
 
 @dataclass
-class ScaledDraw(Op):
-    per: int = 1
-    filter: object = None
-    zone: str = "break"
-    opponent: bool = False
+class ScaledModifyAttack(Scaled):
+    """"gains +1 attack damage for each ..." and its negative twin.
+
+    `per` carries the sign, so the same op is the buff and the debuff.
+    """
+
+    ref: str = REF_IT
 
     def run(self, ctx, env) -> bool:
-        amount = self.per * _zone_count(ctx, self.filter, self.zone, self.opponent)
+        from .effect_ir import _resolve
+        amount = self.amount(ctx)
+        if not amount:
+            return True
+        for cookie in _resolve(self.ref, ctx, env):
+            ctx.modify_attack(cookie, amount)
+        return True
+
+
+@dataclass
+class ScaledDraw(Scaled):
+    def run(self, ctx, env) -> bool:
+        amount = self.amount(ctx)
         if amount:
             ctx.draw(amount)
         return True
+
+
+@dataclass
+class ViewTop(Op):
+    """"View N cards from the top of your deck ..." — `Ctx.view_top` verbatim.
+
+    Everything the primitive already gets right lives there: the whole run is
+    shown even when only some of it can be taken, the cards stay in the deck
+    while the question is open, and `rest` says where the leftovers go.
+    """
+
+    amount: int = 3
+    take: int = 1
+    rest: str = "bottom"
+    filter: object = None
+    reveal: bool = False
+
+    def run(self, ctx, env) -> bool:
+        pick = None
+        if self.filter is not None:
+            pick = lambda defn: self.filter.matches(defn)   # noqa: E731
+        ctx.view_top(self.amount, take=self.take, pick=pick, rest=self.rest,
+                     reveal=self.reveal)
+        return True
+
+    def is_live(self, ctx, env) -> bool:
+        return bool(ctx.me.deck)
 
 
 @dataclass
@@ -1199,16 +1363,7 @@ class MoveSelectedToDeck(Op):
     def run(self, ctx, env) -> bool:
         from .effect_ir import _resolve
         for cookie in _resolve(self.ref, ctx, env):
-            owner = ctx.state.players[cookie.owner]
-            if cookie not in owner.battle:
-                continue
-            owner.battle.remove(cookie)
-            if self.bottom:
-                owner.deck.append(cookie.card)
-            else:
-                owner.deck.insert(0, cookie.card)
-            owner.trash.extend(cookie.spent_cards)
-            ctx.game._check_battle_area(owner)
+            ctx.game.cookie_to_deck(cookie, bottom=self.bottom)
         return True
 
 
@@ -1432,13 +1587,7 @@ class SelfToDeck(Op):
         cookie = ctx.source_cookie
         if cookie is None or cookie not in ctx.me.battle:
             return False
-        ctx.me.battle.remove(cookie)
-        if self.zone == ZONE_DECK_TOP:
-            ctx.me.deck.insert(0, cookie.card)
-        else:
-            ctx.me.deck.append(cookie.card)
-        ctx.me.trash.extend(cookie.spent_cards)
-        ctx.game._check_battle_area(ctx.me)
+        ctx.game.cookie_to_deck(cookie, bottom=self.zone != ZONE_DECK_TOP)
         return True
 
 
@@ -1648,7 +1797,7 @@ def _v_faint(m) -> list[Op]:
 
 
 @verb(r"^place (?:up to )?(\d+) cards? from the top of (?:that|this) cookie's hp "
-      r"into (?:the|your) trash\.?$")
+      r"in(?:to)? (?:the|your) trash\.?$")
 def _v_trash_hp(m) -> list[Op]:
     return [TrashHP(int(m.group(1)))]
 
@@ -2068,22 +2217,49 @@ def _v_debuff_next_turn(m) -> list[Op]:
     return [DebuffNextTurn(int(m.group(1)))]
 
 
+# "for each X in your break area", and its two variants: "for every 2 X",
+# which pays out once per pair rather than once per card, and "in either
+# battle area", which counts both sides of the table.
 _FOR_EACH = re.compile(
-    r"for each (?:\d+ )?(?P<what>.*?)\s*(?:cards?|cookies?)?\s+in "
-    r"(?P<who>your opponent's|your|their)\s*"
+    r"for (?:each|every) (?:(?P<per>\d+) )?(?P<what>.*?)\s*(?:cards?|cookies?)?\s+in "
+    r"(?P<who>your opponent's|your|their|either)\s*"
     r"(?P<zone>break area|trash|support area|battle area|hand)", re.I)
+
+# "for each of your opponent's Cookies that fainted during this turn" counts an
+# event, not a pile, so it is matched separately and answered by the running
+# count the engine already keeps for both players.
+_FOR_EACH_FAINTED = re.compile(
+    r"for each of (?P<who>your opponent's|your) cookies? that fainted "
+    r"during this turn", re.I)
 
 
 def _count_source(phrase: str):
-    """Turn a "for each ..." tail into a (filter, zone, opponent) triple."""
+    """Turn a "for each ..." tail into a (filter, zone, opponent, divisor).
+
+    `divisor` is the "every 2" case: the count is floor-divided by it, so two
+    Cookies in the break area are worth one bonus and three are still worth
+    one. Everything else divides by 1 and is unchanged.
+    """
+    fainted = _FOR_EACH_FAINTED.search(phrase)
+    if fainted:
+        return (CardFilter(), "fainted",
+                "opponent" in fainted.group("who").lower(), 1)
+
     match = _FOR_EACH.search(phrase)
     if not match:
         return None
     groups = match.groupdict()
+    who = (groups["who"] or "").lower()
     zone = {"break area": "break", "trash": "trash", "support area": "support",
             "battle area": "battle", "hand": "hand"}[groups["zone"].lower()]
-    return (parse_card_filter(groups["what"]), zone,
-            "opponent" in (groups["who"] or ""))
+    if zone == "battle" and who.startswith("either"):
+        zone = "battle_both"
+    elif who.startswith("either"):
+        # "either trash", "either hand" — nothing prints those, and guessing at
+        # one side of it would misreport the card.
+        return None
+    return (parse_card_filter(groups["what"]), zone, "opponent" in who,
+            int(groups["per"] or 1))
 
 
 @verb(r"^(?:that|those) cookies? receives? (\d+) damage (for each .*)\.?$")
@@ -2102,7 +2278,7 @@ def _v_gain_hp_scaling(m) -> list[Op]:
     return [ScaledGainHP(int(m.group(1)), *source)]
 
 
-@verb(r"^draw(?: up to)? (\d+) cards? from your deck (for each .*)\.?$")
+@verb(r"^draw(?: up to)? (\d+) cards?(?: from your deck)? (for each .*)\.?$")
 def _v_draw_scaling(m) -> list[Op]:
     source = _count_source(m.group(2))
     if source is None:
@@ -2110,9 +2286,38 @@ def _v_draw_scaling(m) -> list[Op]:
     return [ScaledDraw(int(m.group(1)), *source)]
 
 
-@verb(r"^return (?:up to )?(\d+) cards? from the top of (?:that|your) cookie'?s? "
-      r"hp to your hand\.?$")
+@verb(r"^(?:that|those) cookies? gains? \+(\d+) hp (for each .*)\.?$")
+def _v_selected_gain_hp_scaling(m) -> list[Op]:
+    source = _count_source(m.group(2))
+    if source is None:
+        raise CompileError(f"verb: {m.group(0)!r}")
+    return [ScaledGainHP(int(m.group(1)), *source, ref=REF_IT)]
+
+
+@verb(r"^during this turn,? (?:that|those|this) cookies? gains? \+(\d+) "
+      r"attack damage (for (?:each|every) .*)\.?$")
+def _v_attack_buff_scaling(m) -> list[Op]:
+    source = _count_source(m.group(2))
+    if source is None:
+        raise CompileError(f"verb: {m.group(0)!r}")
+    return [ScaledModifyAttack(int(m.group(1)), *source)]
+
+
+@verb(r"^during this turn,? (?:that|those|this) cookies? deals? -(\d+) "
+      r"attack damage (for (?:each|every) .*)\.?$")
+def _v_attack_debuff_scaling(m) -> list[Op]:
+    """The same op as the buff, with the sign the text prints."""
+    source = _count_source(m.group(2))
+    if source is None:
+        raise CompileError(f"verb: {m.group(0)!r}")
+    return [ScaledModifyAttack(-int(m.group(1)), *source)]
+
+
+@verb(r"^return (?:up to )?(\d+) cards? from the top of (?:that|this|your) "
+      r"cookie'?s? hp to your hand\.?$")
 def _v_hp_to_hand(m) -> list[Op]:
+    """"this Cookie" on a stage card is the one just selected, not the stage —
+    a stage has no HP — so all three wordings land on the same selection."""
     return [HPToHand(int(m.group(1)))]
 
 
@@ -2294,6 +2499,24 @@ def _v_trash_own_hp(m) -> list[Op]:
 @verb(r"^rest that card\.?$")
 def _v_rest_that_card(m) -> list[Op]:
     return []          # the selector above already rested it
+
+
+@verb(r"^view (\d+) cards? from the top of your deck[;,]? (?:and )?place them "
+      r"(?:back )?(?:on|to) the top of (?:the|your) deck in any order\.?$")
+def _v_view_and_reorder(m) -> list[Op]:
+    """Look at the top N and put every one of them back, in an order you pick.
+
+    `take=0` is what makes it a pure reorder: nothing is added to hand, so the
+    whole viewed run is the leftover that `rest="top"` puts back.
+    """
+    return [ViewTop(int(m.group(1)), take=0, rest="top")]
+
+
+@verb(r"^draw(?: up to)? (\d+) cards? from your deck and place this card at "
+      r"the (bottom|top) of your deck\.?$")
+def _v_draw_and_recycle_self(m) -> list[Op]:
+    return [Draw(int(m.group(1))),
+            SelfCardToDeck(bottom=m.group(2).lower() == "bottom")]
 
 
 @verb(r"^place that card in(?:to)? the trash\.?$")
@@ -2548,12 +2771,22 @@ def _v_place_stage(m) -> list[Op]:
 _STATE_WORDS = re.compile(r"\b(active|rested|face[- ]up|face[- ]down)\b", re.I)
 
 
+# "Cookies that have 【Blocker】" arrives here as "Cookies that have", because
+# `split_clauses` strips 【...】 markers. The property the card filtered on is
+# gone, and an empty filter means *every* Cookie — so the card would be read as
+# saying something it does not. Refuse instead.
+_STRIPPED_PROPERTY = re.compile(r"\bthat (?:have|has|is|are)\s*$", re.I)
+
+
 def parse_card_filter(phrase: str) -> CardFilter:
     """Card-level filter for pile contents: colour, level, FLIP, name, type."""
     state = _STATE_WORDS.search(phrase)
     if state:
         raise CompileError(f"card filter describes state, not print: {state.group(0)!r}"
                            f" in {phrase!r}")
+    if _STRIPPED_PROPERTY.search(phrase.strip()):
+        raise CompileError(f"card filter lost its property to marker "
+                           f"stripping: {phrase!r}")
     lowered = phrase.lower()
     color = _COLOR_SYMBOL.search(phrase)
     at_most = _LEVEL_AT_MOST.search(phrase)
@@ -2749,6 +2982,13 @@ def parse_verb(phrase: str) -> list[Op]:
 
 _LEADING_CONNECTIVE = re.compile(r"^(?:then|also|after that)\s*,?\s*", re.I)
 _IF_PREFIX = re.compile(r"^if\s+(.*?),\s*(.+)$", re.I)
+# "During this turn" is a timing phrase, not a condition, and it turns up in
+# the middle of a guard as often as at the front: "If A and, during this turn,
+# B, do X." Left alone it ends the guard at the first comma and the rest of the
+# condition is read as the verb — so the connector is normalised back to the
+# plain "and if" / "or if" the guard loop already understands.
+_MID_GUARD_TIMING = re.compile(
+    r"\s+(and|or)(?:\s+if)?,\s*during this turn,\s*", re.I)
 # "During this turn, if X, do Y." — only strip the timing phrase when a guard
 # follows it. "During this turn, that Cookie deals -2 attack damage." is a verb
 # in its own right and must keep its prefix.
@@ -2786,6 +3026,7 @@ def compile_clause(text: str) -> Clause:
 
     # Guards can stack: "If A, if B, do X."
     conditions = []
+    body = _MID_GUARD_TIMING.sub(lambda m: f" {m.group(1).lower()} if ", body)
     while True:
         body = _DURING_TURN_IF.sub("", body)
         match = _IF_PREFIX.match(body)
@@ -2793,7 +3034,16 @@ def compile_clause(text: str) -> Clause:
             break
         head, rest = match.group(1), match.group(2)
         for piece in re.split(r"\s+and if\s+|\s+and\s+(?=there )", head):
-            conditions.append(parse_condition(piece))
+            # "A or if B" is a choice, not a second requirement: either half
+            # opens the card. `AnyOf` keeps that inside one Guard entry so the
+            # rest of the pipeline still sees a flat list of conditions to
+            # satisfy.
+            alternatives = re.split(r"\s+or if\s+", piece)
+            if len(alternatives) > 1:
+                conditions.append(AnyOf(tuple(parse_condition(a)
+                                              for a in alternatives)))
+            else:
+                conditions.append(parse_condition(piece))
         body = _LEADING_CONNECTIVE.sub("", rest.strip())
     if conditions:
         ops.insert(0, Guard(tuple(conditions)))
@@ -2814,10 +3064,48 @@ def compile_clause(text: str) -> Clause:
     return Clause(ops, cost_text="; ".join(payable))
 
 
+# "Select 1 of the following." and the bullet that starts each branch. The
+# bullets survive `split_clauses` as clauses of their own, but a branch is as
+# long as the card prints it — every sentence up to the next bullet belongs to
+# the option above it — so the grouping happens here, over the whole effect,
+# rather than one clause at a time.
+_MODAL_LEAD = re.compile(r"(?:then,?\s*)?select 1 of the following\.?\s*$", re.I)
+_MODAL_BULLET = "\u30fb"
+
+
+def _modal_branches(chunks: list[str]) -> tuple:
+    """Group the clauses after a modal lead into (label, clauses) branches."""
+    branches: list = []
+    for chunk in chunks:
+        body = chunk.strip()
+        if body.startswith(_MODAL_BULLET):
+            branches.append([body.lstrip(_MODAL_BULLET).strip()])
+        elif branches:
+            branches[-1].append(body)
+        else:
+            # Text between "Select 1 of the following." and the first bullet.
+            # Nothing prints that, and guessing which option it belongs to
+            # would be inventing a card.
+            raise CompileError(f"modal: stray clause {chunk!r}")
+    if len(branches) < 2:
+        raise CompileError("modal: fewer than two options")
+    return tuple((" ".join(parts), tuple(compile_clause(p) for p in parts))
+                 for parts in branches)
+
+
 def compile_text(text: str) -> Program:
     """Compile a whole effect. Raises :class:`CompileError` on any clause."""
     clauses = []
-    for chunk in split_clauses(text):
+    chunks = split_clauses(text)
+    for index, chunk in enumerate(chunks):
+        if _MODAL_LEAD.search(chunk):
+            # Whatever came before "Select 1 of the following." on that line is
+            # the card's own cost, and is charged once, before the choice.
+            head = _MODAL_LEAD.sub("", chunk).strip()
+            if head:
+                clauses.append(compile_clause(head))
+            clauses.append(Clause(ops=[Modal(_modal_branches(chunks[index + 1:]))]))
+            break
         clauses.append(compile_clause(chunk))
     if not clauses:
         raise CompileError("no clauses")

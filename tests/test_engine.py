@@ -752,11 +752,11 @@ def test_unimplemented_card_is_still_offered(db):
     the rules say. Hiding it would be a different kind of lie."""
     from braverse.effects import is_implemented
 
-    assert not is_implemented("BS3-043")
+    assert not is_implemented("ST2-019")
     game = new_game(seed=3, db=db)
     me = game.state.current
-    _stock_support(me, "ST7-016", 4)           # yellow, pays {Y}{Y}{Y}
-    card = _add_to_hand(me, "BS3-043")
+    _stock_support(me, "ST7-016", 4)           # yellow, pays {Y}{Y}
+    card = _add_to_hand(me, "ST2-019")
     assert _offered(game, card.uid)
 
 

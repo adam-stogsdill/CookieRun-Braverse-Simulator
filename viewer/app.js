@@ -449,6 +449,14 @@ function cookieSlot(cookie) {
     tag.title = "Awakened from " + cookie.under.map((c) => c.name).join(", ");
     front.appendChild(tag);
   }
+  /* 【Equip】: a Soul Jam rides its Cookie and grants it the rider printed on
+   * the jam. It is public, and it is the reason the Cookie is behaving oddly,
+   * so it gets a badge that names what is attached. */
+  if (cookie.equipment && cookie.equipment.length) {
+    const tag = h("span", "equipped", "EQUIP");
+    tag.title = cookie.equipment.map((c) => c.name).join(", ");
+    front.appendChild(tag);
+  }
   box.appendChild(front);
   box.dataset.cookie = cookie.uid;
   slot.appendChild(box);

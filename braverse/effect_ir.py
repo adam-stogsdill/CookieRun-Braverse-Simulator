@@ -130,6 +130,21 @@ REF_HOST = "host"        # for FLIP: the Cookie this card was HP for
 
 
 @dataclass(frozen=True)
+class AnyOf:
+    """"If A or if B, ..." — one guard entry that either half satisfies.
+
+    A `Guard` requires all of its entries, which is what "and" means; a card
+    that offers two ways in packs both into one of these instead, so nothing
+    downstream has to know the difference between a requirement and a choice.
+    """
+
+    options: tuple = ()
+
+    def holds(self, ctx) -> bool:
+        return any(option.holds(ctx) for option in self.options)
+
+
+@dataclass(frozen=True)
 class Condition:
     kind: str
     op: str = ">="
@@ -230,6 +245,10 @@ class Condition:
         if self.kind == "zone_count":
             return self._compare(self._count(ctx, player))
         if self.kind == "zone_has":
+            # "there are no X" is the same shape read the other way, and it is
+            # the one case where `value` may legitimately be 0.
+            if self.op == "==" and self.value == 0:
+                return self._count(ctx, player) == 0
             return self._count(ctx, player) >= max(1, self.value)
         if self.kind == "any_own_hp_equals":
             return any(self._compare(c.remaining_hp) for c in ctx.me.battle)
@@ -287,6 +306,19 @@ class Condition:
             return ctx.me.items_played_this_turn > 0
         if self.kind == "hp_gained":
             return ctx.me.hp_gained_this_turn
+        if self.kind == "arena_break_additions":
+            return self._compare(player.arena_break_additions_this_turn)
+        if self.kind == "cookies_to_deck":
+            return self._compare(player.cookies_to_deck_this_turn)
+        if self.kind == "cookies_to_deck_bottom":
+            return self._compare(player.cookies_to_deck_bottom_this_turn)
+        if self.kind == "played_from_trash":
+            return len(player.played_from_trash_this_turn) >= self.value
+        if self.kind == "self_hp_reduced":
+            # "During this turn, if this Cookie's HP was reduced" — the Cookie
+            # asking is the one whose effect is resolving.
+            cookie = ctx.source_cookie
+            return cookie is not None and cookie.hp_reduced_this_turn
         return False
 
 
@@ -352,9 +384,12 @@ class Select(Op):
         return True
 
     def _pool(self, ctx) -> list:
+        # `ctx.enemy_cookies` rather than `ctx.opp.battle`: it is what drops
+        # the Cookies an opposing effect is forbidden to select, and a
+        # compiled selection is an effect like any hand-written one.
         pool = []
         if self.scope in (SCOPE_OPPONENT, SCOPE_ALL):
-            pool += [c for c in ctx.opp.battle if self.filter.matches(c, ctx)]
+            pool += [c for c in ctx.enemy_cookies() if self.filter.matches(c, ctx)]
         if self.scope in (SCOPE_OWN, SCOPE_ALL):
             pool += [c for c in ctx.me.battle if self.filter.matches(c, ctx)]
         return pool
@@ -436,6 +471,33 @@ class TrashHP(Op):
         for cookie in _resolve(self.ref, ctx, env):
             ctx.trash_hp(cookie, self.amount,
                          opponent_trash=self.to_opponent_trash)
+        return True
+
+
+@dataclass
+class TrashHPUntil(Op):
+    """"Place HP cards in the trash until the Cookie's HP reaches N."
+
+    A cost priced as a drain rather than as a fixed number of cards: how much
+    it takes depends on how healthy the Cookie is, which is the point — the
+    same card is cheap on a Cookie that is nearly dead and expensive on a fresh
+    one. A Cookie already at or below the floor pays nothing, which is what the
+    text says and is why `floor` is never 0: no card written this way can
+    faint its own payment.
+    """
+
+    floor: int = 1
+    ref: str = REF_IT
+
+    def run(self, ctx, env) -> bool:
+        for cookie in _resolve(self.ref, ctx, env):
+            # One card at a time through the same primitive a fixed cost uses,
+            # so each one is revealed and logged the way it would be otherwise.
+            while cookie.remaining_hp > self.floor:
+                before = cookie.remaining_hp
+                ctx.trash_hp(cookie, 1)
+                if cookie.remaining_hp >= before:
+                    break          # nothing moved; do not spin
         return True
 
 
@@ -733,6 +795,44 @@ class Clause:
                 live = False
         return live
 
+
+
+@dataclass
+class Modal(Op):
+    """"Select 1 of the following." — one card, two lines, the player picks.
+
+    Each branch is a list of `Clause`, because a branch is as long as the card
+    prints it: "View 3 cards ... Then, place the remaining cards in the trash"
+    is one option made of three sentences, and they share an `env` so a Select
+    in the first reaches the ops in the third.
+
+    Only branches that would do something are offered, for the same reason
+    `Game._would_do_something` filters actions: a line the board makes
+    impossible is not a choice, it is a way to throw the card away by mistake.
+    If none of them is live the whole op is dead and never runs.
+    """
+
+    branches: tuple = ()          # ((label, (Clause, ...)), ...)
+
+    def _live_branches(self, ctx) -> list:
+        return [b for b in self.branches
+                if all(clause.is_live(ctx, {}) for clause in b[1])]
+
+    def run(self, ctx, env) -> bool:
+        options = self._live_branches(ctx) or list(self.branches)
+        if not options:
+            return False
+        labels = [label for label, _ in options]
+        pick = ctx.choose("Select 1 of the following", labels, optional=False)
+        chosen = options[labels.index(pick)] if pick in labels else options[0]
+        ctx.note(chosen[0])
+        for clause in chosen[1]:
+            if not clause.run(ctx, env):
+                return False
+        return True
+
+    def is_live(self, ctx, env) -> bool:
+        return bool(self._live_branches(ctx))
 
 
 @dataclass

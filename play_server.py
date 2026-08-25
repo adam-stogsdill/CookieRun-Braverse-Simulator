@@ -956,6 +956,10 @@ def cookie_json(db: CardDB, cookie: Cookie) -> dict:
         # 【Awaken】: the cards this one was stacked on top of, so the board can
         # show that a Cookie is two cards deep.
         "under": [instance_json(db, c) for c in cookie.under],
+        # 【Equip】: a Soul Jam riding this Cookie changes what it does and is
+        # public information, so it is projected like any other card on the
+        # table rather than being an invisible modifier.
+        "equipment": [instance_json(db, c) for c in cookie.equipment],
     }
     return out
 

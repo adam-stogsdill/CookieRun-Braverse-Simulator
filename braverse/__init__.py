@@ -12,7 +12,7 @@
 # Kept in step with "Current Version" at the top of README.md. Written into
 # every replay file, so a recording that will not play back can say which build
 # made it.
-__version__ = "0.2.48"
+__version__ = "0.2.51"
 
 from .agents import HeuristicAgent, RandomAgent, SeatedAgent
 from .cards import CardDB, CardDef, default_db, load_cards
