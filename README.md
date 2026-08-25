@@ -13,21 +13,6 @@ If there are any issues (as I'm sure there will be), please create an issue or m
 
 I am a Python programmer specializing in ML, so game development is not my forte and thus please excuse some more amateur attempts at design in this project. This is just for fun and with my downtime. I am also a very new CookieRun: Braverse player so I know the rules in this sim are not perfectly implemented.
 
-## Roadmap
-
-There are many things that are still needing to be updated and reworked, but I intend to get more feedback and critical features moving forward. Below are some of the things I'm considering in no particular order:
-
-- Adding multiplayer. Of course TCG games are nothing without community and so this feature is one of my top priorities.
-
-- Introducing customizability for sleeves and mats. Right now the placeholder images are a bit ugly and I'd like to make the game feel more fun.
-
-- There is code to ensure we allow for as many cards as possible, however the newer sets have cards that are still missing and so this needs to be fixed.
-
-- I would like to add a deck builder to this implementation. I think text base deck building can be easy to implement but is not as fun and requires more work.
-
-- Better animations and sounds. This bit is lacking and I know this needs to be improved to make the gameplay more enjoyable.
-
-- Further simplifying the installation and running of the game. I know that running python code is not most people's favorite way of launching a program so I would like to fix that asap.
 
 ### Contents
 
