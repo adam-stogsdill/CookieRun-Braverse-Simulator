@@ -19,6 +19,7 @@
   --battle-scale: 1;   /* the battle area and its overlays */
   --panel-scale: 1;    /* the side panel: log, moves, card viewer */
   --mat-scale: 1;      /* how wide the playmat is allowed to get */
+  --builder-scale: 1;  /* the deck builder: its card pool and decklist */
 
   --card-w: calc(92px * var(--card-scale));
   --card-h: calc(128px * var(--card-scale));
@@ -30,6 +31,13 @@
   /* The mat, the seat bar and the hand row are one column and share a width. */
   --mat-max: calc(1180px * var(--mat-scale));
   --panel-w: calc(340px * var(--panel-scale));
+
+  /* The deck builder's own two card sizes. Declared here beside the others
+   * rather than in builder.css, because a custom property is substituted where
+   * it is *declared* — these have to sit on the same `:root` the scale does. */
+  --pool-card-w: calc(94px * var(--builder-scale));
+  --pool-thumb-w: calc(26px * var(--builder-scale));
+  --pool-thumb-h: calc(36px * var(--builder-scale));
   /* The playmat and the card back are both themeable from the Table tab, and
      both are per seat — your sleeves are yours wherever you sit, the way they
      are across a real table. The stock look lives in the `-default` variables

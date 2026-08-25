@@ -14,9 +14,9 @@
 
 const SIZE_KEY = "braverse.sizes";
 
-/* Four things, because they are the four that people run out of room in — and
- * because each is a region you can point at, rather than a global zoom that
- * makes the small things bigger along with the ones you were reading. */
+/* One per region people actually run out of room in — each something you can
+ * point at, rather than a global zoom that makes the small things bigger along
+ * with the ones you were trying to read. */
 const SIZES = [
   {
     id: "battle", prop: "battle-scale", name: "battle area cards",
@@ -29,6 +29,16 @@ const SIZES = [
   {
     id: "mat", prop: "mat-scale", name: "playmat width",
     hint: "how far the mat may spread on a wide screen",
+  },
+  {
+    id: "builder", prop: "builder-scale", name: "deck builder cards",
+    hint: "the card pool and the decklist's thumbnails",
+    // Lives in the deck builder's own toolbar rather than in this dialog. It
+    // is the one size you cannot see while the dialog is open — the builder is
+    // a different tab, not the board behind — so it belongs next to the thing
+    // it resizes. Still one of `SIZES`, so it is clamped, saved and reset with
+    // the rest; only where its control is drawn differs.
+    at: "#pool-size",
   },
   {
     id: "panel", prop: "panel-scale", name: "side panel",
@@ -50,7 +60,8 @@ const STEP = 5;
 const lowest = (spec) => Math.max(MIN, spec.min || MIN);
 const highest = (spec) => Math.min(MAX, spec.max || MAX);
 
-const DEFAULT_SIZES = { battle: 100, card: 100, mat: 100, panel: 100 };
+const DEFAULT_SIZES = { battle: 100, card: 100, mat: 100, builder: 100,
+                        panel: 100 };
 
 function loadSizes() {
   try {
@@ -127,14 +138,48 @@ function sizeRow(spec) {
 function renderSizes() {
   const wrap = el("#size-rows");
   wrap.innerHTML = "";
-  SIZES.forEach((spec) => wrap.appendChild(sizeRow(spec)));
+  SIZES.filter((spec) => !spec.at)
+       .forEach((spec) => wrap.appendChild(sizeRow(spec)));
+}
+
+/* Sliders that live somewhere else in the page.
+ *
+ * The control is already in the markup, next to whatever it sizes; this only
+ * gives it its range and its behaviour, so the numbers are stated once here
+ * rather than repeated in the HTML where they could drift. */
+function wireElsewhere() {
+  SIZES.filter((spec) => spec.at).forEach((spec) => {
+    const input = el(spec.at);
+    if (!input) return;                 // that part of the page is not built
+    input.min = String(lowest(spec));
+    input.max = String(highest(spec));
+    input.step = String(STEP);
+    input.value = String(sizes[spec.id]);
+    input.oninput = () => {
+      sizes[spec.id] = clamp(spec, input.value);
+      applySizes();
+    };
+    input.onchange = saveSizes;
+  });
+}
+
+/** Put every control back in step with `sizes`, wherever it is drawn. */
+function syncSizeControls() {
+  renderSizes();
+  SIZES.filter((spec) => spec.at).forEach((spec) => {
+    const input = el(spec.at);
+    if (input) input.value = String(sizes[spec.id]);
+  });
 }
 
 renderSizes();
+wireElsewhere();
 
 el("#size-reset").onclick = () => {
   Object.assign(sizes, DEFAULT_SIZES);
   saveSizes();
   applySizes();
-  renderSizes();
+  // Including the ones outside the dialog: Reset sizes means all of them, and
+  // a slider left showing an old number is a slider that lies.
+  syncSizeControls();
 };

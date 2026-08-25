@@ -63,7 +63,9 @@ body.view-build .builder {
   min-height: 0;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(94px, 1fr));
+  /* `auto-fill` means the slider changes how many cards fit across as well as
+   * how big they are, which is the thing people are actually adjusting. */
+  grid-template-columns: repeat(auto-fill, minmax(var(--pool-card-w), 1fr));
   gap: 10px;
   align-content: start;
   padding-right: 4px;
@@ -138,7 +140,10 @@ body.view-build .builder {
   display: flex; align-items: center; gap: 7px;
   padding: 2px 0;
 }
-.decklist .row .card { width: 26px; height: 36px; cursor: pointer; flex: 0 0 auto; }
+.decklist .row .card {
+  width: var(--pool-thumb-w); height: var(--pool-thumb-h);
+  cursor: pointer; flex: 0 0 auto;
+}
 .decklist .row .card img { border-radius: 3px; }
 .decklist .rname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .decklist .rmeta { color: var(--dim); font-size: 10px; flex: 0 0 auto; }
@@ -185,3 +190,12 @@ body.view-build .builder {
   color: var(--dim); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   padding-left: 12px; white-space: pre-wrap; word-break: break-word;
 }
+
+/* The pool's own size slider. Kept narrow so it sits in the filter bar rather
+ * than pushing the search box around; the range itself is set by sizing.js so
+ * the numbers live in one place. */
+.pool-bar .pool-size {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--dim); flex: 0 0 auto;
+}
+.pool-bar .pool-size input[type="range"] { width: 92px; }
