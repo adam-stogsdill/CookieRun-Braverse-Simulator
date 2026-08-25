@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.43
+Current Version: 0.2.44
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -1148,15 +1148,51 @@ before the link goes quiet — a refusal is indistinguishable from a peer that
 never answered, and the message is only useful if it reaches the person who has
 to update.
 
-Signalling is done by hand. One of you picks **I'll start** and gets a code; you
-send it over whatever you already use to talk to each other; they paste it, send
-back a reply code, and the game begins on its own. A signalling server would be
-one more thing to run, to trust and to keep online, for an exchange that happens
-once per game. The codes are gzipped where the browser has `CompressionStream`,
-which takes a few kilobytes of SDP down to a few hundred characters.
+Arranging the game is the one part that cannot itself be peer-to-peer: two
+browsers that have never met cannot describe themselves to each other out of
+nothing. The first version did it by hand — each side produced a few hundred
+characters of compressed session description and the two of you pasted them back
+and forth — which needed no infrastructure at all and was, correctly, judged a
+miserable way to start a game with a friend.
 
-Because that exchange is paced by *people*, so is everything waiting on it:
-`SIGNAL_TIMEOUT` is half an hour, not the minute an RPC would get. The first
+So the codes now say *where to collect an invitation* rather than being one.
+A short code cannot contain a session description, but it can contain an
+address, and this project already runs something that gives a machine a public
+one: the tunnel in `tunnel.py`. The host publishes its offer behind its own
+tunnel and hands out something like
+`c.K7QP9X.neither-founded-marks-suse` — thirty-odd characters, one line. The
+other player types it in and their machine does the rest: it collects the offer,
+answers it, and the two browsers connect. There is nothing to send back.
+`rendezvous.py` is the whole of it — the code format, the board of offers
+waiting to be collected, and the two calls that fetch and answer.
+
+Three things about that are deliberate:
+
+- **The tunnel is opened on demand, and only by the host.** Nobody has to have
+  remembered `--online`, and the joiner needs no tunnel client at all — worth
+  saying plainly in the UI, because "you both need to install something" is a
+  much bigger ask than the one actually being made.
+- **The exchange is machine to machine, never browser to browser.** A browser
+  fetching another machine's tunnel is a cross-origin request, and opening CORS
+  wide enough to allow it would let any page anyone visits talk to this server.
+  The joiner's own server has no such problem and is where the game already
+  lives, so `/api/peer/collect` and `/api/peer/reply` do the talking.
+- **The tunnel carries the introduction and nothing else.** Once the two
+  browsers are connected the decisions go directly between them; the tunnel
+  could be shut down and the game would not notice. `/api/signal/offer` and
+  `/api/signal/answer` are the only routes on it a stranger is meant to reach,
+  and the six-character key is what stops someone who merely knows the tunnel
+  address — a room invite from the same server carries it in the open — from
+  walking into a peer game as well. First answer wins; a second is refused
+  rather than allowed to replace a connection already being made.
+
+Anyone holding a code can answer the offer and become your opponent, exactly as
+anyone holding a room code can take the free seat. It is an invitation, so send
+it the way you would send an invitation.
+
+Everything waiting on that exchange is still paced by *people* — somebody has
+to read a code, find the app and type it — so `SIGNAL_TIMEOUT` is half an hour,
+not the minute an RPC would get. The first
 version got this wrong and it was instructive — the codes exchanged perfectly,
 WebRTC connected, and then nothing happened, because the handshake had given up
 sixty seconds in and nothing was reading the wire any more. `TURN_TIMEOUT` is

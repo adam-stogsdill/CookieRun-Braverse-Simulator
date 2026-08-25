@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.44
+
+- **Playing someone directly now takes one short code.** Whoever starts the
+  game gets something like `c.K7QP9X.neither-founded-marks-suse` — one line,
+  short enough to type — and the other player just enters it. That is the whole
+  exchange: no walls of text, and nothing to send back. The game starts by
+  itself once they use it.
+- **Only the person starting the game needs anything installed.** Hosting opens
+  its own connection when you click, so there is no flag to have remembered,
+  and whoever joins needs nothing at all. If the host is missing the piece it
+  needs, the game now says so in terms of what you were trying to do, and names
+  the one command that fixes it.
+- A code is an invitation and works like one: anyone you send it to can take the
+  seat, the first person to use it gets it, and it stops working after half an
+  hour so an old message in a chat log is not still a way in.
+
 ## 0.2.43
 
 - **The game wears its own icon while it is running.** The window in the

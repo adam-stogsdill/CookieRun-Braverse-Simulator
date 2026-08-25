@@ -1424,10 +1424,14 @@ body.online #settings-watch { display: none; }
  * after it has closed, with `.open` reporting false the whole time. Scoping it
  * to the open state lets the UA hide it again. */
 #peerplay[open] { display: flex; flex-direction: column; max-height: 88vh; }
+/* The body scrolls and the footer does not, rather than the footer being
+ * sticky *inside* the scrolling area — a sticky last child stays pinned while
+ * everything before it slides underneath, so the bottom of the content is
+ * unreachable however far you scroll. Two boxes, one of which moves. */
 #peerplay .peer-form {
-  display: flex; flex-direction: column; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
-#peerplay .peer-foot { position: sticky; bottom: 0; background: var(--panel); }
+#peerplay .peer-body { overflow-y: auto; min-height: 0; }
 #peerplay .peer-blurb { margin: 0 0 10px; font-size: 12px; color: var(--dim); line-height: 1.5; }
 #peerplay .peer-warn {
   margin: 0 0 14px; padding: 10px 12px; font-size: 12px; line-height: 1.5;

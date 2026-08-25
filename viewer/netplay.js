@@ -419,6 +419,13 @@ const PeerUI = {
   showStep(which) {
     el("#peer-step-host").classList.toggle("hidden", which !== "host");
     el("#peer-step-guest").classList.toggle("hidden", which !== "guest");
+    if (!which) return;
+    // The dialog is taller than it can show — the warning above is worth its
+    // space and is not going anywhere — so the step that just opened has to be
+    // scrolled to, or its Copy button sits below the fold and the code looks
+    // like something you are meant to select by hand.
+    const step = el(which === "host" ? "#peer-step-host" : "#peer-step-guest");
+    requestAnimationFrame(() => step.scrollIntoView({ block: "end" }));
   },
 
   deck() { return el("#peer-deck").value; },
@@ -466,7 +473,12 @@ const PeerUI = {
     Peer.note("opening a way in for them…");
     try {
       const code = await Peer.host(PeerUI.deck(), PeerUI.name());
-      if (code === null) return;                 // `Peer.host` already said why
+      if (code === null) {
+        // `Peer.host` has already said why. Take the step back down rather than
+        // leaving "Send this code to the other player" over an empty box.
+        PeerUI.showStep(null);
+        return;
+      }
       el("#peer-code").value = code;
       PeerUI.copy("#peer-code");
       Peer.note("send them that code — the game starts when they use it");
