@@ -615,6 +615,18 @@ const TunnelUI = {
     el("#tunnel-test").classList.toggle("hidden", !s || !s.client);
 
     if (!s) { what.textContent = "could not ask this computer about it."; return; }
+    TunnelUI.renderPicker(s);
+
+    if (s.preferMissing) {
+      // Asked for one thing and given another. Saying so beats a screen that
+      // reports "ready" while quietly using something else.
+      what.textContent =
+        `${s.prefer} is not installed on this computer, so ${s.client || "nothing"} `
+        + `is being used instead. Install ${s.prefer}, or choose again below.`;
+      token.classList.add("hidden");
+      install.classList.add("hidden");
+      return;
+    }
 
     if (!s.client) {
       what.textContent = s.install;
@@ -659,6 +671,56 @@ const TunnelUI = {
         ? "Ready — using ngrok, with a token from this computer's environment."
         : "Ready — using ngrok, and it has your authtoken.")
       : "Using ngrok, which needs a free account token before it can connect.";
+  },
+
+  /** The service picker: every client we know, marked with what is here.
+   *
+   * All of them are listed rather than only the installed ones, because
+   * picking one you have not got yet is a reasonable thing to do on the way to
+   * installing it — and a list that hid them would look like the app did not
+   * support them.
+   */
+  renderPicker(s) {
+    const pick = el("#tunnel-prefer");
+    if (!pick) return;
+    const installed = s.installed || [];
+    const choices = s.choices || [];
+    const want = [""].concat(choices).join("|");
+    if (pick.dataset.built !== want) {
+      pick.innerHTML = "";
+      const auto = h("option", null, "choose for me (cloudflared first)");
+      auto.value = "";
+      pick.appendChild(auto);
+      for (const name of choices) {
+        const option = h("option", null,
+          name + (installed.includes(name) ? "" : " — not installed"));
+        option.value = name;
+        pick.appendChild(option);
+      }
+      pick.dataset.built = want;
+    }
+    pick.value = s.prefer || "";
+  },
+
+  async prefer(name) {
+    try {
+      const got = await Peer.reach("/api/tunnel/prefer", { prefer: name });
+      if (got.error) { TunnelUI.note(got.error, true); return; }
+      TunnelUI.state = got;
+      TunnelUI.render();
+      // The line above already explains a choice that is not installed; saying
+      // "using ngrok" underneath it would contradict it in the same breath.
+      const settled = got.preferMissing ? `saved, but ${got.prefer} is not here yet`
+        : got.prefer ? `using ${got.prefer}`
+        : "choosing automatically";
+      TunnelUI.note(got.reopen
+        // A tunnel already open belongs to whatever opened it; the choice
+        // applies to the next one rather than retroactively.
+        ? settled + " — it applies next time the game is restarted"
+        : settled);
+    } catch (err) {
+      TunnelUI.note(err.message || String(err), true);
+    }
   },
 
   /** Install a client, and keep saying what is happening while it runs. */
@@ -751,6 +813,8 @@ document.addEventListener("DOMContentLoaded", () => {
   bind("#tunnel-forget", () => TunnelUI.forget());
   bind("#tunnel-test", () => TunnelUI.test());
   bind("#tunnel-get", () => TunnelUI.install());
+  const pick = el("#tunnel-prefer");
+  if (pick) pick.onchange = () => TunnelUI.prefer(pick.value);
   // The end of setting up is the thing you were trying to do in the first place.
   bind("#tunnel-host", () => {
     el("#settings").close();

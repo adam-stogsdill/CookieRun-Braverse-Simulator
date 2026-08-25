@@ -9,13 +9,27 @@
   --accent2: #4aa8ff;
   --good: #43c07b;
   --bad: #f0554f;
-  --card-w: 92px;
-  --card-h: 128px;
+  /* How big the board is drawn. Every size below is a printed measurement
+     multiplied by one of these, and `sizing.js` is the only thing that writes
+     them — onto this very element, so the whole cascade moves at once and no
+     renderer knows the preference exists. A laptop, a television and a pair of tired
+     eyes are not asking for the same board, and it is cheaper to let someone
+     say so than to guess on their behalf. */
+  --card-scale: 1;     /* hand, support, stage, the stacks */
+  --battle-scale: 1;   /* the battle area and its overlays */
+  --panel-scale: 1;    /* the side panel: log, moves, card viewer */
+  --mat-scale: 1;      /* how wide the playmat is allowed to get */
+
+  --card-w: calc(92px * var(--card-scale));
+  --card-h: calc(128px * var(--card-scale));
   /* The battle area is where the game is actually read, so its cards are
      bigger than the ones in a support row. Every overlay that stands in for a
      Cookie — the flip reveal, the break, the skill popup — sizes off these. */
-  --battle-card-w: 110px;
-  --battle-card-h: 153px;
+  --battle-card-w: calc(110px * var(--battle-scale));
+  --battle-card-h: calc(153px * var(--battle-scale));
+  /* The mat, the seat bar and the hand row are one column and share a width. */
+  --mat-max: calc(1180px * var(--mat-scale));
+  --panel-w: calc(340px * var(--panel-scale));
   /* The playmat and the card back are both themeable from the Table tab, and
      both are per seat — your sleeves are yours wherever you sit, the way they
      are across a real table. The stock look lives in the `-default` variables
@@ -84,7 +98,7 @@ html, body {
 
 body {
   display: grid;
-  grid-template-columns: 1fr 340px;
+  grid-template-columns: 1fr var(--panel-w);
   grid-template-rows: 46px 1fr;
   grid-template-areas: "bar bar" "table panel";
 }
@@ -155,7 +169,7 @@ button:disabled { opacity: .45; cursor: default; }
 .mat {
   position: relative;
   width: 100%;
-  max-width: 1180px;
+  max-width: var(--mat-max);
   margin: 0 auto;
   display: grid;
   grid-template-columns: 168px minmax(0, 1fr) 148px;
@@ -237,9 +251,13 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
          border: 1px dashed var(--felt-line); border-radius: 10px; background: rgba(0,0,0,.12); }
 .stack.clickable { cursor: pointer; }
 .stack.clickable:hover { border-color: rgba(240,169,43,.6); background: rgba(240,169,43,.06); }
-.stack .stackart { position: relative; width: 44px; height: 61px; flex: 0 0 auto; }
+.stack .stackart {
+  position: relative; flex: 0 0 auto;
+  width: calc(44px * var(--card-scale)); height: calc(61px * var(--card-scale));
+}
 .stack .stackart .card {
-  position: absolute; inset: 0; width: 44px; height: 61px;
+  position: absolute; inset: 0;
+  width: calc(44px * var(--card-scale)); height: calc(61px * var(--card-scale));
   transform: translate(var(--ox, 0), var(--oy, 0));
 }
 /* Under a face-up top card, the pile's depth is the *edges* of the cards below
@@ -265,7 +283,7 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
 
 .seatbar {
   display: flex; align-items: center; gap: 6px;
-  width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 4px 2px;
+  width: 100%; max-width: var(--mat-max); margin: 0 auto; padding: 0 4px 2px;
 }
 .seatbar .who { font-weight: 600; font-size: 12px; }
 .seatbar .pill {
@@ -326,8 +344,8 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
   background: #232a3a; border-radius: 6px;
 }
 .card.rested { transform: rotate(90deg); }
-.card.small { width: 54px; height: 75px; }
-.card.mid { width: 74px; height: 103px; }
+.card.small { width: calc(54px * var(--card-scale)); height: calc(75px * var(--card-scale)); }
+.card.mid { width: calc(74px * var(--card-scale)); height: calc(103px * var(--card-scale)); }
 .card:hover { z-index: 6; }
 
 /* the printed card back, for everything face down */
@@ -392,7 +410,7 @@ body.has-cardback .card.back::after { content: none; }
 /* --------------------------------------------------------------------- hand */
 .handrow {
   display: flex; align-items: flex-end; justify-content: center; gap: 10px;
-  width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 6px; min-height: 108px;
+  width: 100%; max-width: var(--mat-max); margin: 0 auto; padding: 0 6px; min-height: 108px;
 }
 .handrow .tag { font-size: 10px; color: var(--dim); white-space: nowrap; }
 .hand { display: flex; padding-left: 14px; }
@@ -568,6 +586,20 @@ body.has-cardback .card.back::after { content: none; }
 /* -------------------------------------------------------------------- panel */
 .panel {
   grid-area: panel;
+  /* The panel's preference is one number doing two things: the column it sits
+     in grows, and the panel is zoomed to match. In its own coordinates those
+     cancel — the layout in here is untouched and the whole of it is simply
+     drawn larger. `zoom` rather than a font size because nearly every size in
+     this file is in px, and rather than a transform because a transform would
+     leave the old box behind and paint over the table. The card widths are
+     reset for the same reason: they are already being scaled by this. */
+  zoom: var(--panel-scale);
+  /* Zoom scales the panel's own box as well as its contents, so an automatic
+     width would be the column's width painted `--panel-scale` times too wide
+     and half the log would hang off the screen. Dividing it back out is what
+     makes the panel land exactly on its column. */
+  width: calc(var(--panel-w) / var(--panel-scale));
+  --card-scale: 1;
   display: grid;
   grid-template-rows: auto minmax(200px, 1fr) auto auto auto minmax(84px, 20%);
   border-left: 1px solid var(--line);
@@ -682,8 +714,25 @@ body.has-cardback .card.back::after { content: none; }
   margin: 0 auto 9px; border-radius: 6px;
 }
 
+/* -------------------------------------------------------------- size rows */
+/* One row per region, laid out on a grid so the sliders line up under one
+   another and the readouts share a column — four rows of "label input value"
+   left to drift would read as four separate settings rather than one set. */
+.sizes { display: grid; gap: 6px; margin-bottom: 8px; }
+.size-row {
+  display: grid; grid-template-columns: 1fr 150px 44px;
+  align-items: center; gap: 10px;
+}
+.size-name { display: block; font-size: 11.5px; color: var(--dim); margin: 0; cursor: pointer; }
+.size-row input[type=range] { width: 100%; }
+.size-read { font-size: 11px; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
+.size-foot { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+
 /* ------------------------------------------------------------------ dialogs */
 dialog {
+  /* Furniture rather than board: a card shown in a dialog is being read, not
+     played, so it keeps its printed size whatever the table is set to. */
+  --card-scale: 1;
   background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 14px;
   padding: 18px 20px; width: 560px; max-width: 92vw;
@@ -1076,7 +1125,7 @@ body.online #settings-watch { display: none; }
 .picker-prompt { font-size: 13px; font-weight: 600; }
 .picker-count { font-size: 11px; color: var(--dim); margin-left: auto; }
 .picker-row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-height: 46vh; overflow: auto; }
-.picker-card { width: 74px; cursor: pointer; border-radius: 9px; padding: 3px; border: 1px solid transparent; }
+.picker-card { width: calc(74px * var(--card-scale)); cursor: pointer; border-radius: 9px; padding: 3px; border: 1px solid transparent; }
 .picker-card:hover { border-color: #46506a; }
 .picker-card.picked { border-color: var(--accent); background: rgba(240,169,43,.14); }
 .picker-card.picked .card { box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(0,0,0,.5); }
@@ -1097,8 +1146,8 @@ body.online #settings-watch { display: none; }
 /* The opening toss: for those few seconds it is the only thing happening, so
    it belongs in the middle rather than in the panel on the far right. */
 .centre {
-  /* centred over the table, not the window: the panel owns the right 340px */
-  position: fixed; left: calc((100% - 340px) / 2); top: 50%;
+  /* centred over the table, not the window: the panel owns the right column */
+  position: fixed; left: calc((100% - var(--panel-w)) / 2); top: 50%;
   transform: translate(-50%, -50%);
   z-index: 78; text-align: center;
   background: rgba(16, 20, 28, .94);
@@ -1115,7 +1164,7 @@ body.online #settings-watch { display: none; }
   display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
   margin-bottom: 12px;
 }
-.centre-card { width: 74px; }
+.centre-card { width: calc(74px * var(--card-scale)); }
 .centre-card .cname {
   font-size: 9.5px; color: var(--dim); margin-top: 4px; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

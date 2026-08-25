@@ -67,17 +67,29 @@ function playableSeat() {
 }
 
 /** How to name a seat: the person in it online, the pilot driving it locally. */
+/* What a seat is called on screen.
+ *
+ * Seats are numbered from zero everywhere inside — the engine, the room
+ * tokens, `mySeat`, the replay format — and none of that changes here. This is
+ * the one place that turns an index into something to show a person, who
+ * counts from one. Every label goes through it, so the two numbering schemes
+ * meet in exactly one function rather than wherever someone last wrote a
+ * string. */
+function playerName(seat) {
+  return "Player " + (Number(seat) + 1);
+}
+
 function seatLabel(seat, snap) {
   const room = (snap && snap.room) || state.lobby;
   if (room) {
-    const name = (room.seats[seat] || {}).name || `seat ${seat}`;
+    const name = (room.seats[seat] || {}).name || playerName(seat);
     return seat === state.mySeat && snap && snap.seat !== null ? `${name} (you)` : name;
   }
   // In a replay every seat's pilot is "replay", which says nothing about the
   // game being watched — so name whoever actually played it.
   const pilots = (snap && snap.replay && snap.replay.pilots)
     || (snap && snap.pilots) || [];
-  return `seat ${seat} · ${prettyPilot(pilots[seat] || "")}`;
+  return `${playerName(seat)} · ${prettyPilot(pilots[seat] || "")}`;
 }
 
 /* Seat the viewer at the bottom of the table.
@@ -658,7 +670,7 @@ function renderSide(seat, snap) {
   if (snap.online) {
     bar.appendChild(h("span", "who", seatLabel(seat, snap)));
   } else {
-    bar.appendChild(h("span", "who", "Seat " + seat));
+    bar.appendChild(h("span", "who", playerName(seat)));
     // A replayed seat is labelled with whoever played it, not with the fact
     // that it is being read off a file — the header already says that.
     const pilot = (snap.replay && snap.replay.pilots ? snap.replay.pilots : snap.pilots)[seat];
@@ -861,8 +873,8 @@ function renderTurnline(snap) {
   // In a replay both pilots read "replay", which the line already says at the
   // end — naming it twice per turn is noise.
   const who = snap.online || snap.replay
-    ? `<b>${snap.replay ? "seat " + snap.turnPlayer : seatLabel(snap.turnPlayer, snap)}</b>`
-    : `<b>seat ${snap.turnPlayer}</b> (${prettyPilot(snap.pilots[snap.turnPlayer])})`;
+    ? `<b>${snap.replay ? playerName(snap.turnPlayer) : seatLabel(snap.turnPlayer, snap)}</b>`
+    : `<b>${playerName(snap.turnPlayer)}</b> (${prettyPilot(snap.pilots[snap.turnPlayer])})`;
   // Watching one back rather than playing it: say so, and say how far in.
   // The seed belongs to a game you might want to play again; a replay is
   // already exactly the game it is, and the line is tight enough as it is.

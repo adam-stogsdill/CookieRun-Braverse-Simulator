@@ -300,13 +300,13 @@
     <div id="local-pane">
     <div class="grid">
       <div class="seat">
-        <h3>Seat 0 <span class="tag">goes first</span></h3>
+        <h3>Player 1 <span class="tag">goes first</span></h3>
         <label>pilot <select id="pilot0"></select></label>
         <label>deck <select id="deck0"></select></label>
         <div class="deckinfo" id="deckinfo0"></div>
       </div>
       <div class="seat">
-        <h3>Seat 1</h3>
+        <h3>Player 2</h3>
         <label>pilot <select id="pilot1"></select></label>
         <label>deck <select id="deck1"></select></label>
         <div class="deckinfo" id="deckinfo1"></div>
@@ -341,6 +341,13 @@
 
     <h3>Playing online</h3>
     <div id="tunnel-box">
+      <label class="check pick" id="tunnel-pick-row"
+             title="Which service to use when more than one is installed">
+        service
+        <select id="tunnel-prefer">
+          <option value="">choose for me</option>
+        </select>
+      </label>
       <p class="tun-what" id="tunnel-what">checking…</p>
 
       <div id="tunnel-install" class="hidden">
@@ -385,6 +392,13 @@
     <label class="check" title="Card flicks, hits and breaks">
       <input id="sound" type="checkbox" checked> sound
     </label>
+
+    <h3>Sizes <span class="tag">— drag one and watch the board behind</span></h3>
+    <div id="size-rows" class="sizes"></div>
+    <div class="size-foot">
+      <button id="size-reset" class="ghost tiny" type="button">Reset sizes</button>
+      <span class="hint">Remembered in this browser.</span>
+    </div>
 
     <h3>Misclick guard</h3>
     <label class="check pick" title="Hold the mouse button to send a move you cannot take back, instead of clicking it">
@@ -538,6 +552,7 @@
 <script src="/app.js"></script>
 <script src="/builder.js"></script>
 <script src="/showcase.js"></script>
+<script src="/sizing.js"></script>
 <script src="/table.js"></script>
 <script src="/replays.js"></script>
 <script src="/tutorial.js"></script>

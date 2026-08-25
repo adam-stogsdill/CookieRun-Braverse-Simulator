@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.46
+Current Version: 0.2.48
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -100,6 +100,7 @@ play_server.py        the visual player: play a bot, play a person, or watch two
 viewer/               its browser front end (no build step, no dependencies, no assets)
                         app.js/style.css the table, builder.* the deck builder,
                         table.* the sleeve and playmat tab,
+                        sizing.js how big the board is drawn,
                         replays.* the replay shelf
 selfplay.py           bulk self-play harness and win-rate report
 train_rl.py           train / evaluate the RL agent
@@ -708,6 +709,36 @@ felt wearing the dark felt's outlines is unreadable. The two seats start on
 different sleeves, because telling your cards from your opponent's at a glance
 is what sleeving them is for.
 
+**How big everything is drawn is a preference.** A 13" laptop and a television
+across the room are not asking for the same board, and neither is anyone who
+would rather read a card than squint at one. **Settings → Sizes** has one
+slider per region — the battle area's cards, the hand and support cards, how
+wide the playmat may spread, and the side panel — each from 60% to 175% of the
+size it ships at, and each taking effect as it is dragged, because the dialog
+sits over the board you are sizing and a number you cannot watch land is a
+number you have to guess at.
+
+Underneath it is four multipliers written onto `<html>`, and every measurement
+in `style.css` is a printed size multiplied by one of them. Nothing that draws
+the table, an overlay or the panel knows the preference exists, so a size
+survives a re-render, a seat swap and a refresh for free. Onto `<html>` rather
+than `<body>`, for a reason worth stating once: a custom property is
+substituted where it is *declared*, and `--card-w` is declared on `:root` — set
+the scale one element lower and `:root` goes on reading the 1 it declares
+itself, so the slider moves and the cards do not. `tests/test_viewer.py` pins
+that, and pins that every slider names a scale something is actually measured
+against.
+
+The side panel is the odd one: it takes its width out of the table's, so it is
+capped at 150% and its number does two things at once — the column grows, and
+the panel is zoomed to match. In its own coordinates those cancel out, so the
+layout inside is untouched and the whole of it is simply drawn bigger. `zoom`
+rather than a font size because nearly every size in the file is in px, and
+rather than a transform because a transform would leave the old box behind and
+paint over the table. Cards shown in the panel, in a dialog or among the Table
+tab's swatches keep their printed size: those are being read or previewed, not
+played, and a swatch that moved with the board would stop being a swatch.
+
 **Traps stand up when they can be sprung.** A response window is the one moment
 your hand can act on someone else's turn, and the only card in it that can act
 is a trap you can pay for. Those rise out of the hand with a green ring; the
@@ -1268,6 +1299,24 @@ id.
 The cost is code length — a hundred-bit key rather than six characters, so
 about fifty characters rather than thirty-five. Still one line, still typeable,
 and it buys not having to trust anybody's tunnel with your session description.
+
+#### Which client gets used
+
+`find_backend` takes the first client on PATH in `BACKENDS` order, which puts
+cloudflared first because it is the only one needing no account, no token and
+nothing configured anywhere. That is a good default and was, until recently,
+the *only* behaviour — which is wrong for the person who installed playit
+precisely because cloudflared is what fails behind their CGNAT.
+
+So a preference can be stored (`~/.braverse/tunnel.pref`, set from Settings or
+`--tunnel`, and the flag simply sets the setting so the two cannot disagree).
+A preference that names a client which is not installed **falls back rather
+than failing**, and `status` reports `preferMissing` so the screen can say
+"ngrok is not installed, so cloudflared is being used instead" — silently using
+something other than the thing someone picked is the failure this reports
+rather than has. Anything unrecognised, in the file or from the wire, reads as
+automatic: the value ends up in a `shutil.which` lookup, so it is checked
+against the known backends rather than trusted.
 
 #### playit.gg
 

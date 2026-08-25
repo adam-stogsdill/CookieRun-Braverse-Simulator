@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.48
+
+- **You can now set how big the board is drawn.** Settings has a **Sizes**
+  section with a slider for each part of the table — the battle area's cards,
+  your hand and the support rows, how wide the playmat spreads, and the side
+  panel with the log and the card viewer. They move the board as you drag them,
+  so you can see where you are landing, and **Reset sizes** puts everything
+  back. What you pick is remembered in this browser.
+
+## 0.2.47
+
+- **The seats are called Player 1 and Player 2** on the board, in the turn
+  line, in the match set-up and in the replay shelf, instead of Seat 0 and
+  Seat 1. Counting players from one is what everybody does.
+- **You can choose which service online play uses.** Settings → Playing online
+  has a picker listing cloudflared, ngrok and playit, marking which of them are
+  installed. It is left on **choose for me** by default, which prefers
+  cloudflared because it needs no account — worth changing only if you
+  installed one of the others on purpose.
+- Picking one you have not installed says so and keeps working with whatever
+  you do have, rather than quietly using something else or refusing to play.
+- The same choice is available as `--tunnel` for anyone starting the game from
+  a terminal, and the two agree: the flag sets the setting.
+
 ## 0.2.46
 
 - **playit.gg now works as well**, alongside cloudflared and ngrok, on both

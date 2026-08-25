@@ -36,7 +36,11 @@ function replayOutcome(row) {
   if (result.winner === null || result.winner === undefined || result.winner === -1) {
     return ["draw", turns].filter(Boolean).join(" · ");
   }
-  return [`seat ${result.winner} wins`, turns].filter(Boolean).join(" · ");
+  // `playerName` lives in app.js, which loads first; checked for rather than
+  // assumed, the way this file treats everything else it does not own.
+  const who = typeof playerName === "function"
+    ? playerName(result.winner) : `seat ${result.winner}`;
+  return [`${who} wins`, turns].filter(Boolean).join(" · ");
 }
 
 async function refreshReplays() {

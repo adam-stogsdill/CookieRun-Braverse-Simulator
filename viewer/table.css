@@ -14,6 +14,10 @@ body.view-table .panel,
 body.view-table .controls,
 body.view-table .turnline { display: none; }
 body.view-table .tablekit {
+  /* Samples of the stock look, at the sizes this file picks: the Sizes
+     preference is about the board, and a swatch that moved with it would stop
+     being a swatch. */
+  --card-scale: 1;
   grid-column: 1 / -1;
   grid-row: 2;
   display: flex;

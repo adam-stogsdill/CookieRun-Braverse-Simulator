@@ -734,6 +734,32 @@ def test_every_asset_the_page_asks_for_is_served():
     assert not missing, f"not in the do_GET allowlist: {missing}"
 
 
+def test_a_size_preference_reaches_the_measurements_it_scales():
+    """The size sliders write onto <html>, and `:root` declares what they feed.
+
+    Two ways this silently does nothing, both of which look like a slider that
+    moves and a board that does not. A custom property is substituted where it
+    is *declared*, so `--card-w: calc(92px * var(--card-scale))` on `:root`
+    reads the `--card-scale` that `:root` has — writing the preference one
+    element lower, onto <body>, leaves the cards exactly where they were. And
+    a slider naming a property nothing measures itself against is a control
+    wired to nothing at all.
+    """
+    css = (VIEWER / "style.css").read_text(encoding="utf-8")
+    js = (VIEWER / "sizing.js").read_text(encoding="utf-8")
+
+    assert "documentElement.style.setProperty" in js, \
+        "the sizes must be set on <html>: :root reads its own declarations"
+
+    written = set(re.findall(r'prop: "([a-z-]+)"', js))
+    assert written, "no sliders found in sizing.js"
+    root = css.split("}", 1)[0]          # the opening `:root { ... }` block
+    for prop in sorted(written):
+        assert f"--{prop}:" in root, f"--{prop} is not declared on :root"
+        # Declared *and* used: a scale nothing multiplies by is a dead control.
+        assert f"var(--{prop})" in css, f"--{prop} scales nothing"
+
+
 def test_a_dialog_is_not_forced_visible_after_it_closes():
     """An id rule setting `display` on a <dialog> must be scoped to `[open]`.
 

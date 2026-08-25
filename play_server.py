@@ -205,6 +205,10 @@ def ensure_public() -> str:
             backend = TUN.find_backend()
             want = (TUN.PLAYIT_LOCAL_PORT
                     if backend is not None and backend.name == "playit" else 0)
+            # `open_tunnel` picks the client again below; it must land on the
+            # same one this port was chosen for, or a playit tunnel would be
+            # pointed at an ephemeral port.
+            chosen = backend.name if backend is not None else ""
             try:
                 server = Viewer(("127.0.0.1", want), PublicHandler)
             except OSError as exc:
@@ -212,7 +216,8 @@ def ensure_public() -> str:
                     f"could not listen on 127.0.0.1:{want} for playit "
                     f"({exc}) — something else is using it") from exc
             threading.Thread(target=server.serve_forever, daemon=True).start()
-        link = TUN.open_tunnel(server.server_address[1], authtoken=NGROK_TOKEN)
+        link = TUN.open_tunnel(server.server_address[1], authtoken=NGROK_TOKEN,
+                               prefer=chosen)
         PUBLIC_SERVER, PUBLIC_LINK = server, link
         PUBLIC_URL = link.url.rstrip("/") + "/"
         PUBLIC_HOST = link.host
@@ -2850,6 +2855,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             self._file(VIEWER / "index.html")
         elif path in ("/app.js", "/sfx.js", "/confirm.js", "/style.css",
+                      "/sizing.js",
                       "/builder.js", "/builder.css",
                       "/table.js", "/table.css",
                       "/showcase.js", "/showcase.css",
@@ -3285,11 +3291,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"ok": True})
         elif path in ("/api/tunnel/authtoken", "/api/tunnel/forget",
-                      "/api/tunnel/test", "/api/tunnel/install"):
+                      "/api/tunnel/test", "/api/tunnel/install",
+                      "/api/tunnel/prefer"):
             if not self._is_local():
                 self._json({"error": "only on the machine running the server"}, 403)
                 return
-            if path == "/api/tunnel/install":
+            if path == "/api/tunnel/prefer":
+                # Changing which client to use cannot affect a tunnel that is
+                # already open — that one belongs to whatever opened it — so
+                # the reply says whether a restart is what makes it take hold.
+                name = TUN.save_preference(str(body.get("prefer") or ""))
+                self._json({"ok": True, "prefer": name,
+                            "reopen": bool(PUBLIC_URL),
+                            **TUN.status(NGROK_TOKEN)})
+            elif path == "/api/tunnel/install":
                 global INSTALL_JOB
                 if INSTALL_JOB is not None and INSTALL_JOB.running:
                     self._json({"ok": True, "job": INSTALL_JOB.poll()})
@@ -3699,6 +3714,11 @@ def main() -> None:
     # machine that uses ngrok rather than cloudflared needs a token from
     # somewhere. Passing one here is for a one-off or a script; `--save-…` is
     # for a machine you use, and after that neither flag is needed again.
+    parser.add_argument("--tunnel", default="", metavar="CLIENT",
+                        choices=[""] + [b.name for b in TUN.BACKENDS],
+                        help="which tunnel client to prefer; the default picks "
+                             "cloudflared when it is installed, since it needs "
+                             "no account. Also settable in Settings.")
     parser.add_argument("--ngrok-authtoken", default="", metavar="TOKEN",
                         help="use this ngrok authtoken (also read from "
                              f"${TUN.AUTHTOKEN_ENV}, or from --save-ngrok-authtoken)")
@@ -3729,6 +3749,10 @@ def main() -> None:
         print("forgot the saved ngrok authtoken" if TUN.forget_token()
               else "there was no saved ngrok authtoken")
         raise SystemExit(0)
+    if args.tunnel:
+        # A flag is for this run and for good: the same value the screen sets,
+        # so the two cannot drift into disagreeing about which client is used.
+        TUN.save_preference(args.tunnel)
     NGROK_TOKEN = args.ngrok_authtoken.strip()
     if args.save_ngrok_authtoken:
         if not NGROK_TOKEN:

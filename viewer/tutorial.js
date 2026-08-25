@@ -98,7 +98,7 @@ const STEPS = [
   {
     id: "welcome",
     title: "A guided first game",
-    body: "You are seat 0 in a real match against the bot — nothing here is a "
+    body: "You are Player 1 in a real match against the bot — nothing here is a "
         + "mock-up. I will stop you at each new idea and get out of the way in "
         + "between. Close this at any point with <b>End tutorial</b>.",
     next: "Deal me in",

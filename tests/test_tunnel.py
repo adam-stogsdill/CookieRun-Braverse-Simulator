@@ -408,3 +408,84 @@ def test_a_machine_running_playit_is_told_what_is_left_to_do(monkeypatch):
     assert "playit setup" in state["setup"]
     # Nothing to type here: both remaining steps are on their account.
     assert state["needsToken"] is False
+
+
+# ---------------------------------------------------------------------------
+# choosing which client to use
+# ---------------------------------------------------------------------------
+# Before this, whichever client came first in `BACKENDS` won and there was no
+# way to say otherwise — which is wrong for the person who installed playit
+# *because* cloudflared is what fails behind their CGNAT.
+def installed(*names):
+    return lambda name: ("/usr/bin/" + name) if name in names else None
+
+
+def test_the_default_is_cloudflared_when_it_is_there(home, monkeypatch):
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared", "ngrok", "playit"))
+    assert TUN.read_preference() == ""
+    assert TUN.find_backend().name == "cloudflared"
+
+
+def test_a_choice_is_honoured_over_the_default(home, monkeypatch):
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared", "playit"))
+    TUN.save_preference("playit")
+    assert TUN.find_backend().name == "playit"
+
+
+def test_choosing_nothing_goes_back_to_automatic(home, monkeypatch):
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared", "playit"))
+    TUN.save_preference("playit")
+    assert TUN.save_preference("") == ""
+    assert TUN.read_preference() == ""
+    assert TUN.find_backend().name == "cloudflared"
+    assert not TUN.preference_path().exists()
+
+
+def test_a_choice_that_is_not_installed_falls_back_and_says_so(home, monkeypatch):
+    """Rather than refusing to play with no explanation."""
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared"))
+    TUN.save_preference("ngrok")
+    assert TUN.find_backend().name == "cloudflared"
+    state = TUN.status()
+    assert state["prefer"] == "ngrok" and state["client"] == "cloudflared"
+    assert state["preferMissing"] is True
+
+
+def test_a_choice_that_is_installed_does_not_report_a_gap(home, monkeypatch):
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared", "ngrok"))
+    TUN.save_preference("ngrok")
+    assert TUN.status()["preferMissing"] is False
+
+
+@pytest.mark.parametrize("junk", ["bogus", "../etc/passwd", "cloudflared; rm -rf /",
+                                  "  ", "NGROK\n"])
+def test_a_name_that_is_not_a_client_is_not_stored(home, junk):
+    """It ends up in a filename and then in a `which` lookup."""
+    saved = TUN.save_preference(junk)
+    assert saved in ("", "ngrok")          # "NGROK\n" normalises; the rest do not
+    if saved == "":
+        assert TUN.read_preference() == ""
+
+
+def test_a_hand_edited_preference_file_is_ignored_rather_than_trusted(home):
+    TUN.preference_path().parent.mkdir(parents=True, exist_ok=True)
+    TUN.preference_path().write_text("rm -rf /\n", encoding="utf-8")
+    assert TUN.read_preference() == ""
+
+
+def test_the_status_lists_what_can_be_chosen_and_what_is_here(home, monkeypatch):
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared"))
+    state = TUN.status()
+    assert state["choices"] == [b.name for b in TUN.BACKENDS]
+    assert state["installed"] == ["cloudflared"]
+
+
+def test_opening_a_tunnel_uses_the_client_it_was_asked_for(home, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(TUN.shutil, "which", installed("cloudflared", "playit"))
+    monkeypatch.setattr(TUN.subprocess, "Popen",
+                        lambda argv, **kw: seen.update(argv=argv) or
+                        (_ for _ in ()).throw(OSError("stop here")))
+    with pytest.raises(TUN.TunnelError):
+        TUN.open_tunnel(9000, prefer="playit")
+    assert seen["argv"][0] == "playit"

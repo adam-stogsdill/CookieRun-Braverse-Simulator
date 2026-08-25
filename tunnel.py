@@ -371,8 +371,16 @@ def status(explicit: str = "") -> dict:
     backend = find_backend()
     name = backend.name if backend else ""
     needs = name == "ngrok"
+    wanted = read_preference()
     return {
         "client": name,
+        # What was asked for, what is actually installed, and — when those
+        # disagree — the fact that they do. Silently using something other than
+        # the thing someone picked is the failure this reports rather than has.
+        "prefer": wanted,
+        "installed": [b.name for b in BACKENDS if shutil.which(b.name)],
+        "choices": [b.name for b in BACKENDS],
+        "preferMissing": bool(wanted and wanted != name),
         "scheme": backend.scheme if backend else "",
         # playit cannot be set up from here at all: the claim and the tunnel
         # both live on your account. So the screen says what to go and do
@@ -447,8 +455,59 @@ BACKENDS = (
 )
 
 
-def find_backend() -> Optional[Backend]:
-    """The first tunnel client on PATH, in preference order."""
+# Which client to reach for when more than one is installed. Empty means the
+# order in `BACKENDS`, which puts cloudflared first because it is the only one
+# that needs no account, no token and nothing configured anywhere. A stored
+# value overrides that — someone behind CGNAT may have installed playit
+# precisely because cloudflared is what fails for them, and before this there
+# was no way to say so.
+PREFERENCE_FILE = "tunnel.pref"
+
+
+def preference_path() -> Path:
+    return Path.home() / ".braverse" / PREFERENCE_FILE
+
+
+def read_preference() -> str:
+    """The chosen client, or "" for automatic. Never raises."""
+    try:
+        name = preference_path().read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return ""
+    return name if name in {b.name for b in BACKENDS} else ""
+
+
+def save_preference(name: str) -> str:
+    """Remember which client to prefer. "" (or anything unknown) means auto."""
+    name = (name or "").strip().lower()
+    if name not in {b.name for b in BACKENDS}:
+        name = ""
+    path = preference_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not name:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return ""
+    path.write_text(name + "\n", encoding="utf-8")
+    return name
+
+
+def find_backend(prefer: str = "") -> Optional[Backend]:
+    """The tunnel client to use: the preferred one if it is here, else the
+    first on PATH in `BACKENDS` order.
+
+    A preference that is set but not installed does **not** stop everything —
+    it falls back and `status` reports the gap, so the screen can say "you
+    asked for ngrok and it is not installed" rather than the game simply
+    refusing with no explanation.
+    """
+    prefer = (prefer or "").strip().lower() or read_preference()
+    if prefer:
+        for backend in BACKENDS:
+            if backend.name == prefer and shutil.which(backend.name):
+                return backend
     for backend in BACKENDS:
         if shutil.which(backend.name):
             return backend
@@ -557,14 +616,14 @@ class Tunnel:
 
 
 def open_tunnel(port: int, timeout: float = STARTUP_TIMEOUT,
-                authtoken: str = "") -> Tunnel:
+                authtoken: str = "", prefer: str = "") -> Tunnel:
     """Start a tunnel to loopback ``port`` and return it once it has an address.
 
     Raises `TunnelError` if no client is installed, or if the one that is never
     reports an address — the caller can then go back to serving locally instead
     of printing an invite link that leads nowhere.
     """
-    backend = find_backend()
+    backend = find_backend(prefer)
     if backend is None:
         raise TunnelError(INSTALL_HINT)
     # Only ngrok has anything to authenticate with; cloudflared quick tunnels
