@@ -8,11 +8,14 @@
   panel with the log and the card viewer. They move the board as you drag them,
   so you can see where you are landing, and **Reset sizes** puts everything
   back. What you pick is remembered in this browser.
-- **The deck builder's cards resize too**, from a **size** slider in the
-  builder's own filter bar. Turn it down and the pool packs ten cards to a row
-  for skimming a set; turn it up and four fill the width with their rules text
-  readable. The decklist's thumbnails follow along, it is remembered like the
-  other sizes, and **Reset sizes** puts it back with them.
+- **The deck builder zooms, with − and + buttons in its own filter bar.** Click
+  for a small step, or hold one down and it keeps going — faster the longer you
+  hold it, so crossing the whole range takes a couple of seconds rather than
+  forty clicks.
+- **It zooms much further than before**, from 40% up to 400%: small enough to
+  fit twenty-one cards across for skimming a set, large enough to read a card's
+  rules text without leaning in. The decklist's thumbnails follow along, the
+  zoom is remembered, and **Reset sizes** puts it back with the others.
 - **Fixed: the game could not see cloudflared (or ngrok) even though it was
   installed.** Opening the game by double-clicking it gives it a much shorter
   list of places to look for programs than a terminal does — and on a Mac that

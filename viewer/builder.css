@@ -198,4 +198,17 @@ body.view-build .builder {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; color: var(--dim); flex: 0 0 auto;
 }
-.pool-bar .pool-size input[type="range"] { width: 92px; }
+.pool-bar .pool-size .zoom-label { color: var(--dim); }
+.pool-bar .pool-size .zoom {
+  width: 22px; height: 22px; padding: 0; line-height: 1;
+  font-size: 14px; font-weight: 700; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  /* Held down rather than clicked, so the browser's own press behaviours —
+   * text selection, the double-tap-to-zoom delay on touch — are in the way. */
+  user-select: none; touch-action: manipulation;
+}
+/* Wide enough for "400%" so the buttons do not shuffle sideways as it counts. */
+.pool-bar .pool-size .zoom-read {
+  min-width: 38px; text-align: center;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}

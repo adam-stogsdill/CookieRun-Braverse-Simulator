@@ -39,6 +39,11 @@ const SIZES = [
     // it resizes. Still one of `SIZES`, so it is clamped, saved and reset with
     // the rest; only where its control is drawn differs.
     at: "#pool-size",
+    stepper: true,
+    // Far wider than the sliders: a pool of 1401 cards is two different jobs —
+    // skimming a set at a glance, and reading rules text without a magnifier —
+    // and the old 60–175 did neither end properly.
+    min: 40, max: 400,
   },
   {
     id: "panel", prop: "panel-scale", name: "side panel",
@@ -57,8 +62,19 @@ const MIN = 60;
 const MAX = 175;
 const STEP = 5;
 
-const lowest = (spec) => Math.max(MIN, spec.min || MIN);
-const highest = (spec) => Math.min(MAX, spec.max || MAX);
+/* A spec may name its own bounds, wider or narrower than the defaults.
+ *
+ * Widening used to be forbidden, on the grounds that a size you cannot undo is
+ * a trap. That still holds for anything whose *own control* is inside what it
+ * scales — shrink the side panel far enough and the slider goes with it. The
+ * deck builder's zoom is the case it does not hold for: the buttons live in the
+ * filter bar, which `--builder-scale` does not touch, so they stay exactly where
+ * they were at any zoom. Hence a floor rather than a fixed ceiling — nothing may
+ * reach zero, which is the only size there is genuinely no way back from. */
+const FLOOR = 10;
+
+const lowest = (spec) => Math.max(FLOOR, spec.min || MIN);
+const highest = (spec) => Math.max(lowest(spec), spec.max || MAX);
 
 const DEFAULT_SIZES = { battle: 100, card: 100, mat: 100, builder: 100,
                         panel: 100 };
@@ -142,33 +158,120 @@ function renderSizes() {
        .forEach((spec) => wrap.appendChild(sizeRow(spec)));
 }
 
-/* Sliders that live somewhere else in the page.
+/* Holding a zoom button should get you across the range without wearing your
+ * finger out, and without shooting past the size you wanted in the first
+ * quarter second. So a press does one step at once, waits long enough that a
+ * click is only ever one step, and then repeats — faster the longer it is
+ * held, and in bigger jumps once it is clear this is a journey rather than a
+ * nudge. */
+const HOLD_DELAY = 350;     // before a press becomes a repeat at all
+const REPEAT_FROM = 200;    // first repeat interval
+const REPEAT_TO = 40;       // as fast as it ever goes
+const RAMP = 1400;          // milliseconds to reach full speed
+const LEAP_AFTER = 1200;    // after this long, move in bigger steps
+
+function stepFor(held) {
+  return held > LEAP_AFTER ? STEP * 4 : STEP;
+}
+
+function intervalFor(held) {
+  const eased = Math.min(1, held / RAMP);
+  return REPEAT_FROM + (REPEAT_TO - REPEAT_FROM) * eased;
+}
+
+/** Wire one +/- button so press-and-hold keeps going. Returns a teardown. */
+function holdToRepeat(button, apply) {
+  let timer = null;
+  let started = 0;
+
+  const tick = () => {
+    const held = Date.now() - started;
+    apply(stepFor(held));
+    timer = setTimeout(tick, intervalFor(held));
+  };
+
+  const stop = () => {
+    if (timer === null) return;
+    clearTimeout(timer);
+    timer = null;
+    // Saved once, on release: a hold is one decision, and it ends where the
+    // finger comes off.
+    saveSizes();
+  };
+
+  button.addEventListener("pointerdown", (event) => {
+    // Left button only, and never the browser's own drag-the-button behaviour.
+    if (event.button !== 0) return;
+    event.preventDefault();
+    // Keeps the hold alive if the finger slides off the button. Guarded
+    // because it throws on a pointer id the browser does not know about, and
+    // losing the press to an exception would be worse than losing the capture.
+    try { button.setPointerCapture(event.pointerId); } catch (err) { /* no capture */ }
+    started = Date.now();
+    apply(STEP);                       // a click is exactly one step
+    timer = setTimeout(tick, HOLD_DELAY);
+  });
+  // Every way a press can end, including the pointer being taken away by a
+  // scroll or the window losing focus mid-hold — a stuck timer here would zoom
+  // for ever with nothing pressed.
+  for (const done of ["pointerup", "pointercancel", "pointerleave", "blur"]) {
+    button.addEventListener(done, stop);
+  }
+  window.addEventListener("blur", stop);
+  return stop;
+}
+
+/* Controls that live somewhere else in the page.
  *
- * The control is already in the markup, next to whatever it sizes; this only
- * gives it its range and its behaviour, so the numbers are stated once here
- * rather than repeated in the HTML where they could drift. */
+ * The container is already in the markup, next to whatever it sizes; its
+ * contents and behaviour are built here, so the range and the stepping live in
+ * one place rather than being repeated in the HTML where they could drift. */
 function wireElsewhere() {
   SIZES.filter((spec) => spec.at).forEach((spec) => {
-    const input = el(spec.at);
-    if (!input) return;                 // that part of the page is not built
-    input.min = String(lowest(spec));
-    input.max = String(highest(spec));
-    input.step = String(STEP);
-    input.value = String(sizes[spec.id]);
-    input.oninput = () => {
-      sizes[spec.id] = clamp(spec, input.value);
+    const host = el(spec.at);
+    if (!host) return;                 // that part of the page is not built
+    host.innerHTML = "";
+
+    const nudge = (by) => {
+      const before = sizes[spec.id];
+      sizes[spec.id] = clamp(spec, before + by);
+      if (sizes[spec.id] === before) return;   // already at the end
       applySizes();
+      syncSizeControls();
     };
-    input.onchange = saveSizes;
+
+    const out = h("button", "zoom", "−");
+    out.type = "button";
+    out.title = "Zoom out — hold to keep going";
+    holdToRepeat(out, (by) => nudge(-by));
+
+    const read = h("span", "zoom-read", sizes[spec.id] + "%");
+    read.id = spec.at.slice(1) + "-read";
+
+    const into = h("button", "zoom", "+");
+    into.type = "button";
+    into.title = "Zoom in — hold to keep going";
+    holdToRepeat(into, (by) => nudge(by));
+
+    host.appendChild(h("span", "zoom-label", "size"));
+    host.appendChild(out);
+    host.appendChild(read);
+    host.appendChild(into);
   });
 }
 
-/** Put every control back in step with `sizes`, wherever it is drawn. */
+/** Put every control back in step with `sizes`, wherever it is drawn.
+ *
+ * Deliberately does not rebuild the controls outside the dialog: they are being
+ * held down while this runs, and replacing a button mid-press would drop the
+ * pointer capture and the hold with it. Only the readout changes. */
 function syncSizeControls() {
   renderSizes();
   SIZES.filter((spec) => spec.at).forEach((spec) => {
+    const read = el(spec.at + "-read");
+    if (read) read.textContent = sizes[spec.id] + "%";
     const input = el(spec.at);
-    if (input) input.value = String(sizes[spec.id]);
+    if (input && input.tagName === "INPUT") input.value = String(sizes[spec.id]);
   });
 }
 
