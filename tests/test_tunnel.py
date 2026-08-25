@@ -269,8 +269,9 @@ def test_a_real_looking_token_is_handed_to_ngroks_own_store(monkeypatch):
     monkeypatch.setattr(TUN.subprocess, "run",
                         lambda argv, **kw: seen.update(argv=argv, kw=kw) or Done())
     assert TUN.configure_token("2abcDEF_ghi-jkl.mno") == ""
-    assert seen["argv"] == ["ngrok", "config", "add-authtoken",
-                            "2abcDEF_ghi-jkl.mno"]
+    # The path it was found at, not the bare name — see `client_path`.
+    assert os.path.basename(seen["argv"][0]) == "ngrok"
+    assert seen["argv"][1:] == ["config", "add-authtoken", "2abcDEF_ghi-jkl.mno"]
     # A list, and never through a shell — the two together are what make the
     # value above impossible to read as anything but one argument.
     assert seen["kw"].get("shell") in (None, False)
@@ -289,6 +290,7 @@ def test_ngroks_own_complaint_is_passed_on_without_the_token_in_it(monkeypatch):
 
 def test_configuring_without_ngrok_says_so_rather_than_failing_oddly(monkeypatch):
     monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN, "EXTRA_BINS", {})
     assert "not installed" in TUN.configure_token("2abcDEF_ghi-jkl")
 
 
@@ -301,13 +303,19 @@ def test_only_a_client_we_know_can_be_installed(client):
 def test_the_install_command_is_built_from_fixed_strings(monkeypatch):
     monkeypatch.setattr(TUN.sys, "platform", "darwin")
     monkeypatch.setattr(TUN.shutil, "which", lambda name: "/usr/bin/" + name)
-    assert TUN.installer("ngrok") == ["brew", "install", "ngrok"]
-    assert TUN.installer("cloudflared") == ["brew", "install", "cloudflared"]
+    for client in ("ngrok", "cloudflared"):
+        argv = TUN.installer(client)
+        assert os.path.basename(argv[0]) == "brew"
+        assert argv[1:] == ["install", client]
 
 
 def test_a_machine_with_no_package_manager_is_not_offered_an_install(monkeypatch):
     """Better a download page than fetching a binary from somewhere ourselves."""
     monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    # `client_path` also searches the usual install folders, and the machine
+    # running this test has real ones — so they have to be emptied too, or this
+    # would be testing that Homebrew is installed here.
+    monkeypatch.setattr(TUN, "EXTRA_BINS", {})
     assert TUN.installer("ngrok") is None
     assert TUN.DOWNLOAD_PAGES["ngrok"].startswith("https://ngrok.com/")
 
@@ -488,4 +496,99 @@ def test_opening_a_tunnel_uses_the_client_it_was_asked_for(home, monkeypatch):
                         (_ for _ in ()).throw(OSError("stop here")))
     with pytest.raises(TUN.TunnelError):
         TUN.open_tunnel(9000, prefer="playit")
-    assert seen["argv"][0] == "playit"
+    assert os.path.basename(seen["argv"][0]) == "playit"
+
+
+# ---------------------------------------------------------------------------
+# finding a client that PATH does not mention
+# ---------------------------------------------------------------------------
+# The game is meant to be double-clicked, and a process launched that way on
+# macOS gets `PATH=/usr/bin:/bin:/usr/sbin:/sbin` — no `/opt/homebrew/bin`,
+# which is where Homebrew puts everything on Apple Silicon. Relying on `PATH`
+# alone told people who had just installed cloudflared, and watched it work in
+# their terminal, that they had not installed it.
+@pytest.fixture
+def bare_path(tmp_path, monkeypatch):
+    """A machine where PATH is useless and the client is in the usual place."""
+    folder = tmp_path / "opt" / "homebrew" / "bin"
+    folder.mkdir(parents=True)
+    exe = folder / "cloudflared"
+    exe.write_text("#!/bin/sh\nexit 0\n")
+    exe.chmod(0o755)
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN.sys, "platform", "darwin")
+    monkeypatch.setitem(TUN.EXTRA_BINS, "darwin", [str(folder)])
+    return exe
+
+
+def test_a_client_off_the_path_is_still_found(bare_path):
+    assert TUN.client_path("cloudflared") == str(bare_path)
+
+
+def test_and_is_then_run_by_that_full_path(bare_path):
+    """Finding it is only half: launching by bare name fails the same way."""
+    backend = next(b for b in TUN.BACKENDS if b.name == "cloudflared")
+    argv = backend.argv(9000)
+    assert argv[0] == str(bare_path)
+
+
+def test_the_screen_lists_it_as_installed(bare_path):
+    assert "cloudflared" in TUN.status()["installed"]
+    assert TUN.status()["client"] == "cloudflared"
+
+
+def test_the_package_manager_is_looked_for_the_same_way(tmp_path, monkeypatch):
+    """brew lives in /opt/homebrew/bin too, so "Install it for me" vanished."""
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    brew = folder / "brew"
+    brew.write_text("#!/bin/sh\nexit 0\n")
+    brew.chmod(0o755)
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN.sys, "platform", "darwin")
+    monkeypatch.setitem(TUN.EXTRA_BINS, "darwin", [str(folder)])
+    assert TUN.installer("cloudflared") == [str(brew), "install", "cloudflared"]
+
+
+def test_path_still_wins_when_it_has_an_answer(tmp_path, monkeypatch):
+    """The usual places are a fallback, not an override."""
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: "/usr/bin/" + name)
+    assert TUN.client_path("cloudflared") == "/usr/bin/cloudflared"
+
+
+def test_a_directory_of_the_right_name_is_not_a_client(tmp_path, monkeypatch):
+    folder = tmp_path / "bin"
+    (folder / "cloudflared").mkdir(parents=True)
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN.sys, "platform", "darwin")
+    monkeypatch.setitem(TUN.EXTRA_BINS, "darwin", [str(folder)])
+    assert TUN.client_path("cloudflared") is None
+
+
+def test_a_file_that_cannot_be_run_is_not_a_client(tmp_path, monkeypatch):
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    (folder / "cloudflared").write_text("not executable")
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN.sys, "platform", "darwin")
+    monkeypatch.setitem(TUN.EXTRA_BINS, "darwin", [str(folder)])
+    assert TUN.client_path("cloudflared") is None
+
+
+def test_the_places_looked_cover_where_these_actually_install():
+    """The two that matter: Homebrew on Apple Silicon, and winget's shims."""
+    assert "/opt/homebrew/bin" in TUN.EXTRA_BINS["darwin"]
+    assert "/usr/local/bin" in TUN.EXTRA_BINS["darwin"]
+    assert any("WinGet" in place for place in TUN.EXTRA_BINS["win32"])
+
+
+def test_windows_looks_for_the_extensions_windows_uses(tmp_path, monkeypatch):
+    folder = tmp_path / "bin"
+    folder.mkdir()
+    exe = folder / "cloudflared.exe"
+    exe.write_text("binary")
+    exe.chmod(0o755)
+    monkeypatch.setattr(TUN.shutil, "which", lambda name: None)
+    monkeypatch.setattr(TUN.sys, "platform", "win32")
+    monkeypatch.setitem(TUN.EXTRA_BINS, "win32", [str(folder)])
+    assert TUN.client_path("cloudflared") == str(exe)

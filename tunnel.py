@@ -168,6 +168,8 @@ SETUP_HINT = (
     "computer. Either will do:\n"
     "cloudflared — brew install cloudflared (no account needed)\n"
     "ngrok — brew install ngrok (free account)\n"
+    "Already installed one? Close and reopen this screen — it is checked "
+    "afresh each time.\n"
     "Someone on your own network can already join without it."
 )
 
@@ -244,9 +246,15 @@ def installer(client: str) -> Optional[list]:
     if client not in INSTALLABLE:
         return None
     plan = INSTALLERS.get(sys.platform)
-    if plan is None or not shutil.which(plan["tool"]):
+    if plan is None:
         return None
-    return plan["argv"](client)
+    tool = client_path(plan["tool"])
+    if not tool:
+        return None
+    # Same problem, same fix: `brew` is in /opt/homebrew/bin, which a
+    # double-clicked app does not have on its PATH either.
+    argv = plan["argv"](client)
+    return [tool] + argv[1:]
 
 
 class Job:
@@ -325,10 +333,11 @@ def configure_token(token: str, timeout: float = 30.0) -> str:
     if not TOKEN_RE.match(token):
         return ("that does not look like an ngrok authtoken — it should be one "
                 "unbroken string of letters, digits, dashes and underscores")
-    if not shutil.which("ngrok"):
+    exe = client_path("ngrok")
+    if not exe:
         return "ngrok is not installed on this computer yet"
     try:
-        done = subprocess.run(["ngrok", "config", "add-authtoken", token],
+        done = subprocess.run([exe, "config", "add-authtoken", token],
                               capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as exc:
         return f"could not run ngrok: {exc}"
@@ -345,10 +354,11 @@ def configured() -> bool:
     Read rather than guessed: `ngrok config check` is the client telling us
     about its own store, which is the only thing that actually knows.
     """
-    if not shutil.which("ngrok"):
+    exe = client_path("ngrok")
+    if not exe:
         return False
     try:
-        done = subprocess.run(["ngrok", "config", "check"],
+        done = subprocess.run([exe, "config", "check"],
                               capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return False
@@ -378,7 +388,7 @@ def status(explicit: str = "") -> dict:
         # disagree — the fact that they do. Silently using something other than
         # the thing someone picked is the failure this reports rather than has.
         "prefer": wanted,
-        "installed": [b.name for b in BACKENDS if shutil.which(b.name)],
+        "installed": [b.name for b in BACKENDS if client_path(b.name)],
         "choices": [b.name for b in BACKENDS],
         "preferMissing": bool(wanted and wanted != name),
         "scheme": backend.scheme if backend else "",
@@ -410,8 +420,12 @@ class Backend:
     scheme: str = "https"
 
     def argv(self, port: int) -> list[str]:
+        # The resolved path, not the bare name: the whole reason `client_path`
+        # exists is that `PATH` may not mention this, and launching by name
+        # would then fail for exactly the reason finding it did.
+        exe = client_path(self.name) or self.name
         if self.name == "cloudflared":
-            return [self.name, "tunnel", "--no-autoupdate",
+            return [exe, "tunnel", "--no-autoupdate",
                     "--url", f"http://127.0.0.1:{port}"]
         if self.name == "playit":
             # `--stdout` is what makes the address readable at all: by default
@@ -419,10 +433,10 @@ class Backend:
             # the same trap ngrok sets. The tunnel itself is configured on the
             # account rather than on the command line, which is why there is no
             # port here — see `PLAYIT_SETUP_HINT`.
-            return [self.name, "--stdout"]
+            return [exe, "--stdout"]
         # `--log stdout` is what makes the address readable at all; by default
         # ngrok draws a full-screen terminal UI and logs nowhere we can see.
-        return [self.name, "http", str(port), "--log", "stdout"]
+        return [exe, "http", str(port), "--log", "stdout"]
 
     def environ(self, token: str) -> Optional[dict]:
         """The child's environment, with the authtoken in it if there is one.
@@ -494,6 +508,48 @@ def save_preference(name: str) -> str:
     return name
 
 
+# Where a client can be even though `PATH` does not mention it.
+#
+# This is not defensiveness, it is the common case. A process launched from
+# Finder, the Dock or a double-clicked build gets `PATH=/usr/bin:/bin:...` and
+# nothing else — no `/opt/homebrew/bin`, which is where Homebrew puts things on
+# every Apple Silicon Mac. So the game, which is *meant* to be double-clicked,
+# would report "no tunnel client found" to somebody who had just installed one
+# and watched it work in their terminal. Windows has the same shape: winget
+# drops shims in a per-user directory that a fresh process may not have picked
+# up yet.
+EXTRA_BINS = {
+    "darwin": ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin",
+               "~/.local/bin"],
+    "linux": ["/usr/local/bin", "/usr/bin", "/snap/bin", "~/.local/bin"],
+    "win32": [r"~\AppData\Local\Microsoft\WinGet\Links",
+              r"~\AppData\Local\Programs",
+              r"~\AppData\Local\playit_gg\bin",
+              r"C:\Program Files\cloudflared",
+              r"C:\Program Files (x86)\cloudflared"],
+}
+
+
+def client_path(name: str) -> Optional[str]:
+    """The full path to ``name``, looking past `PATH` when it comes up empty.
+
+    Returns a path rather than a boolean because the answer is then used to
+    *run* the thing: launching by bare name would fail for exactly the same
+    reason finding it did.
+    """
+    found = shutil.which(name)
+    if found:
+        return found
+    exts = [".exe", ".cmd", ".bat", ""] if sys.platform == "win32" else [""]
+    for folder in EXTRA_BINS.get(sys.platform, []):
+        base = Path(folder).expanduser()
+        for ext in exts:
+            candidate = base / (name + ext)
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+    return None
+
+
 def find_backend(prefer: str = "") -> Optional[Backend]:
     """The tunnel client to use: the preferred one if it is here, else the
     first on PATH in `BACKENDS` order.
@@ -506,10 +562,10 @@ def find_backend(prefer: str = "") -> Optional[Backend]:
     prefer = (prefer or "").strip().lower() or read_preference()
     if prefer:
         for backend in BACKENDS:
-            if backend.name == prefer and shutil.which(backend.name):
+            if backend.name == prefer and client_path(backend.name):
                 return backend
     for backend in BACKENDS:
-        if shutil.which(backend.name):
+        if client_path(backend.name):
             return backend
     return None
 

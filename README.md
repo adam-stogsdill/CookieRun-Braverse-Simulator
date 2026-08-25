@@ -1300,6 +1300,25 @@ The cost is code length — a hundred-bit key rather than six characters, so
 about fifty characters rather than thirty-five. Still one line, still typeable,
 and it buys not having to trust anybody's tunnel with your session description.
 
+#### Finding the client at all
+
+`shutil.which` is not enough, and the reason is worth writing down because it
+cost a bug report. A process launched from Finder, the Dock or a double-clicked
+build inherits `PATH=/usr/bin:/bin:/usr/sbin:/sbin` — which does not include
+`/opt/homebrew/bin`, where Homebrew puts everything on Apple Silicon. This game
+is *meant* to be double-clicked, so relying on `PATH` told people who had just
+installed cloudflared, and watched it work in their own terminal, that they had
+not installed it.
+
+`client_path` therefore checks `PATH` first and then the handful of places these
+actually land (`EXTRA_BINS`), and it returns a **path rather than a boolean**,
+because the answer is then used to *run* the thing: launching by bare name would
+fail for precisely the reason finding it did. `Backend.argv`, `configure_token`
+and `installer` all go through it — `brew` is in `/opt/homebrew/bin` too, so
+"Install it for me" had quietly disappeared for the same reason. It is
+re-checked on every call, so installing a client while the game is open needs no
+restart, only reopening the screen.
+
 #### Which client gets used
 
 `find_backend` takes the first client on PATH in `BACKENDS` order, which puts

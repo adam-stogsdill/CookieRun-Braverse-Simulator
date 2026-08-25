@@ -8,6 +8,14 @@
   panel with the log and the card viewer. They move the board as you drag them,
   so you can see where you are landing, and **Reset sizes** puts everything
   back. What you pick is remembered in this browser.
+- **Fixed: the game could not see cloudflared (or ngrok) even though it was
+  installed.** Opening the game by double-clicking it gives it a much shorter
+  list of places to look for programs than a terminal does — and on a Mac that
+  list leaves out exactly where Homebrew installs things, so a perfectly good
+  install came back as "no tunnel client found". It now looks in the usual
+  install folders too, on both Mac and Windows.
+- If you install one while the game is open, close and reopen
+  **Settings → Playing online** and it will be there — no restart needed.
 
 ## 0.2.47
 
