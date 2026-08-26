@@ -39,15 +39,17 @@ from tqdm import tqdm
 class PolicyNet(nn.Module):
     """Scores one (state, action) row; a softmax over rows gives the policy."""
 
-    def __init__(self, hidden: int = 96, feature_dim: int = FEATURE_DIM,
+    def __init__(self, hidden: int = 1024, feature_dim: int = FEATURE_DIM,
                  state_dim: int = STATE_DIM):
         super().__init__()
         self.feature_dim = feature_dim
         self.state_dim = state_dim
         self.body = nn.Sequential(
             nn.Linear(feature_dim, hidden), nn.ReLU(),
-            nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, 1),
+            nn.Linear(hidden, hidden // 2), nn.ReLU(),
+            nn.Linear(hidden // 2, hidden // 4), nn.ReLU(),
+            nn.Linear(hidden // 4, hidden // 8), nn.ReLU(),
+            nn.Linear(hidden // 8, 1),
         )
         self.value = nn.Sequential(
             nn.Linear(state_dim, hidden), nn.ReLU(),

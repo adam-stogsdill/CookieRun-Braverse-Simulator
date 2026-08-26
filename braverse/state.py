@@ -78,6 +78,9 @@ class Cookie:
     damage_cap: int | None = None       # incoming attack damage ceiling
     attack_cost_discount: int = 0       # colour symbols shaved off the attack
     attack_cost_surcharge: int = 0      # extra {N} added to the attack
+    # "that Cookie's attack costs are all changed to {N}" — the colours drop
+    # out and only the count remains, for this turn.
+    attack_cost_all_generic: bool = False
     level_override: int | None = None   # "this Cookie's LV. becomes N"
     activate_locked: bool = False       # its 【Activate】 is suppressed
     # "During this turn, if this Cookie's HP was reduced" — set by damage and
@@ -156,6 +159,12 @@ class PlayerState:
     extra_deck: list[CardInstance] = field(default_factory=list)
 
     supported_this_turn: bool = False
+    # Set the moment this player takes a Main Phase action, because the Support
+    # Phase is over once the Main Phase has begun (6-1-1).
+    left_support_phase: bool = False
+    # 6-5-2-2 allows one 【EXTRA】 or 【Awakened】 play a turn, across the whole
+    # EXTRA deck — not one per card and not one per gate.
+    extra_played_this_turn: bool = False
     refresh_count: int = 0    # how many [refresh]es this player has done
     activated_this_turn: set[int] = field(default_factory=set)   # source uids
     traps_this_attack: int = 0

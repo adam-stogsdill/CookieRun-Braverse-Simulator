@@ -1,5 +1,73 @@
 # Changelog
 
+## 0.2.53
+
+Checked the engine against the official **Comprehensive Rules Ver.1.8**
+(27 July 2026) — a much longer document than the PLAY GUIDE this project was
+first written from. Nine rules were being played differently.
+
+- **You can only support before you act.** The Support Phase runs *before* the
+  Main Phase, and the Main Phase is only three things: play cards, activate
+  effects, battle. Placing a support card is not one of them. Until now you
+  could attack, watch the FLIPs turn over, and only then decide which card to
+  spend as energy — the phase strip already drew it as a step, and now it
+  really is one. The practice bot supports first accordingly.
+- **One 【EXTRA】 card a turn.** "The Turn Player can, once per turn, play an
+  【EXTRA】 Cookie card or 【Awakened】 Cookie card." A turn that opened two
+  gates used to be able to walk the whole EXTRA deck onto the board.
+- **【Special Play】 Cookies now cost what they print.** The five of them —
+  Dark Enchantress Cookie, the three BS11 Dough Cookies and promo Licorice
+  Cookie — were arriving for free, which made a LV.3 6 HP body a turn-one
+  drop. Each now places the Cookies it names into your trash on the way in
+  (the trash, not the break area, so your opponent banks no Level for them),
+  and cannot be played at all when there is nothing to place. Dark Enchantress
+  can be played out of a *full* battle area, because trashing her two hosts is
+  what makes room for her.
+- **【EXTRA】 Cookies go home instead of into your hand or deck.** One bounced
+  or shuffled away is placed face-down back in the EXTRA deck, and one sitting
+  in your trash returns there at [refresh]. It can only ever be played from
+  that pile, so anywhere else it was a dead card thinning your 60.
+- **Running out of deck with no Cookie in the trash loses the game.** The third
+  defeat condition, and the one the engine had no answer for: it quietly
+  reshuffled and played on forever. [refresh] also now asks for a *Cookie* of
+  LV.1 or higher, which is the only thing a break area holds.
+- **An attack by a Cookie that is no longer there deals no damage.** If a trap
+  or an attack rider removes the attacker from the battle area, the battle ends
+  where it stands. It used to swing anyway.
+- **【Blocker】 no longer needs an active Cookie**, unless the card's own price
+  is resting itself. The rule asks for the activation cost and nothing more.
+- **"A Cookie card in your hand to play" now means one you can actually play.**
+  An 【EXTRA】 Cookie that found its way into a hand, or a 【Special Play】 one
+  whose condition cannot be met, is no longer counted as the Cookie standing
+  between you and defeat — nor offered as a replacement it cannot be.
+- **Deck check: at least one non-【Special Play】 Cookie**, since a deck of
+  nothing but those has no way to put its first Cookie on the board.
+
+## 0.2.52
+
+- **Almost every promo (P) card is now playable — 30 of the 32 that were not.**
+  GingerBright's hand-size buff, Strawberry Cookie's faint trigger, Almond
+  Cookie pushing a Cookie into the support area, Pumpkin Pie Cookie stripping
+  an HP card off everything opposite, Hall of Ancient Heroes making an Ancient
+  Cookie's attack payable in any colour, Truffle Cookie trading itself for a
+  Cookie out of your support area, and two dozen more.
+- **Birthday Cake Cookie asks you.** "If today is your birthday" is not
+  something the board knows, so the card puts the question to its controller
+  rather than reading your computer's clock — which would also have meant a
+  saved replay played back differently on a different day.
+- **Fixed: five cards were playing only the first half of a sentence.**
+  Anything worded "select ... **and** <do something with them>" stopped at the
+  comma. Hermit Crab's Shell (BS2-050) never removed the Cookie it selected and
+  so did nothing at all; Essence of Rejuvenation (BS4-040) and Lilybell Cookie
+  (BS4-058) never played the Cookie they picked; Prickly Cacti Gloves (BS2-006)
+  and Muscle Cookie (P-015) never paid the HP they cost; Time Travel Ticket
+  (ST2-018) never showed you the HP pile. All six now play their whole text.
+- **Fixed: "[Ancient] Cookies" matched nothing.** The keyword in brackets was
+  also being read as a card name, and no Cookie is named "Ancient", so any card
+  that targeted them could never find a target.
+- **Fixed: "another [Pizza Cookie]" was true of a lone Pizza Cookie**, which
+  handed it a permanent attack bonus it had not earned.
+
 ## 0.2.51
 
 - **Cards that ask what happened earlier in the turn now work.** Space Doughnut

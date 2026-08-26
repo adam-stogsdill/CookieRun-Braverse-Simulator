@@ -5,6 +5,6 @@ Importing this package registers every implemented card with
 it below.
 """
 
-from . import bs1, bs10, bs11, bs2, bs9, bs8, bs3, bs4, bs5, bs6, bs7, extra, st8_green, st9_blue, st_misc  # noqa: F401
+from . import bs1, bs10, bs11, bs2, bs9, bs8, bs3, bs4, bs5, bs6, bs7, extra, promo, st8_green, st9_blue, st_misc  # noqa: F401
 
-__all__ = ["bs1", "bs10", "bs11", "bs9", "bs2", "bs3", "bs8", "bs4", "bs5", "bs6", "bs7", "extra", "st8_green", "st9_blue", "st_misc"]
+__all__ = ["bs1", "bs10", "bs11", "bs9", "bs2", "bs3", "bs8", "bs4", "bs5", "bs6", "bs7", "extra", "promo", "st8_green", "st9_blue", "st_misc"]

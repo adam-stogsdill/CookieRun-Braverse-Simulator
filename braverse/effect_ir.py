@@ -33,6 +33,10 @@ class Filter:
     keyword: Keyword | None = None
     name: str | None = None
     exclude_self: bool = False
+    # "other than [Buttercup Cookie]" — by printed name, so a second copy of
+    # the card is excluded too, which is what "other than" means about a card
+    # rather than about the copy resolving.
+    exclude_name: str | None = None
     has_flip: bool | None = None
 
     def matches(self, cookie, ctx) -> bool:
@@ -58,6 +62,8 @@ class Filter:
         if self.has_flip is not None and defn.is_flip != self.has_flip:
             return False
         if self.exclude_self and cookie is ctx.source_cookie:
+            return False
+        if self.exclude_name is not None and defn.name == self.exclude_name:
             return False
         return True
 
@@ -230,7 +236,11 @@ class Condition:
         if self.kind == "opponent_has_level":
             return any((c.defn(db).level or 0) == self.value for c in ctx.opp.battle)
         if self.kind == "name_in_battle":
-            return any(c.name(db) == self.name for c in player.battle)
+            # "another [Pizza Cookie]" is `value` 2: the Cookie asking is one
+            # of them, so "there is one" is true of every Pizza Cookie about
+            # itself and says nothing.
+            return sum(1 for c in player.battle
+                       if c.name(db) == self.name) >= max(1, self.value)
         if self.kind == "name_in_support":
             return any(db[c.card_id].name == self.name for c in player.support)
         if self.kind == "keyword_in_battle":

@@ -39,6 +39,14 @@ class RulesConfig:
     first_turn_cannot_attack: bool = True
     supports_per_turn: int = 1
     traps_per_attack: int = 1
+    # COMPREHENSIVE RULES 6-1-1/6-4/6-5-1. The Support Phase is its own phase
+    # and it runs *before* the Main Phase: "the turn player can place 1 card
+    # from their hand face up in their support area", and the Main Phase then
+    # lists exactly three things you may do — play cards, activate effects,
+    # battle. Supporting is not among them. The engine used to offer the
+    # support placement throughout the turn, which let a player attack, watch
+    # the FLIPs turn over, and only then decide which card to spend as energy.
+    support_only_before_main_actions: bool = True
 
     # --- field ------------------------------------------------------------
     max_battle_cookies: int = 2

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from braverse.cost import Cost
 from braverse.effects import (MOVEMENT_PROTECTORS, STATIC_ABILITY_CARDS,
-                              Ctx, Trigger, effect)
-from braverse.enums import CardType, Color, Keyword
+                              Ctx, Trigger, effect, special_play)
+from braverse.enums import CardType, Color, Keyword, Marker
 
 
 def _self_break(ctx: Ctx) -> bool:
@@ -425,3 +425,54 @@ def _dark_enchantress_protected(db, owner, cookie) -> bool:
 
 MOVEMENT_PROTECTORS.append(_dark_enchantress_protected)
 STATIC_ABILITY_CARDS.add("BS11-116")
+
+
+# --- 【Special Play】 --------------------------------------------------------
+# Comprehensive Rules 4-10: a 【Special Play】 Cookie has no ordinary way onto
+# the board. The printed line is its whole entrance, and 4-10-1-1 says the card
+# cannot be played while that line cannot be honoured — so this is a gate, not
+# a `<...>` cost you may decline once the move has been offered.
+#
+# Four of the five in the pool print the same sentence, "Place N {K} LV.n
+# Cookie(s) ... from your battle area into your trash", which is
+# `Game.trash_cookie` exactly: those Cookies go to the trash and *not* the
+# break area, so the opponent banks no Level for the ones you spend arriving.
+# `frees` is how many battle slots the sentence empties, which is what lets
+# Dark Enchantress be played out of a full battle area (3-5-6-1-1).
+def black_cookies(ctx: Ctx, level: int, *, marked: bool = False) -> list:
+    return [c for c in ctx.me.battle
+            if ctx.db[c.card.card_id].color is Color.BLACK
+            and c.level(ctx.db) == level
+            and (not marked or c.defn(ctx.db).has(Marker.SPECIAL_PLAY))]
+
+
+def trash_black(ctx: Ctx, count: int, level: int, *, marked: bool = False) -> bool:
+    """Pay a 【Special Play】 condition by trashing `count` of your Cookies."""
+    for _ in range(count):
+        options = black_cookies(ctx, level, marked=marked)
+        if not options:
+            return False
+        cookie = ctx.choose("\u3010Special Play\u3011: place a Cookie in your trash",
+                            options, optional=False)
+        if cookie is None:
+            return False
+        ctx.game.trash_cookie(cookie)
+    return True
+
+
+def register_special_play(card_id: str, count: int, level: int, *,
+                          marked: bool = False) -> None:
+    """Wire one "place N {K} LV.n Cookies into your trash" entrance."""
+    special_play(
+        card_id, frees=count,
+        pay=lambda ctx: trash_black(ctx, count, level, marked=marked),
+    )(lambda ctx: len(black_cookies(ctx, level, marked=marked)) >= count)
+
+
+# 【Special Play】 Place 1 {K} LV.1 Cookie from your battle area into your trash.
+register_special_play("BS11-111", 1, 1)     # Mold Dough Cookie
+register_special_play("BS11-112", 1, 1)     # Pom-pom Dough Cookie
+register_special_play("BS11-113", 1, 1)     # Venom Dough Cookie
+# 【Special Play】 Place 2 {K} LV.2 Cookies that have Special Play from your
+# battle area into your trash.
+register_special_play("BS11-115", 2, 2, marked=True)   # Dark Enchantress Cookie

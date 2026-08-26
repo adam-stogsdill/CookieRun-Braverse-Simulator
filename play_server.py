@@ -983,6 +983,11 @@ def player_json(db: CardDB, player, state: GameState) -> dict:
         "extraCount": len(player.extra_deck),
         "breakLevel": player.break_level_total(db),
         "supportedThisTurn": player.supported_this_turn,
+        # The Support Phase runs before the Main Phase and closes for good on
+        # the first Main Phase action (Comprehensive Rules 6-1-1). The phase
+        # strip needs to say "passed" from that moment rather than "ready",
+        # and only the engine knows when it happened.
+        "supportOpen": not player.left_support_phase,
     }
 
 

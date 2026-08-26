@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.51
+Current Version: 0.2.53
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -2231,20 +2231,27 @@ Cookie it means instead of awakening any LV.3 of that name.
 
 ## Rules fidelity
 
-The engine follows the official English PLAY GUIDE. The rules that matter most,
+The engine follows the official English **Comprehensive Rules** (Ver.1.8,
+27 July 2026), with the PLAY GUIDE beside it for the parts the Comprehensive
+Rules assume you already know. Where a constant in `braverse/config.py` cites
+the PLAY GUIDE, the longer document agrees with it. The rules that matter most,
 and that are easy to get wrong:
 
 - **Cookies are free and there is no level-up.** "When a Cookie card plays, you
   do not [rest] the cost in the support area." Any Cookie goes from hand into a
   free battle slot (max two). Level is not a cost or a gate — it is purely the
   number your opponent banks in your break area when that Cookie faints.
-- **Running out of deck does not lose the game.** It triggers a **[refresh]**:
-  you put one LV.1-or-higher Cookie from your trash into your *own* break area,
-  then shuffle the trash back into the deck. Decking yourself advances your
-  opponent's clock instead of ending the game.
+- **Running out of deck does not lose the game — usually.** It triggers a
+  **[refresh]**: you put one LV.1-or-higher Cookie from your trash into your
+  *own* break area, then shuffle the trash back into the deck. Decking yourself
+  advances your opponent's clock instead of ending the game. But a [refresh]
+  with **no Cookie in the trash to place** is the third defeat condition
+  (1-2-1-1-3, 9-2-1-3), and it is a real way to lose.
 - **You lose only when both** your battle area is empty **and** you have no
-  Cookie card in hand to place there. When a Cookie faints you may immediately
-  bring one from hand, [On Play] included.
+  Cookie card in hand to place there — a Cookie you can *play*, which an
+  【EXTRA】 one in your hand and a 【Special Play】 one with nothing to pay its
+  line are not. When a Cookie faints you may immediately bring one from hand,
+  [On Play] included.
 - **No summoning sickness.** A revealed Cookie enters [active] and may attack
   the turn it arrives. You cannot attack (or draw) on the very first turn of the
   game.
@@ -2252,11 +2259,36 @@ and that are easy to get wrong:
   recently used" — into the trash; a revealed FLIP fires immediately, one by
   one. At 0 HP the Cookie card goes face up to the break area; 10 total Level
   there loses.
+- **Phases are ordered, and the Support Phase is one of them.** Active, Draw,
+  Support, Main, End (6-1-1). The one support card a turn goes down *before*
+  the Main Phase; taking a Main Phase action — playing a card, activating an
+  effect, attacking — closes the Support Phase for the turn. You cannot attack,
+  watch what the FLIPs turned over, and only then choose what to spend as
+  energy.
+- **【Special Play】 is a gate, not a discount.** A Cookie that prints it has no
+  other way onto the board, and cannot be played at all while its line cannot
+  be honoured (4-10-1-1). All five in the pool print "place N {K} Cookies from
+  your battle area into your trash" — the trash, so no Level is banked for
+  them — and Dark Enchantress Cookie may therefore be played out of a full
+  battle area, since her price is the two Cookies standing in it (3-5-6-1-1).
+- **The EXTRA deck is one play a turn** (6-5-2-2), across the whole pile rather
+  than per card. An EXTRA Cookie that leaves the battle area for a *private*
+  zone — a hand, a deck — goes face-down back into the EXTRA deck instead, and
+  one in the trash returns there at [refresh] (9-4-1, 9-4-3); it can only ever
+  be played from that pile (6-5-2-3).
+- **A battle whose attacker left the battle area ends there.** If an attack
+  rider or a trap moves the attacking Cookie (or the target) to another zone,
+  the players go straight to the End Battle Step and no damage is dealt
+  (7-1-1-3, 7-1-2-2).
+- **【Blocker】 asks for the activation cost and nothing else** (10-1-1-1) — a
+  rested Cookie may still step in front of a swing, unless the card's own price
+  is resting itself, which five of them are.
 - **Deck**: 60 cards, up to 4 per *card number* (so alt arts share the cap), up
-  to 16 FLIP, at least one Cookie.
+  to 16 FLIP, at least one Cookie, and at least one Cookie that is *not*
+  【Special Play】 (5-1-1-2) — otherwise there is no way to open.
 - **Turn order** is decided by rock-paper-scissors and the winner chooses. It
   is worth choosing: in mirror matches under the heuristic, whoever goes first
-  wins **68%** of the time (ST9 68.7%, ST8 67.3% over 150 games each), despite
+  wins **66%** of the time (ST9 66.7%, ST8 64.7% over 150 games each), despite
   the opener skipping their first draw and being unable to attack.
 - **Setup**: draw 6, one free full mulligan, then further redraws while your
   hand holds no Cookie — offered, not imposed, and your opponent draws 1 each
@@ -2484,13 +2516,18 @@ cloneable and actions are fully specified, determinized MCTS is a drop-in
 replacement — `game.clone()`, shuffle the unknown zones, roll out with
 `RandomAgent`.
 
-Known gaps: 【Special Play】, 【Equip】 and 【Skill】 are not modelled, 【Awaken】
-is modelled only where the EXTRA deck uses it, and ST9-009 Wave Drop's
-"discarded by Sea Fairy" trigger is handled inside Sea Fairy's effect rather
-than as a trigger of its own.
+Known gaps: 【Skill】 is not modelled, 【Awaken】 is modelled only where the
+EXTRA deck uses it, and ST9-009 Wave Drop's "discarded by Sea Fairy" trigger is
+handled inside Sea Fairy's effect rather than as a trigger of its own.
+【Equip】 is written by hand card by card (the five BS3 Soul Jams) with no
+compiler support. One clause of the Trap Step is still loose: the Comprehensive
+Rules let the defender take exactly *one* of a trap, a 【Blocker】 and a "when
+your opponent attacks" effect (7-1-2-1), and the engine makes the first two
+exclusive but runs the third automatically alongside whichever was taken.
 
 ## Source
 
-Rules are taken from the official English **CookieRun: Braverse PLAY GUIDE**
-(Devsisters Corp.). Quoted phrases in `config.py` and the card modules come from
-that document.
+Rules are taken from the official English **CookieRun: Braverse Comprehensive
+Rules** (Ver.1.8, 27 July 2026) and the **PLAY GUIDE** (Devsisters Corp.).
+Quoted phrases in `config.py` and the card modules come from those documents;
+section numbers like 6-5-2-2 refer to the Comprehensive Rules.

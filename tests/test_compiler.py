@@ -1210,6 +1210,115 @@ def test_when_your_turn_ends_untap_is_banked_against_its_card(db):
     assert me.end_turn_untaps == [("BS5-060", 3)]
 
 
+# --- text the parser must not quietly lose ---------------------------------
+def test_a_selection_that_runs_into_another_instruction_is_refused():
+    """The `select` patterns end in `.*?$`, so a sentence that carries on past
+    the target used to hand the rest to the filter, which read none of it."""
+    from braverse.compiler import parse_filter
+
+    for parse in (parse_filter, parse_card_filter):
+        with pytest.raises(CompileError):
+            parse("your Cookies and place 2 of their HP cards in the trash")
+    # A compound *filter* is still fine — "and" only ends it when what follows
+    # gives an order.
+    assert parse_filter("Cookies whose remaining HP is 1 and is LV.2 or higher")
+
+
+def test_select_and_do_compounds_run_both_halves(ctx):
+    """Prickly Cacti Gloves (BS2-006) pays for its damage with its own HP; the
+    second half of that sentence was being dropped."""
+    program = compile_text("Select 1 of your Cookies and place 2 of their HP "
+                           "cards in the trash.")
+    mine = ctx.me.battle[0]
+    before = mine.remaining_hp
+    assert before > 2
+
+    program(ctx)
+
+    assert mine.remaining_hp == before - 2
+
+
+def test_a_bracketed_keyword_is_not_also_read_as_a_card_name():
+    """"[Ancient] Cookies" is a keyword. Read as a name as well, the filter
+    wants a Cookie printed with the name "Ancient" — which no card is, so the
+    card selects nothing and quietly does nothing."""
+    from braverse.compiler import parse_filter
+
+    ancient = parse_filter("your [Ancient] Cookies in your battle area")
+    assert ancient.keyword is not None
+    assert ancient.name is None
+    # A real bracketed name still reads as one.
+    assert parse_filter("your [Pizza Cookie]").name == "Pizza Cookie"
+
+
+def test_another_named_cookie_needs_a_second_copy(ctx, db):
+    """Pizza Cookie (P-065): "another [Pizza Cookie]" is never true of the one
+    Cookie asking about itself."""
+    from braverse.compiler import parse_condition
+
+    condition = parse_condition("another [Pizza Cookie] is in your battle area")
+    ctx.me.battle.clear()
+    first = ctx.game._deploy_cookie(ctx.me, CardInstance.make("P-065", 0),
+                                    run_on_play=False)
+    ctx.source_cookie = first
+    assert not condition.holds(ctx), "one Pizza Cookie is not 'another'"
+
+    ctx.game._deploy_cookie(ctx.me, CardInstance.make("P-065", 0),
+                            run_on_play=False)
+    assert condition.holds(ctx)
+
+
+def test_a_bare_attack_aura_is_read_as_an_attack_trigger(db):
+    """GingerBright (P-001) prints 【Your Turn】 and a conditional attack buff
+    and no other marker, so there was no trigger to hang it on at all."""
+    from braverse.effects import Trigger, get_effect, is_implemented
+
+    assert is_implemented("P-001")
+    assert get_effect("P-001", Trigger.ATTACK_START) is not None
+
+
+def test_a_rules_box_wrapped_in_an_escaped_quote_is_unwrapped(db):
+    """P-125's whole text arrives quoted, left over from however the dump was
+    written; BS11-064 uses the same escape as real punctuation inside its text
+    and must keep it."""
+    from braverse.effects import is_implemented
+
+    assert not db["P-125"].description.startswith("\\")
+    assert is_implemented("P-125")
+    assert "\\" in db["BS11-064"].description, "an inner quote is the card's own"
+
+
+# --- costs and stat rewrites -----------------------------------------------
+def test_hand_to_deck_bottom_is_a_payable_cost(ctx):
+    """Macaron Cookie (P-045) trades a card in hand for a fresh one."""
+    program = compile_text("<Place 1 card from your hand at the bottom of your "
+                           "deck.> Draw up to 1 card from your deck.")
+    ctx.trigger = Trigger.ON_PLAY.value
+    hand_before = len(ctx.me.hand)
+    deck_before = len(ctx.me.deck)
+
+    program(ctx)
+
+    assert len(ctx.me.hand) == hand_before, "one out, one in"
+    assert len(ctx.me.deck) == deck_before
+
+
+def test_attack_costs_all_changed_to_generic(ctx, db):
+    """Hall of Ancient Heroes (P-032) drops the colours, not the count."""
+    from braverse.effects import modified_attack_cost
+
+    mine = ctx.me.battle[0]
+    printed = mine.defn(db).attack.cost
+    assert printed.colored, "the fixture needs a coloured attack cost"
+
+    compile_text("Select up to 1 of your Cookies. During this turn, that "
+                 "Cookie's attack costs are all changed to {N}.")(ctx)
+
+    rewritten = modified_attack_cost(db, ctx.me, mine, printed)
+    assert rewritten.total == printed.total
+    assert not rewritten.colored
+
+
 # --- "During this turn, if ..." event guards --------------------------------
 def test_a_mid_sentence_timing_phrase_does_not_end_the_guard(ctx):
     """"If A and, during this turn, B, do X." — the comma after "and" used to
@@ -1767,3 +1876,78 @@ def test_a_soul_jam_that_does_not_equip_is_spent(db):
 
     assert card in me.trash
     assert not any(c.equipment for c in me.battle)
+
+
+# --- promo cards written by hand -------------------------------------------
+class _Answers2:
+    """A controller that answers every question with a scripted reply."""
+
+    def __init__(self, *, yes=True, pick=0):
+        self.yes = yes
+        self.pick = pick
+        self.prompts: list[str] = []
+
+    def choose_action(self, state, options):
+        return options[0] if options else None
+
+    def choose(self, state, prompt, options, *, optional):
+        self.prompts.append(prompt)
+        if options and all(isinstance(o, bool) for o in options):
+            return True if self.yes else None
+        if not options:
+            return None
+        return options[min(self.pick, len(options) - 1)]
+
+
+def test_birthday_cake_asks_rather_than_reading_the_clock(ctx, db):
+    """P-041's condition is a fact about the world, not the board.
+
+    Reading the system clock would answer it and would break every existing
+    recording — a replay re-runs the engine and would get a different answer on
+    a different day. A question is a decision, and decisions are what replays
+    already carry.
+    """
+    from braverse.effects import Trigger, get_effect
+
+    fn = get_effect("P-041", Trigger.ATTACK)
+    assert fn is not None
+    ctx.me.battle.clear()
+    mine = ctx.game._deploy_cookie(ctx.me, CardInstance.make("P-041", 0),
+                                   run_on_play=False)
+    ctx.source_cookie = mine
+    base = mine.attack_damage(db)
+
+    refuser = _Answers2(yes=False)
+    _seat(ctx, refuser)
+    fn(ctx)
+    assert refuser.prompts, "the card must ask"
+    assert mine.attack_damage(db) == base
+
+    mine.attack_bonus = 0
+    _seat(ctx, _Answers2(yes=True))
+    fn(ctx)
+    assert mine.attack_damage(db) == base + 1
+
+
+def test_an_alternative_cost_is_not_also_charged_as_the_play_cost(db):
+    """P-082 prints "<{Y}{N}> or <...>". Lifting the head of that into
+    `play_cost` bills the energy whichever way the choice goes, so the card
+    keeps both alternatives in its own effect and prints no play cost."""
+    from braverse.effects import Trigger, get_effect
+
+    assert not db["P-082"].play_cost, "the head of the text is not the price"
+    assert get_effect("P-082", Trigger.ITEM) is not None
+    # A card that prints one cost is unaffected.
+    assert db["BS3-116"].play_cost
+
+
+def test_magic_lettering_pens_goes_colourless_after_a_faint(ctx, db):
+    """P-084's rewrite makes the cost payable from any support card — the same
+    single symbol, not a cheaper one."""
+    from braverse.impl.promo import _pens_cost
+
+    assert _pens_cost(ctx) == Cost.parse("{G}")
+    ctx.me.cookies_fainted_this_turn = 1
+    rewritten = _pens_cost(ctx)
+    assert rewritten.total == 1
+    assert not rewritten.colored

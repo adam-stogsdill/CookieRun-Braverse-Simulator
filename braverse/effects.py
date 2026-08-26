@@ -129,6 +129,42 @@ def extra_play_of(db, card_id: str) -> "ExtraPlay | None":
     return EXTRA_PLAYS.get(db[card_id].base_id if card_id in db else card_id)
 
 
+@dataclass(frozen=True)
+class SpecialPlay:
+    """How one 【Special Play】 Cookie gets onto the board.
+
+    Comprehensive Rules 4-10-1-1: a Cookie with 【Special Play】 *cannot be
+    played* while its printed condition is unmet — the condition is not a cost
+    you may decline, it is the only door the card has. So the registry is
+    consulted the same way `ExtraPlay` is: no entry, or a false `gate`, and the
+    card is not a legal move at all rather than a free LV.3 body.
+
+    `pay` performs the printed condition once the move is taken, and `frees`
+    says how many battle slots it vacates on the way — Dark Enchantress trashes
+    two Cookies to arrive, so she is playable *out of a full battle area*, which
+    is what 3-5-6-1-1 allows.
+    """
+
+    gate: object                     # (ctx) -> bool
+    pay: object                      # (ctx) -> bool
+    frees: int = 0                   # battle slots the condition empties
+
+
+SPECIAL_PLAYS: dict[str, SpecialPlay] = {}
+
+
+def special_play(card_id: str, **kwargs):
+    """Register how a 【Special Play】 Cookie is played. Decorates its gate."""
+    def wrap(gate):
+        SPECIAL_PLAYS[card_id] = SpecialPlay(gate=gate, **kwargs)
+        return gate
+    return wrap
+
+
+def special_play_of(db, card_id: str) -> "SpecialPlay | None":
+    return SPECIAL_PLAYS.get(db[card_id].base_id if card_id in db else card_id)
+
+
 def may_play(db, player, opponent, defn) -> bool:
     return all(rule(db, player, opponent, defn) for rule in PLAY_CONDITIONS)
 
@@ -182,13 +218,17 @@ EFFECT_DAMAGE_BONUSES: list = []
 # a replacement Cost, or None to leave it alone.
 ATTACK_COST_MODIFIERS: list = []
 
-
 def modified_attack_cost(db, player, cookie, cost):
     for modifier in ATTACK_COST_MODIFIERS:
         replacement = modifier(db, player, cookie, cost)
         if replacement is not None:
             cost = replacement
             break
+    if getattr(cookie, "attack_cost_all_generic", False):
+        # "all changed to {N}": the same number of symbols, none of them
+        # coloured, so any support card can pay for any of them.
+        from .cost import Cost
+        cost = Cost((), cost.total)
     surcharge = getattr(cookie, "attack_cost_surcharge", 0)
     if surcharge:
         from .cost import Cost

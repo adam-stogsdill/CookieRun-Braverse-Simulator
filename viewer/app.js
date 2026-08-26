@@ -619,8 +619,11 @@ function phaseTrack(seat, snap) {
     } else if (key === "support") {
       if (player.supportedThisTurn) { cls += " used"; note = "done"; }
       else if (inSupportStep(snap)) { cls += " now"; note = "now"; }
-      else if (supportStep.passed) { cls = "phase skipped"; note = "passed"; }
-      else { cls += " available"; note = "ready"; }
+      // supportOpen is the engine's word for it: the phase closes on the first
+      // Main Phase action whether or not this client walked through the step.
+      else if (supportStep.passed || player.supportOpen === false) {
+        cls = "phase skipped"; note = "passed";
+      } else { cls += " available"; note = "ready"; }
     } else if (key === "main") {
       if (inSupportStep(snap)) { cls += " todo"; }
       else cls += snap.phase === "main" ? " now" : " done";

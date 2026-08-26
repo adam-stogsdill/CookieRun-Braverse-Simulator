@@ -394,10 +394,13 @@ def test_single_pilot_path_is_unchanged_by_the_multi_pilot_refactor(db):
                           DeckGenConfig(games_per_eval=30, seed=1), db=db)
     score = evolver.fitness(STARTER_DECKS["st9_sea_fairy"], seed_block=0)
     # Moved 19/30 -> 20/30 when "Return this Cookie to your hand" was corrected
-    # to return the revealed FLIP card rather than the Cookie it was HP for.
-    # That is a rules fix, not drift: re-pin deliberately, never to make a red
-    # test green.
-    assert score == pytest.approx(20 / 30)
+    # to return the revealed FLIP card rather than the Cookie it was HP for,
+    # then 20/30 -> 18/30 when 【Blocker】 stopped requiring an active Cookie
+    # (Comprehensive Rules 10-1-1-1 asks for the activation cost and nothing
+    # else), then 18/30 -> 17/30 when the Support Phase stopped running for
+    # the whole turn (6-1-1). All three are rules fixes, not drift: re-pin
+    # deliberately, never to make a red test green.
+    assert score == pytest.approx(17 / 30)
 
 
 # --- encoder swapping and checkpoint widths ---------------------------------

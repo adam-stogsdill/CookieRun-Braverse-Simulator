@@ -65,9 +65,17 @@ class HeuristicAgent:
 
         if isinstance(action, A.PlaceSupport):
             # Energy is the whole game early; keep taking it, but never bin a
-            # card the board is short of.
+            # card the board is short of — `_hand_value` is what picks *which*
+            # card to spend.
+            #
+            # It outranks everything, lethal included, because the Support
+            # Phase runs before the Main Phase (6-1-1): supporting first costs
+            # nothing — the attack is still there afterwards — while attacking
+            # first ends the Support Phase and throws the drop away. Scored
+            # any lower, the agent spends the whole game one energy short and
+            # the win rates measure the bot rather than the rules.
             card = self._card(state, action.card_uid)
-            return 90.0 - self._hand_value(state, me, card)
+            return 600.0 - self._hand_value(state, me, card)
 
         if isinstance(action, A.PlayCookie):
             defn = db[self._card(state, action.card_uid).card_id]

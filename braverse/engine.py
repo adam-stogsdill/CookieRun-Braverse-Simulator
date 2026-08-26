@@ -25,7 +25,7 @@ from .cards import CardDB, CardDef, blocker_price, default_db
 from .cost import Cost, plan_payment
 from .effects import (Ctx, Trigger, ask_many, cannot_attack, effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
-                      may_play, modified_attack_cost)
+                      may_play, modified_attack_cost, special_play_of)
 from .enums import CardType, Color, Keyword, Marker, Phase
 from .state import (CardInstance, Cookie, GameState, PlayerState,
                     card_label)
@@ -154,6 +154,9 @@ class Game:
         # "trap" or "block" once the defender has answered this attack; either
         # one rules the other out for the rest of the window.
         self._responded: str | None = None
+        # Non-zero while a Cookie is mid-arrival and the "your battle area is
+        # empty" check must wait for it. See `_holding_refill`.
+        self._refill_held = 0
 
     # ------------------------------------------------------------------
     # setup
@@ -178,11 +181,15 @@ class Game:
             player.extra_deck = [CardInstance.make(cid, player.index)
                                  for cid in extra_list]
             self._draw_opening_hand(player)
-        for player in state.players:
+        # 5-2-1-5: "starting with the first player". With seat 0 opening this
+        # is the order it always was, so no existing recording moves.
+        seating = [state.players[self.first_player],
+                   state.players[1 - self.first_player]]
+        for player in seating:
             self._offer_mulligan(player)
-        for player in state.players:
+        for player in seating:
             self._redraw_until_cookie(player)
-        for player in state.players:
+        for player in seating:
             self._place_opening_cookie(player)
         state.phase = Phase.ACTIVE
         state.turn_number = 1
@@ -222,7 +229,7 @@ class Game:
         opponent = self.state.opponent_of(player.index)
         free = True
         for _ in range(self.rules.max_mulligans):
-            if not free and any(self.db[c.card_id].is_cookie for c in player.hand):
+            if not free and self.playable_cookies(player):
                 return
             if not ask(self.state, list(player.hand), free=free):
                 return
@@ -248,7 +255,7 @@ class Game:
             return
         opponent = self.state.opponent_of(player.index)
         for _ in range(20):
-            if any(self.db[c.card_id].is_cookie for c in player.hand):
+            if self.playable_cookies(player):
                 return
             player.deck.extend(player.hand)
             player.hand.clear()
@@ -260,7 +267,7 @@ class Game:
     def _place_opening_cookie(self, player: PlayerState) -> None:
         """Step 5: each player places 1 Cookie card face down, then reveals it
         and builds its HP pile. [On Play] effects do not fire during setup."""
-        options = [c for c in player.hand if self.db[c.card_id].is_cookie]
+        options = self.playable_cookies(player)
         if not options:
             self._lose(player.index, "no Cookie to open with")
             return
@@ -308,8 +315,11 @@ class Game:
             cookie.attack_bonus = cookie.attack_bonus_next_turn
             cookie.attack_bonus_next_turn = 0
             cookie.hp_reduced_this_turn = False
+            cookie.attack_cost_all_generic = False
             cookie.used_markers.clear()
         player.supported_this_turn = False
+        player.left_support_phase = False
+        player.extra_played_this_turn = False
         player.activated_this_turn.clear()
         player.items_played_this_turn = 0
         self._actions_this_turn = 0
@@ -513,7 +523,9 @@ class Game:
         db = self.db
         _, colors = player.active_support_colors(db)
 
-        if not player.supported_this_turn:
+        if not player.supported_this_turn and not (
+                self.rules.support_only_before_main_actions
+                and player.left_support_phase):
             for card in player.hand:
                 out.append(A.PlaceSupport(card.uid))
 
@@ -574,6 +586,12 @@ class Game:
         rule that a move on offer is a move that does something.
         """
         out: list[A.Action] = []
+        # 6-5-2-2: "The Turn Player can, ONCE PER TURN, play an 【EXTRA】 Cookie
+        # card or 【Awakened】 Cookie card." The gate on each card is its own
+        # condition; this is the limit on top of all of them, and without it a
+        # turn that opened two gates emptied half the EXTRA deck onto the board.
+        if player.extra_played_this_turn:
+            return out
         for card in player.extra_deck:
             play = extra_play_of(self.db, card.card_id)
             if play is None:
@@ -587,6 +605,37 @@ class Game:
             elif len(player.battle) < self.rules.max_battle_cookies:
                 out.append(A.PlayExtra(card.uid))
         return out
+
+    def can_play_cookie(self, player: PlayerState, card: CardInstance) -> bool:
+        """Whether this card in hand could actually be placed in the battle area.
+
+        Three things can stop it, and every question about "a Cookie card in
+        your hand to play" has to ask all three or it is asking something
+        weaker. It has to be a Cookie; it must not be an 【EXTRA】 one, which
+        may only ever be played out of the EXTRA deck (6-5-2-3); and a
+        【Special Play】 Cookie is playable only while its printed line can be
+        honoured (4-10-1-1).
+
+        The battle-area cap is deliberately *not* part of this: the two callers
+        that ask about a *free* slot check it themselves, and the defeat
+        condition (1-2-1-1-2) is asked precisely when the battle area is empty.
+        """
+        defn = self.db[card.card_id]
+        if not defn.is_cookie or defn.type is CardType.EXTRA:
+            return False
+        if not may_play(self.db, player,
+                        self.state.opponent_of(player.index), defn):
+            return False
+        if defn.has(Marker.SPECIAL_PLAY):
+            play = special_play_of(self.db, defn.id)
+            if play is None:
+                return False
+            return bool(play.gate(self._ctx(player, source_card=card)))
+        return True
+
+    def playable_cookies(self, player: PlayerState) -> list[CardInstance]:
+        """The Cookie cards in hand that could be put into the battle area."""
+        return [c for c in player.hand if self.can_play_cookie(player, c)]
 
     def _cookie_plays(self, player: PlayerState, card: CardInstance,
                       defn: CardDef) -> list[A.Action]:
@@ -602,12 +651,16 @@ class Game:
         BS9-102 was doing before its type was fixed: "can be played if there
         are 20 cards or more in each player's trash", droppable on turn one.
         """
-        if defn.type is CardType.EXTRA:
+        if not self.can_play_cookie(player, card):
             return []
-        if len(player.battle) >= self.rules.max_battle_cookies:
-            return []
-        if not may_play(self.db, player,
-                        self.state.opponent_of(player.index), defn):
+        # 3-5-6-1-1: a 【Special Play】 condition that empties battle slots
+        # empties them *before* the Cookie arrives, so a full battle area is
+        # not in its way — Dark Enchantress trashes the two Cookies she is
+        # standing on.
+        play = (special_play_of(self.db, defn.id)
+                if defn.has(Marker.SPECIAL_PLAY) else None)
+        frees = play.frees if play is not None else 0
+        if len(player.battle) - frees >= self.rules.max_battle_cookies:
             return []
         return [A.PlayCookie(card.uid, None)]
 
@@ -651,13 +704,22 @@ class Game:
         if self._pending_attack and self._responded is None:
             _, target = self._pending_attack
             for cookie in player.battle:
-                if cookie.uid == target.uid or cookie.rested:
+                # 10-1-1-1: 【Blocker】 redirects an attack aimed at "one of
+                # your Cookie cards *other than* the 【Blocker】 card".
+                if cookie.uid == target.uid:
                     continue
                 if player.blockers_disabled:
                     break
                 price = self._blocker_cost(cookie)
-                if price is not None and plan_payment(price[0], colors) is not None:
-                    out.append(A.Block(cookie.uid))
+                if price is None or plan_payment(price[0], colors) is None:
+                    continue
+                # Being rested only stops the five Cookies whose price *is*
+                # resting themselves. The rules ask for the activation cost and
+                # nothing else, so a rested Cookie with an energy price is
+                # still allowed to step in front of the swing.
+                if price[1] and cookie.rested:
+                    continue
+                out.append(A.Block(cookie.uid))
         return out
 
     def _blocker_cost(self, cookie: Cookie) -> tuple[Cost, bool] | None:
@@ -683,6 +745,10 @@ class Game:
         if self._actions_this_turn > self.max_actions_per_turn:
             self.end_turn()
             return
+        # The Support Phase ends the moment a Main Phase action is taken; from
+        # then on the support placement is no longer on offer (6-1-1, 6-5-1).
+        if not isinstance(action, (A.PlaceSupport, A.EndTurn)):
+            self.state.current.left_support_phase = True
         handler = {
             A.PlaceSupport: self._do_place_support,
             A.PlayCookie: self._do_play_cookie,
@@ -706,8 +772,47 @@ class Game:
 
     def _do_play_cookie(self, action: A.PlayCookie) -> None:
         player = self.state.current
-        card = self._take_from_hand(player, action.card_uid)
-        self._deploy_cookie(player, card, onto=action.onto)
+        card = self._peek_hand(player, action.card_uid)
+        defn = self.db[card.card_id]
+        play = (special_play_of(self.db, defn.id)
+                if defn.has(Marker.SPECIAL_PLAY) else None)
+        if play is None:
+            self._take_from_hand(player, action.card_uid)
+            self._deploy_cookie(player, card, onto=action.onto)
+            return
+        # 【Special Play】: the printed line is paid on the way in, and paying
+        # it can empty the battle area. The refill prompt is held off until
+        # this Cookie is down, because this Cookie *is* the refill — asking
+        # first would let a replacement take the slot the condition just made.
+        with self._holding_refill(player):
+            ctx = self._ctx(player, source_card=card)
+            # Re-checked on the way in, the way an EXTRA gate is: the board can
+            # have moved since the action list was built.
+            if not play.gate(ctx) or not play.pay(self._ctx(player, source_card=card)):
+                return
+            if self.state.over or card not in player.hand:
+                return
+            self._take_from_hand(player, action.card_uid)
+            self._deploy_cookie(player, card, onto=action.onto)
+
+    @contextlib.contextmanager
+    def _holding_refill(self, player: PlayerState):
+        """Hold off the empty-battle-area check while a Cookie is arriving.
+
+        A 【Special Play】 condition empties battle slots as its price, so for
+        the length of one play the battle area is legitimately empty with a
+        Cookie already on its way into it. Checking there and then would ask
+        for a replacement that is not needed — or, with an empty hand behind
+        it, end the game a player has not lost. The check runs once on the way
+        out, which covers the case where the condition could not be finished.
+        """
+        self._refill_held += 1
+        try:
+            yield
+        finally:
+            self._refill_held -= 1
+        if self._refill_held == 0 and not self.state.over:
+            self._check_battle_area(player)
 
     def _do_play_extra(self, action: A.PlayExtra) -> None:
         player = self.state.current
@@ -715,7 +820,7 @@ class Game:
         if card is None:
             return
         play = extra_play_of(self.db, card.card_id)
-        if play is None:
+        if play is None or player.extra_played_this_turn:
             return
         ctx = self._ctx(player, source_card=card)
         # Re-check on the way in: the gate was true when the list was built,
@@ -728,6 +833,7 @@ class Game:
         if play.pay is not None and not play.pay(ctx):
             return
         player.extra_deck.remove(card)
+        player.extra_played_this_turn = True
         defn = self.db[card.card_id]
         if host is not None:
             self._awaken(player, host, card)
@@ -853,6 +959,15 @@ class Game:
         # Static 【Your Turn】 buffs read the board as the attack is declared.
         self._run_cookie_effect(attacker, Trigger.ATTACK_START, player)
         attacker.rested = True
+        # 7-1-1-3: "At the end of the Attack Step, if the attacking card or the
+        # attacked card was moved to another zone, the Trap Step is skipped and
+        # the players proceed to the End Battle Step." An attack rider that
+        # bounces its own Cookie, or takes the target off the board, ends the
+        # battle here — there is nothing left to defend against and nothing
+        # left to swing.
+        if (state.over or attacker not in player.battle
+                or target not in defender.battle):
+            return
         # Named where the card names it — 980 of the Cookies print a name for
         # their attack, and "attacks for 3" told you which Cookie swung but not
         # which of its lines did.
@@ -861,7 +976,11 @@ class Game:
                      f"{swing} for {attacker.attack_damage(self.db)}")
 
         target = self._response_window(defender, attacker, target)
-        if state.over or target is None:
+        # 7-1-2-2: the same test at the end of the Trap Step. The target
+        # leaving was already handled — a trap that bounces it returns None —
+        # but a trap that removes the *attacker* used to leave a Cookie that is
+        # no longer on the board dealing its printed damage.
+        if state.over or target is None or attacker not in player.battle:
             return
 
         target.incoming_damage_reduction = 0
@@ -1134,16 +1253,41 @@ class Game:
                               f" — {cookie.remaining_hp} HP")
             self._record_heal(cookie, gained)
 
+    def _is_extra(self, card: CardInstance) -> bool:
+        return self.db[card.card_id].type is CardType.EXTRA
+
+    def _to_private_zone(self, owner: PlayerState, card: CardInstance,
+                         place) -> None:
+        """Send a Cookie card that has left the battle area to a private zone.
+
+        9-4-1: "If a Cookie Card played from the 【Extra】 deck is moved to a
+        private zone, it is placed face-down in the 【Extra】 deck of its
+        owner." The hand and the deck are both private zones, so an EXTRA
+        Cookie bounced or decked goes home instead — it can never be played
+        from either of them (6-5-2-3), so putting it there is dealing a dead
+        card and quietly shrinking the EXTRA deck for the rest of the game.
+        """
+        if self._is_extra(card):
+            card.face_up = False
+            owner.extra_deck.append(card)
+            self.state.record(
+                f"{card_label(self.db[card.card_id])} returns to the EXTRA deck")
+            return
+        place(card)
+
     def return_cookie_to_hand(self, cookie: Cookie) -> None:
         owner = self.state.players[cookie.owner]
         if cookie not in owner.battle:
             return
         owner.battle.remove(cookie)
-        owner.hand.append(cookie.card)
+        extra = self._is_extra(cookie.card)
+        self._to_private_zone(owner, cookie.card, owner.hand.append)
         # Only the Cookie the effect names returns to hand; anything it was
         # 【Awaken】ed on top of is spent along with its HP pile.
         owner.trash.extend(cookie.spent_cards)
-        self.state.record(f"{card_label(self.db[cookie.card.card_id])} returns to hand")
+        if not extra:
+            self.state.record(
+                f"{card_label(self.db[cookie.card.card_id])} returns to hand")
         self._check_battle_area(owner)
 
     def move_cookie_to_support(self, cookie: Cookie, *, rested: bool = False) -> None:
@@ -1195,10 +1339,11 @@ class Game:
             return
         owner.battle.remove(cookie)
         if bottom:
-            owner.deck.append(cookie.card)
+            self._to_private_zone(owner, cookie.card, owner.deck.append)
             owner.cookies_to_deck_bottom_this_turn += 1
         else:
-            owner.deck.insert(0, cookie.card)
+            self._to_private_zone(owner, cookie.card,
+                                  lambda c: owner.deck.insert(0, c))
         owner.cookies_to_deck_this_turn += 1
         owner.trash.extend(cookie.spent_cards)
         self._check_battle_area(owner)
@@ -1257,9 +1402,13 @@ class Game:
         """"If your Cookie card has fainted, you can bring one Cookie card from
         your hand to the battle area" — and you lose only when the battle area
         is empty *and* no Cookie card in hand could refill it."""
-        if player.battle:
+        if player.battle or self._refill_held:
             return
-        options = [c for c in player.hand if self.db[c.card_id].is_cookie]
+        # "no remaining Cookie cards in your hand to play" (1-2-1-1-2) means
+        # *playable*: an 【EXTRA】 Cookie that wandered into a hand may only be
+        # played from the EXTRA deck, and a 【Special Play】 one whose condition
+        # cannot be honoured is not a Cookie you have to play either.
+        options = self.playable_cookies(player)
         if not options:
             if self.rules.lose_when_no_cookie_anywhere:
                 self._lose(player.index, "no Cookie in play or in hand")
@@ -1287,15 +1436,40 @@ class Game:
 
         "the player selects 1 Cookie card of LV.1 or higher from their trash
         and places it in their break area. After that, shuffle all cards in the
-        trash and place them in the deck."
+        trash and place them in the deck." (1-3-9-1.)
+
+        Unless there is no such Cookie: an empty deck with nothing in the trash
+        to pay for it is the third defeat condition (1-2-1-1-3, 9-2-1-3), and
+        it used to be the one thing here that silently did nothing. A player
+        whose trash holds no Cookie kept drawing off a reshuffled pile forever.
         """
         if not self.rules.refresh_on_empty_deck or player.deck:
             return bool(player.deck)
 
+        # 9-4-3: an 【EXTRA】 Cookie sitting in the trash goes home to the EXTRA
+        # deck. First, because it is not one of the Cookies the break area may
+        # be paid with either — it was never part of the 60, and a deck that
+        # grew one would be dealing a card that cannot be played from hand.
+        returning = [c for c in player.trash
+                     if self.db[c.card_id].type is CardType.EXTRA]
+        for card in returning:
+            player.trash.remove(card)
+            card.face_up = False
+            player.extra_deck.append(card)
+        if returning:
+            self.state.record(
+                f"refresh — {len(returning)} EXTRA card(s) return to the EXTRA deck")
+
         for _ in range(self.rules.refresh_break_cost):
-            options = [c for c in player.trash if (self.db[c.card_id].level or 0) >= 1]
+            # A *Cookie* card of LV.1 or higher, not merely a card with a
+            # Level: nothing else may be placed in a break area (3-8-3).
+            options = [c for c in player.trash
+                       if self.db[c.card_id].is_cookie
+                       and (self.db[c.card_id].level or 0) >= 1]
             if not options:
-                break
+                self._lose(player.index,
+                           "refresh with no Cookie in the trash")
+                return False
             card = self.controller(player.index).choose(
                 self.state, "Refresh: send a Cookie to your break area",
                 options, optional=False,
@@ -1486,6 +1660,7 @@ class Game:
         twin.state = copy.deepcopy(self.state)
         twin._pending_attack = None
         twin._response_player = None
+        twin._refill_held = 0
         return twin
 
     def play_out(self) -> GameState:

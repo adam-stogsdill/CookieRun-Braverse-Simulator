@@ -96,6 +96,17 @@ def _normalise_symbols(text: str) -> str:
         text = text.replace(token, replacement)
     return text
 
+
+# One row (P-125) has its whole rules box wrapped in an escaped quote, left over
+# from however the dump was quoted. Only a wrapper is stripped: BS11-064 and
+# BS11-047 use the same escape *inside* their text, quoting the 【On Play】 they
+# rewrite, and that is real punctuation the card prints.
+def _unwrap_quoted(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith('\\"') and stripped.endswith('\\"'):
+        return stripped[2:-2].strip()
+    return text
+
 # `<{B}{B}> Gem Mermaid Strength deals 2 Then, ...`
 # Two printings exist: `<{B}{B}> Gem Mermaid Strength deals 2` (named attack)
 # and the older `<{P}{P}> Deals 2 damage.` (unnamed).
@@ -104,6 +115,11 @@ _ATTACK_RE = re.compile(r"^\s*<([^>]*)>\s*(.*?)\s*\bdeals?\s+(\d+)", re.S | re.I
 # end of the first line so it cannot swallow numbers from the rider text.
 _ATTACK_TERSE_RE = re.compile(r"^\s*<([^>]*)>\s*([^\n]*?)\s+(\d+)\s*$", re.M)
 _LEAD_COST_RE = re.compile(r"^\s*<((?:\{[A-Za-z]+\})+)>")
+# `<{Y}{N}> or <place 1 Cookie ...>` — the head of the text is not the price
+# here, it is *one of two* prices, and charging it as `play_cost` would bill
+# the player for a cost they may have chosen not to pay. Only one card prints
+# this (P-082); it carries both alternatives in its own effect instead.
+_ALTERNATIVE_LEAD_COST = re.compile(r"^\s*<[^>]*>\s*or\s*<", re.I)
 _LEAD_ANY_COST_RE = re.compile(r"^\s*<[^>]*>\s*")
 _MARKER_RE = re.compile(r"【([^】]*)】")
 
@@ -263,12 +279,30 @@ def strip_blocker_text(defn: CardDef, text: str) -> str:
     return _BLOCKER_LINE.sub(" ", _BLOCKER_REMINDER.sub(" ", text), count=1)
 
 
+# 【Special Play】 is the one marker a card can *name* without having: BS11-105
+# says "if there is a Cookie that has 【Special Play】 in your battle area", and
+# reading that as the keyword handed a LV.3 5 HP Cookie a play condition it
+# does not print — and, once Special Play became a real gate, made it
+# unplayable. The keyword itself always opens the line it is printed on, so
+# that is what is required of it. The other markers are not restricted this
+# way: 【Once Per Turn】 legitimately follows 【Activate】 mid-line on 186 cards.
+_LINE_MARKERS = {Marker.SPECIAL_PLAY}
+_LINE_START_RE = re.compile(r"^\s*【([^】]*)】")
+
+
 def _parse_markers(text: str) -> frozenset[Marker]:
     found = set()
+    opening = {m.group(1).strip().lower()
+               for m in (_LINE_START_RE.match(line)
+                         for line in (text or "").splitlines())
+               if m}
     for token in _MARKER_RE.findall(text or ""):
         for marker in Marker:
-            if token.strip().lower() == marker.value.lower():
-                found.add(marker)
+            if token.strip().lower() != marker.value.lower():
+                continue
+            if marker in _LINE_MARKERS and marker.value.lower() not in opening:
+                continue
+            found.add(marker)
     return frozenset(found)
 
 
@@ -370,9 +404,12 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
         description, attack_text = _TEXT_OVERRIDES[base_id]
         all_text = description + "\n" + attack_text
     else:
-        description = _fix_on_play(_normalise_symbols(row.get("description", "")), base_id)
-        attack_text = _fix_on_play(_normalise_symbols(row.get("attackText", "")), base_id)
-        all_text = _fix_on_play(_normalise_symbols(row.get("all_rules_text", "")), base_id)
+        description = _fix_on_play(
+            _normalise_symbols(_unwrap_quoted(row.get("description", ""))), base_id)
+        attack_text = _fix_on_play(
+            _normalise_symbols(_unwrap_quoted(row.get("attackText", ""))), base_id)
+        all_text = _fix_on_play(
+            _normalise_symbols(_unwrap_quoted(row.get("all_rules_text", ""))), base_id)
 
     # The dump routinely files an ITEM/TRAP/STAGE's rules text under attackText
     # instead of description — sometimes the whole card (160 of them leave
@@ -390,10 +427,11 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
     play_cost = Cost()
     if not card_type.is_cookie:
         lead = _LEAD_COST_RE.match(description)
-        if lead:
+        if lead and not _ALTERNATIVE_LEAD_COST.match(description):
             play_cost = Cost.parse(lead.group(1))
 
-    flip_text = _fix_on_play(_normalise_symbols(row.get("flipText", "")), base_id)
+    flip_text = _fix_on_play(
+        _normalise_symbols(_unwrap_quoted(row.get("flipText", ""))), base_id)
     # Some rows duplicate the attack line into the flip field, minus its damage
     # number, so the attack *name* would be parsed as a flip effect. A flip
     # field that is only a cost plus the attack's name is that defect.

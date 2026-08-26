@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from . import config as cfg
 from .cards import CardDB
-from .enums import CardType
+from .enums import CardType, Marker
 
 
 def _expand(entries: dict[str, int]) -> list[str]:
@@ -168,8 +168,18 @@ def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT,
         problems.append("deck contains banned cards")
 
     levels = Counter(c.level for c in known if c.is_cookie)
-    if rules.require_cookie_card and not any(c.is_cookie for c in known):
-        problems.append("deck must include at least one Cookie card")
+    # 5-1-1-2: "you must include at least 1 non-【Special Play】 Cookie Card."
+    # A 【Special Play】 Cookie's printed condition needs a Cookie of yours
+    # already on the board, so a deck of nothing but those has no opening
+    # Cookie and no way to field one — it loses on turn one by rule.
+    if rules.require_cookie_card:
+        openers = [c for c in known
+                   if c.is_cookie and not c.has(Marker.SPECIAL_PLAY)]
+        if not any(c.is_cookie for c in known):
+            problems.append("deck must include at least one Cookie card")
+        elif not openers:
+            problems.append(
+                "deck must include at least one non-\u3010Special Play\u3011 Cookie card")
 
     return DeckReport(
         ok=not problems,
