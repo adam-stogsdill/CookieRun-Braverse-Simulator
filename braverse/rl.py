@@ -119,7 +119,7 @@ class TrainConfig:
     lr: float = 3e-4
     entropy_coef: float = 0.01
     value_coef: float = 0.5
-    temperature: float = 1.0
+    temperature: float = 0.90
     league_every: int = 500          # snapshot the policy into the league
     league_size: int = 6
     heuristic_share: float = 0.4     # fraction of games played against the script
