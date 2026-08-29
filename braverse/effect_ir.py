@@ -37,6 +37,10 @@ class Filter:
     # the card is excluded too, which is what "other than" means about a card
     # rather than about the copy resolving.
     exclude_name: str | None = None
+    # A printed 【marker】 the filter restricts on — 【Special Play】 is the one
+    # cards ask about. Kept apart from `keyword`, which is the creature-type
+    # band (【Arena】, 【Ancient】); a marker is an ability badge.
+    marker: object | None = None
     has_flip: bool | None = None
 
     def matches(self, cookie, ctx) -> bool:
@@ -65,6 +69,8 @@ class Filter:
             return False
         if self.exclude_name is not None and defn.name == self.exclude_name:
             return False
+        if self.marker is not None and not defn.has(self.marker):
+            return False
         return True
 
 
@@ -83,6 +89,7 @@ class CardFilter:
     is_cookie: bool | None = None
     is_flip: bool | None = None
     hp: int | None = None
+    marker: object | None = None
 
     def matches(self, defn) -> bool:
         level = defn.level or 0
@@ -105,6 +112,8 @@ class CardFilter:
         if self.is_flip is not None and defn.is_flip != self.is_flip:
             return False
         if self.hp is not None and (defn.hp or 0) != self.hp:
+            return False
+        if self.marker is not None and not defn.has(self.marker):
             return False
         return True
 
@@ -146,8 +155,8 @@ class AnyOf:
 
     options: tuple = ()
 
-    def holds(self, ctx) -> bool:
-        return any(option.holds(ctx) for option in self.options)
+    def holds(self, ctx, env: dict | None = None) -> bool:
+        return any(option.holds(ctx, env) for option in self.options)
 
 
 @dataclass(frozen=True)
@@ -200,8 +209,13 @@ class Condition:
             items = []
         return sum(1 for d in items if filt.matches(d))
 
-    def holds(self, ctx) -> bool:
+    def holds(self, ctx, env: dict | None = None) -> bool:
         db = ctx.db
+        if self.kind == "did":
+            # "If you did, ..." — whether the sentence before this one actually
+            # happened. The ops that can meaningfully fail to happen record it
+            # in `env`; nothing else in the grammar looks backwards like this.
+            return bool((env or {}).get("did"))
         mine = self.who != SCOPE_OPPONENT
         player = ctx.me if mine else ctx.opp
 
@@ -308,10 +322,53 @@ class Condition:
             return target is not None and self._compare(target.level(db))
         if self.kind == "break_level_higher":
             return ctx.me.break_level_total(db) > ctx.opp.break_level_total(db)
+        if self.kind == "break_level_lead":
+            # "2 or more levels higher" — the size of the gap, not just its
+            # sign, which is what separates this from `break_level_higher`.
+            return self._compare(ctx.me.break_level_total(db)
+                                 - ctx.opp.break_level_total(db))
         if self.kind == "break_level_lower":
             return ctx.me.break_level_total(db) < ctx.opp.break_level_total(db)
         if self.kind == "arena_effect_damage":
             return ctx.me.arena_effect_damage_this_turn
+        if self.kind == "support_shrank":
+            return player.support_trashed_this_turn > 0
+        if self.kind == "special_play_this_turn":
+            return player.special_plays_this_turn > 0
+        if self.kind == "attacker_damage":
+            # "if 1 of your opponent's Cookies attacks more than 4 damage" —
+            # asked from inside the response window, so the attacker is known.
+            attacker = ctx.attacker
+            return (attacker is not None
+                    and self._compare(attacker.attack_damage(db)))
+        if self.kind == "battle_faints":
+            # "if your Cookie faints during this battle". The engine holds
+            # these back until the battle is over (`_waits_for_the_battle`),
+            # so by the time this is read the answer exists.
+            faints = getattr(ctx.game, "_battle_faints", [])
+            mine = self.who != SCOPE_OPPONENT
+            wanted = ctx.me.index if mine else ctx.opp.index
+            hits = sum(1 for owner, color, level in faints
+                       if owner == wanted
+                       and (self.color is None or color is self.color)
+                       and (self.value2 is None or level >= self.value2))
+            return hits >= max(1, self.value)
+        if self.kind in ("selected_hp", "selected_level"):
+            # About whatever the sentence before this one picked, which lives
+            # in `env` — so these are the two conditions that cannot be read
+            # off the board alone.
+            picked = (env or {}).get(REF_IT) or []
+            if self.kind == "selected_hp":
+                return any(self._compare(c.remaining_hp) for c in picked)
+            return any(self._compare(c.level(db)) for c in picked)
+        if self.kind == "attacker_named":
+            cookie = ctx.source_cookie
+            return cookie is not None and cookie.name(db) == self.name
+        if self.kind == "my_turn":
+            # "If activated during your turn" — a FLIP fires whenever its host
+            # loses HP, which is usually the *opponent's* turn, so which turn
+            # it went off on is a real distinction and not a formality.
+            return ctx.state.turn_player == ctx.me.index
         if self.kind == "item_played":
             return ctx.me.items_played_this_turn > 0
         if self.kind == "hp_gained":
@@ -378,14 +435,27 @@ class Select(Op):
             env[self.ref] = list(pool)
             return True
 
+        side = "your opponent's" if self.scope == SCOPE_OPPONENT else "your"
+        upto = "up to " if self.optional else ""
+        prompt = f"Select {upto}{self.count} of {side} Cookies"
+
+        # More than one card is one question, not a queue of them: pick as many
+        # as you want up to the limit and confirm when you are done. Asking
+        # twice in a row gives no way to say "that is all" except declining the
+        # second question, and no way to change the first answer at all.
+        if self.count > 1:
+            batched = ctx.choose_many(prompt, pool, count=self.count,
+                                      up_to=self.optional)
+            if batched is not None:
+                env[self.ref] = batched
+                return True
+
         chosen = []
         remaining = list(pool)
         for _ in range(self.count):
             if not remaining:
                 break
-            side = "opponent's" if self.scope == SCOPE_OPPONENT else "your"
-            pick = ctx.choose(f"Select up to {self.count} of {side} Cookies",
-                              remaining, optional=self.optional)
+            pick = ctx.choose(prompt, remaining, optional=self.optional)
             if pick is None:
                 break
             remaining.remove(pick)
@@ -581,12 +651,21 @@ class MillToSupport(Op):
 @dataclass
 class ReturnSupportToHand(Op):
     card_type: CardType | None = None
+    amount: int = 1
 
     def run(self, ctx, env) -> bool:
         predicate = None
         if self.card_type is not None:
             predicate = lambda d: d.type is self.card_type  # noqa: E731
-        return bool(ctx.return_support_to_hand(predicate=predicate))
+        moved = 0
+        for _ in range(self.amount):
+            if not ctx.return_support_to_hand(predicate=predicate):
+                break
+            moved += 1
+        # How many came back, for a following "place the same number ...".
+        env["moved"] = moved
+        _record_did(env, moved > 0)
+        return moved > 0
 
 
 @dataclass
@@ -635,6 +714,16 @@ _ZONE_LABELS = {
 }
 
 
+def _record_did(env, happened: bool) -> None:
+    """Leave a "did that actually happen?" note for a following "If you did".
+
+    Only the handful of ops a card ever asks this about set it; everything
+    else leaves the note alone, so an unrelated sentence in between cannot
+    answer the question for them.
+    """
+    env["did"] = bool(happened)
+
+
 @dataclass
 class MoveCards(Op):
     """Move up to ``count`` filtered cards from one zone to another.
@@ -654,15 +743,40 @@ class MoveCards(Op):
     # arrives rested unless the text says "as active".
     rested: bool = True
 
+    def _prompt(self) -> str:
+        upto = "up to " if self.optional and self.count > 1 else ""
+        what = "card" if self.count == 1 else f"{upto}{self.count} cards"
+        return (f"Move {'a card' if self.count == 1 else what} from your "
+                f"{_ZONE_LABELS.get(self.source, self.source)} to your "
+                f"{_ZONE_LABELS.get(self.destination, self.destination)}")
+
     def run(self, ctx, env) -> bool:
         owner = ctx.opp if self.from_opponent else ctx.me
         moved = 0
+        # More than one card is one question. The pool is read once, before
+        # anything moves, because a batched answer names every card up front.
+        if self.count > 1:
+            pool = self._pool(ctx, owner)
+            batched = ctx.choose_many(self._prompt(), pool, count=self.count,
+                                      up_to=self.optional) if pool else None
+            if batched is not None:
+                for picked in batched:
+                    self._put(ctx, owner, self._remove(ctx, owner, picked))
+                    moved += 1
+                env["moved"] = moved
+                _record_did(env, moved > 0)
+                return self.optional or moved > 0
+
         for _ in range(self.count):
             card = self._take(ctx, owner)
             if card is None:
                 break
             self._put(ctx, owner, card)
             moved += 1
+        # How many, not just whether: "place the same number of {G} cards from
+        # your hand into your support area" is the sentence that reads it.
+        env["moved"] = moved
+        _record_did(env, moved > 0)
         return self.optional or moved > 0
 
     def _pool(self, ctx, owner):
@@ -681,12 +795,13 @@ class MoveCards(Op):
         pool = self._pool(ctx, owner)
         if not pool:
             return None
-        picked = ctx.choose(
-            f"Move a card from your {_ZONE_LABELS.get(self.source, self.source)}"
-            f" to your {_ZONE_LABELS.get(self.destination, self.destination)}",
-            pool, optional=self.optional)
+        picked = ctx.choose(self._prompt(), pool, optional=self.optional)
         if picked is None:
             return None
+        return self._remove(ctx, owner, picked)
+
+    def _remove(self, ctx, owner, picked):
+        """Lift one chosen card out of its zone, whichever zone that is."""
         if self.source == ZONE_BATTLE:
             # A Cookie leaving the field sheds its HP pile — and anything it
             # was 【Awaken】ed on top of — to the trash.
@@ -736,6 +851,12 @@ class PayCost(Op):
         return not self.cost or ctx.can_pay(self.cost)
 
 
+# Conditions about something that has not happened yet when a move is being
+# probed: what the sentence before will pick, and whether it will succeed. A
+# probe cannot answer them, so it does not get to veto the move either.
+_NOT_YET_KNOWN = {"did", "selected_hp", "selected_level"}
+
+
 @dataclass
 class Guard(Op):
     """An ``If ...,`` prefix. Aborts the clause when the condition fails."""
@@ -743,12 +864,15 @@ class Guard(Op):
     conditions: tuple = ()
 
     def run(self, ctx, env) -> bool:
-        return all(c.holds(ctx) for c in self.conditions)
+        return all(c.holds(ctx, env) for c in self.conditions)
 
     def is_live(self, ctx, env) -> bool:
         # `holds` is a pure read of the board, so the probe is the real answer
-        # rather than an approximation of it.
-        return all(c.holds(ctx) for c in self.conditions)
+        # rather than an approximation of it — except for "if you did", which
+        # is about something that has not been done yet. A probe cannot know
+        # it, so it does not get to veto the move either.
+        return all(c.holds(ctx, env) for c in self.conditions
+                   if getattr(c, "kind", None) not in _NOT_YET_KNOWN)
 
 
 @dataclass
@@ -805,6 +929,38 @@ class Clause:
                 live = False
         return live
 
+
+
+@dataclass
+class Dispatch(Op):
+    """"Apply the effect below based on X." — the board picks, not the player.
+
+    The same bullet layout as `Modal` and the opposite mechanic: each branch
+    carries the condition printed before its colon, and the first one that
+    holds is the one that runs. Nobody is asked, so there is nothing here for
+    a replay to record beyond what the board already says.
+    """
+
+    branches: tuple = ()          # ((condition, (Clause, ...)), ...)
+
+    def _chosen(self, ctx):
+        for condition, clauses in self.branches:
+            if condition.holds(ctx):
+                return clauses
+        return None
+
+    def run(self, ctx, env) -> bool:
+        clauses = self._chosen(ctx)
+        if clauses is None:
+            return False
+        for clause in clauses:
+            if not clause.run(ctx, env):
+                return False
+        return True
+
+    def is_live(self, ctx, env) -> bool:
+        clauses = self._chosen(ctx)
+        return bool(clauses) and all(c.is_live(ctx, {}) for c in clauses)
 
 
 @dataclass

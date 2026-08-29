@@ -63,6 +63,7 @@ import time
 from pathlib import Path
 
 from braverse import STARTER_SET_IDS, default_db, starter_deck
+from braverse.agentfile import AGENT_DIR, find_checkpoint
 from braverse.deckfile import read_deck
 from braverse.features import Encoder
 from braverse.features_wide import WideEncoder
@@ -97,7 +98,15 @@ def train_one(name: str, decks, db, args) -> dict:
 
     cfg = TrainConfig(games=args.games, eval_every=0, league_every=args.league_every,
                       random_deck_share=args.random_decks, seed=args.seed)
-    trainer = Trainer(decks, cfg, db=db, encoder=encoder)
+    resume = find_checkpoint(args.resume) if args.resume else None
+    trainer = Trainer(decks, cfg, db=db, encoder=encoder,
+                      net=Trainer.load_net(resume) if resume else None)
+    if resume:
+        found = trainer.restore(resume)
+        print(f"  resumed {resume}: {found['games_trained']} games trained, "
+              f"league {found['league']}, optimizer "
+              f"{'restored' if found['optimizer'] else 'reset (pre-0.2.54 file)'}",
+              flush=True)
 
     started = time.time()
     trainer.train(log=lambda *_: None)
@@ -134,10 +143,15 @@ def main() -> None:
                         help="train both encoders on the same budget and decks")
     parser.add_argument("--eval-only", metavar="CHECKPOINT",
                         help="evaluate an existing checkpoint, no training")
+    parser.add_argument("--resume", metavar="CHECKPOINT",
+                        help="continue training an existing checkpoint. The "
+                             "encoder is read off the file, not from "
+                             "--encoder. Pass a fresh --seed too, or the run "
+                             "replays the same games it already learned from")
     parser.add_argument("--random-decks", type=float, default=0.5)
     parser.add_argument("--league-every", type=int, default=500)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--out", default="rl_wide.pt")
+    parser.add_argument("--out", default=f"{AGENT_DIR}/rl_wide.pt")
     args = parser.parse_args()
 
     db = default_db()
@@ -145,7 +159,7 @@ def main() -> None:
     print(f"training decks: {described}")
 
     if args.eval_only:
-        net = Trainer.load_net(args.eval_only)
+        net = Trainer.load_net(find_checkpoint(args.eval_only))
         name = "wide" if net.feature_dim == WideEncoder.dim else "stock"
         print(f"{args.eval_only}: {net.feature_dim}-wide rows -> {name} encoder")
         trainer = Trainer(decks, TrainConfig(games=0, seed=args.seed), db=db,
@@ -155,6 +169,20 @@ def main() -> None:
         return
 
     names = list(ENCODERS) if args.compare else [args.encoder]
+    if args.resume:
+        if args.compare:
+            raise SystemExit("--resume continues one agent; it cannot be "
+                             "combined with --compare, which trains two from "
+                             "scratch on an equal budget")
+        # Which encoder a checkpoint belongs to is a property of the file, so
+        # read it rather than trusting --encoder: the mismatch would otherwise
+        # surface as a shape error several minutes into a long run.
+        detected = ("wide" if Trainer.load_net(find_checkpoint(args.resume)).feature_dim
+                    == WideEncoder.dim else "stock")
+        if detected != args.encoder:
+            print(f"note: {args.resume} was trained with the {detected} "
+                  f"encoder; using that rather than --encoder {args.encoder}")
+        names = [detected]
     results = [train_one(name, decks, db, args) for name in names]
 
     if len(results) > 1:

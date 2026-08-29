@@ -132,6 +132,135 @@ def test_checkpoint_round_trips(db, tmp_path):
     assert torch.allclose(trainer.net.logits(rows), reloaded.logits(rows))
 
 
+def test_a_resume_restores_the_optimizer_and_the_league(db, tmp_path):
+    """Weights alone are a warm start, not a resume.
+
+    Adam's moments rebuild from zero without this, and an empty league sends
+    the first `league_every` games back to the scripted heuristic — a weaker
+    and narrower opponent than the run was finishing against.
+    """
+    from braverse.rl import TrainConfig, Trainer
+
+    cfg = TrainConfig(games=6, batch_games=2, eval_every=0, league_every=2)
+    trainer = Trainer(config=cfg, db=db)
+    trainer.train(log=lambda *_: None)
+    assert trainer.league and trainer.games_trained == 6
+
+    path = tmp_path / "agent.pt"
+    trainer.save(path)
+
+    resumed = Trainer(config=cfg, db=db, net=Trainer.load_net(path))
+    found = resumed.restore(path)
+
+    assert found == {"optimizer": True, "league": len(trainer.league),
+                     "games_trained": 6}
+    assert len(resumed.league) == len(trainer.league)
+    assert resumed.opt.state_dict()["state"], "Adam moments came back empty"
+    # A frozen league member must stay frozen, or the snapshot trains too.
+    assert all(not p.requires_grad
+               for member in resumed.league for p in member.parameters())
+
+
+def test_a_pre_resume_checkpoint_still_loads(db, tmp_path):
+    """Every `.pt` beside an installed game is a bare state_dict (format 1).
+
+    `load_net` must keep reading them — it is what `play_server.make_pilot`
+    calls — and `restore` must report the warm start honestly rather than
+    claiming an optimizer it did not find.
+    """
+    import torch
+
+    from braverse.rl import TrainConfig, Trainer
+
+    trainer = Trainer(config=TrainConfig(games=0), db=db)
+    path = tmp_path / "old.pt"
+    torch.save(trainer.net.state_dict(), path)          # the old layout
+
+    assert Trainer.load_net(path).feature_dim == trainer.net.feature_dim
+
+    fresh = Trainer(config=TrainConfig(games=0), db=db)
+    assert fresh.restore(path) == {"optimizer": False, "league": 0,
+                                   "games_trained": 0}
+
+
+def test_a_checkpoint_from_an_older_architecture_still_loads(db, tmp_path):
+    """Deepening PolicyNet must not orphan the `.pt` files already on disk.
+
+    It did once: the body grew from three layers to five, and every checkpoint
+    trained before that stopped loading — including the one `play_server`
+    offers as a pilot. The shape is read off the weights, depth included.
+    """
+    import torch
+
+    from braverse.rl import PolicyNet, Trainer
+
+    old = PolicyNet(widths=(96, 96), value_hidden=96)     # the pre-0.2.54 body
+    path = tmp_path / "ancient.pt"
+    torch.save(old.state_dict(), path)
+
+    loaded = Trainer.load_net(path)
+    assert loaded.widths == (96, 96)
+    assert loaded.feature_dim == old.feature_dim
+    rows = torch.zeros((3, old.feature_dim))
+    assert torch.allclose(loaded.logits(rows), old.logits(rows))
+
+
+def test_the_default_policy_shape_is_unchanged(db):
+    """`widths` is a loading affordance, not a new default to drift with."""
+    from braverse.rl import PolicyNet
+
+    net = PolicyNet()
+    assert net.widths == (1024, 512, 256, 128)
+    assert net.value_hidden == 1024
+
+
+def test_an_agent_takes_its_encoder_from_its_policy(db):
+    """Any `.pt` beside the game is offered as a pilot, wide ones included.
+
+    Defaulting to the stock encoder instead killed the match thread with a
+    matrix-shape error the first time the bot was asked to move — the failure
+    looked like the game hanging, not like a bad checkpoint.
+    """
+    from braverse.features import Encoder
+    from braverse.features_wide import WideEncoder
+    from braverse.rl import PolicyNet, RLAgent, encoder_for
+
+    for encoder_cls in (Encoder, WideEncoder):
+        net = PolicyNet(feature_dim=encoder_cls.dim,
+                        state_dim=encoder_cls.state_dim)
+        assert type(encoder_for(net, db)) is encoder_cls
+        assert type(RLAgent(net, 0, db=db).encoder) is encoder_cls
+
+
+def test_a_policy_of_an_unknown_width_is_refused_by_name(db):
+    """A shape error several moves in tells nobody which file was wrong."""
+    from braverse.rl import PolicyNet, encoder_for
+
+    with pytest.raises(ValueError, match="no encoder emits 77-wide rows"):
+        encoder_for(PolicyNet(feature_dim=77, state_dim=11), db)
+
+
+def test_a_wide_checkpoint_plays_a_whole_game(db, tmp_path):
+    """End to end through the construction `play_server.make_pilot` uses."""
+    import torch
+
+    from braverse import Game, HeuristicAgent
+    from braverse.features_wide import WideEncoder
+    from braverse.rl import PolicyNet, RLAgent, Trainer
+
+    path = tmp_path / "wide.pt"
+    torch.save(PolicyNet(feature_dim=WideEncoder.dim,
+                         state_dim=WideEncoder.state_dim).state_dict(), path)
+
+    agent = RLAgent(Trainer.load_net(path), 0, db=db, seed=1)   # no encoder=
+    other = HeuristicAgent(db=db, seed=2)
+    setattr(other, "_seat_hint", 1)
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [agent, other], db=db, seed=3)
+    game.setup()
+    assert game.play_out().over
+
+
 # --- deck generation -------------------------------------------------------
 def test_repair_always_produces_a_legal_deck(db):
     pool = set_pool(db, ("ST8", "ST9"))

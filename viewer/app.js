@@ -21,6 +21,7 @@ const state = {
   restSeen: new Map(),  // the same, being rebuilt by the render in progress
   turning: 0,           // cards turning in this render, for the sweep stagger
   picked: [],           // indices chosen in a multi-card pick
+  pickFull: "",         // why the last click did nothing, when at the limit
   eventId: 0,           // last event batch played
   announced: false,     // win chime fired for this match
   lastMatch: null,      // the body of the last local /api/new, for a rematch
@@ -1793,6 +1794,7 @@ function renderPicker(snap) {
   if (bar.dataset.for !== String(pending.id)) {
     bar.dataset.for = String(pending.id);
     state.picked = [];
+    state.pickFull = "";
   }
 
   bar.classList.remove("hidden");
@@ -1803,7 +1805,7 @@ function renderPicker(snap) {
     `${state.picked.length} / ${upTo ? "up to " : ""}${count}`));
   bar.appendChild(head);
 
-  const row = h("div", "picker-row");
+  const row = h("div", "picker-row" + (state.pickFull ? " full" : ""));
   pending.options.forEach((opt) => {
     const wrap = h("div", "picker-card" + (state.picked.includes(opt.index) ? " picked" : ""));
     const card = cardNode({ img: opt.img, name: opt.label, uid: opt.subject },
@@ -1812,9 +1814,24 @@ function renderPicker(snap) {
     wrap.appendChild(h("div", "cname", opt.label));
     wrap.onclick = () => {
       const at = state.picked.indexOf(opt.index);
-      if (at >= 0) state.picked.splice(at, 1);
-      else if (count === 1 && !upTo) state.picked = [opt.index];
-      else if (state.picked.length < count) state.picked.push(opt.index);
+      if (at >= 0) {
+        state.picked.splice(at, 1);
+        state.pickFull = "";
+      } else if (count === 1 && !upTo) {
+        state.picked = [opt.index];
+        state.pickFull = "";
+      } else if (state.picked.length < count) {
+        state.picked.push(opt.index);
+        state.pickFull = "";
+      } else {
+        /* At the limit. Silently ignoring the click reads as a broken card —
+         * you pressed it and nothing moved — so say what the limit is and what
+         * to do about it, and mark the ones already taken so it is obvious
+         * which click frees a slot. */
+        state.pickFull = count === 1
+          ? "Only 1 can be chosen — click the one you picked to swap it."
+          : `Only ${count} can be chosen — click one you have picked to swap it.`;
+      }
       renderPicker(snap);
     };
     row.appendChild(wrap);
@@ -1843,15 +1860,18 @@ function renderPicker(snap) {
   confirm.onclick = () => {
     const picks = state.picked.slice();
     state.picked = [];
+    state.pickFull = "";
     bar.classList.add("hidden");
     // A single pick is still a single answer; only a batch sends a list — and
     // "up to 1" is a batch, because "none" is one of its answers.
     answer(count > 1 || upTo ? picks : picks[0]);
   };
-  foot.appendChild(h("span", "hint", upTo
-    ? (state.picked.length ? `${state.picked.length} of up to ${count}` : "none is allowed")
-    : (state.picked.length === count ? "ready"
-       : `choose ${count - state.picked.length} more`)));
+  const hint = state.pickFull
+    || (upTo
+        ? (state.picked.length ? `${state.picked.length} of up to ${count}` : "none is allowed")
+        : (state.picked.length === count ? "ready"
+           : `choose ${count - state.picked.length} more`));
+  foot.appendChild(h("span", "hint" + (state.pickFull ? " over" : ""), hint));
   /* An optional question is only half a question without the no. It used to
    * come off the move list on the right; that list is gone, so the decline
    * travels with the strip that took the question over. "Up to N" already has
@@ -1860,6 +1880,7 @@ function renderPicker(snap) {
     const no = h("button", "ghost", "Decline");
     Confirm.wire(no, "decline", () => {
       state.picked = [];
+      state.pickFull = "";
       bar.classList.add("hidden");
       answer(null);
     });

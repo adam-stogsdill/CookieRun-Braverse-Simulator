@@ -1154,6 +1154,10 @@ body.online #settings-watch { display: none; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-foot { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
 .picker-foot .hint { font-size: 11px; color: var(--dim); }
+/* At the limit: the click that did nothing gets an explanation, and the cards
+ * already taken are outlined so it is obvious which one to click to swap. */
+.picker-foot .hint.over { color: var(--bad); }
+.picker-row.full .picker-card.picked { outline: 2px solid var(--bad); outline-offset: 2px; }
 .picker-foot button { margin-left: auto; }
 
 /* ------------------------------------------------------- centre-stage ask */

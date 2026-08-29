@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from braverse.console import utf8_output
+from braverse.agentfile import AGENT_DIR, AGENT_GLOB
 from braverse.deckfile import DECK_DIR, parse_decklist, read_decklist
 from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, __version__,
@@ -727,11 +728,24 @@ def drop_replay(name: str) -> bool:
 PROFILES = Profiles()
 
 
+def agent_files() -> dict[str, Path]:
+    """Trained agents by file name: loose beside the script, then in `agents/`.
+
+    Scanned in that order for the same reason `deck_files` is — the curated
+    folder wins a name clash — and both are scanned because a `.pt` dropped
+    beside the executable has always been offered as an opponent, and moving
+    the shipped ones into a folder must not withdraw that.
+    """
+    found = {p.name: p for p in scan(AGENT_GLOB)}
+    found.update({p.name: p for p in scan(f"{AGENT_DIR}/{AGENT_GLOB}")})
+    return found
+
+
 def available_pilots() -> list[str]:
     # "tutorial" is a real pilot rather than a hidden mode: it is the gentlest
     # opponent in the box and worth being able to pick again afterwards.
     pilots = ["human", "heuristic", "random", "tutorial"]
-    pilots += [f"rl:{p.name}" for p in scan("*.pt")]
+    pilots += [f"rl:{name}" for name in sorted(agent_files())]
     return pilots
 
 
@@ -746,7 +760,7 @@ def make_pilot(kind: str, seat: int, db: CardDB, seed: int, runner: "Match"):
         return Paced(TUT.make_opponent(db=db, seat=seat), runner)
     if kind.startswith("rl:"):
         from braverse.rl import RLAgent, Trainer
-        net = Trainer.load_net(next(p for p in scan("*.pt") if p.name == kind[3:]))
+        net = Trainer.load_net(agent_files()[kind[3:]])
         return Paced(RLAgent(net, seat, db=db, seed=seed), runner)
     return Paced(SeatedAgent(HeuristicAgent(db=db, seed=seed), seat), runner)
 

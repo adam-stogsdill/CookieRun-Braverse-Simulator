@@ -277,8 +277,13 @@ def puny_strength(ctx: Ctx) -> None:
             if card is not None:
                 ctx.me.break_area.remove(card)
                 ctx.game._deploy_cookie(ctx.me, card, from_zone="break")
-    ctx.me.hand.remove(shown)
-    ctx.me.break_area.append(shown)
+    # The Cookie played from the break area runs its 【Played from break area】
+    # and 【On Play】 in the middle of this card, and those can move the
+    # revealed Cookie out of the hand before we get here.  A card cannot be
+    # placed in the break area twice, so if it has already left, leave it be.
+    if shown in ctx.me.hand:
+        ctx.me.hand.remove(shown)
+        ctx.me.break_area.append(shown)
     ctx.game._check_win()
 
 

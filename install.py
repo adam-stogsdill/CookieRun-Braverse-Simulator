@@ -65,6 +65,19 @@ ICON_NAME = "braverse.icns"
 # player who never opens this script still has to know that `decks/` takes
 # `.txt` files and `card_images/` takes `.webp` named after a card.
 FOLDERS = {
+    "agents": """\
+Trained practice opponents go here, as .pt files.
+
+Every file in this folder is offered as an opponent when you start a game, by
+its file name. The ones that came with the game are already here; a file
+someone sends you, or one you train yourself, shows up the same way once it is
+in this folder.
+
+These are the "rl:" opponents in the list. They are not the only practice
+opponents — the built-in ones need no file and are always there.
+
+Delete a file to remove that opponent from the list.
+""",
     "decks": """\
 Decklists go here, as .txt files.
 

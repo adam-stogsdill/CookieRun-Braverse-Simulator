@@ -1,0 +1,48 @@
+{
+ "encoder": "WideEncoder",
+ "feature_dim": 142,
+ "state_dim": 109,
+ "games_trained": 100,
+ "config": {
+  "games": 100,
+  "batch_games": 32,
+  "lr": 0.0003,
+  "entropy_coef": 0.01,
+  "value_coef": 0.5,
+  "temperature": 0.9,
+  "league_every": 500,
+  "league_size": 6,
+  "heuristic_share": 0.4,
+  "eval_every": 0,
+  "eval_games": 120,
+  "seed": 0,
+  "random_deck_share": 0.5,
+  "random_deck_cache": 200
+ },
+ "history": [
+  {
+   "policy_loss": 0.03144705668091774,
+   "value_loss": 1.0346156358718872,
+   "entropy": 1.9911675453186035,
+   "decisions": 574,
+   "games": 32,
+   "train_winrate": 0.0625
+  },
+  {
+   "policy_loss": 0.01798408478498459,
+   "value_loss": 0.8004254102706909,
+   "entropy": 1.9368976354599,
+   "decisions": 630,
+   "games": 64,
+   "train_winrate": 0.03125
+  },
+  {
+   "policy_loss": -0.003861324628815055,
+   "value_loss": 0.7200714945793152,
+   "entropy": 1.9634909629821777,
+   "decisions": 697,
+   "games": 96,
+   "train_winrate": 0.09375
+  }
+ ]
+}

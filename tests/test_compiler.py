@@ -536,13 +536,7 @@ def test_incoming_damage_reduction_applies_to_the_attack(db):
 # history). They are listed rather than tolerated in bulk so that a *new* hole
 # in a completed set still fails these tests.
 KNOWN_UNCODED = {
-    "ST1-018", "ST2-016", "ST2-019", "ST2-021",
-    "ST3-021", "ST3-022",
-    "ST4-016", "ST4-019", "ST5-022",
-    "BS1-024", "BS1-025", "BS1-050", "BS1-078",
-    "BS2-014", "BS2-020", "BS2-021", "BS2-049", "BS2-051",
-    "BS6-019", "BS6-021",
-    "BS7-020", "BS7-063", "BS7-065", "BS7-107", "BS7-108",
+    "ST5-022",
 }
 
 
@@ -1111,16 +1105,16 @@ def test_modal_item_offers_both_branches(db):
     assert all(c.remaining_hp < c.max_hp(db) for c in game.state.players[1].battle)
 
 
-def test_equip_item_stays_unimplemented(db):
-    """The 【Equip】 cards that are written are written by hand, one at a time.
-
-    The five Soul Jams have their attachments and their riders; BS5-111 has
-    neither, and its 【Dragon】 keyword and conditional aura are still nothing
-    the compiler can read. Sweeping it in would silently misreport the card.
+def test_the_compiler_never_sweeps_in_an_equip_card(db):
+    """【Equip】 cards are written by hand, one at a time — there is no
+    compiler support for attaching a card to another card, and a jam swept in
+    as ordinary text would resolve its rider once and then be filed in the
+    trash. BS5-111 is the check: implemented, and not by compilation.
     """
     from braverse.effects import is_implemented
 
-    assert not is_implemented("BS5-111")
+    assert is_implemented("BS5-111")
+    assert not compile_card(db["BS5-111"]).ok, "the compiler must still refuse it"
     assert db["BS5-111"].play_cost == Cost.parse("{N}")
 
 
@@ -1504,18 +1498,32 @@ def test_there_are_no_x_is_not_read_as_there_is_an_x(ctx):
     assert len(ctx.me.hand) == before + 1
 
 
-def test_a_filter_that_lost_its_marker_is_refused(db):
-    """"Cookies that have 【Blocker】" arrives here as "Cookies that have" —
-    the property is gone and an empty filter would match every Cookie, so the
-    card is refused rather than read as something it does not say."""
-    from braverse.effects import is_implemented
-
+def test_a_filter_that_lost_its_property_is_refused():
+    """A dangling "that have" is a filter whose property was normalised away,
+    and an empty filter matches every Cookie — the card would be read as
+    saying something it does not."""
     with pytest.raises(CompileError):
         parse_card_filter("Cookie that has")
-    # BS11-105's attack rider gates on a 【Special Play】 Cookie being present;
-    # without the marker it read as "any Cookie", which is always true while
-    # you are attacking.
-    assert not is_implemented("BS11-105")
+    # 【Skill】 has no field on either filter, so naming it is refused too.
+    with pytest.raises(CompileError):
+        parse_card_filter("Cookie that has 【Skill】")
+
+
+def test_a_property_marker_survives_where_it_is_a_filter(db):
+    """【Special Play】 and 【Blocker】 are badges at the head of a card and
+    *filters* mid-sentence. Deleted, the filter widens to every Cookie — which
+    is how BS11-105's attack rider came to fire on every swing instead of only
+    beside a 【Special Play】 Cookie."""
+    from braverse.effects import is_implemented
+    from braverse.enums import Marker
+
+    assert is_implemented("BS11-105")
+    assert parse_card_filter("Cookie that has Special Play").marker is Marker.SPECIAL_PLAY
+    assert parse_card_filter("Cookies that have Blocker").marker is Marker.BLOCKER
+    # At the head of a card it is still a badge and still stripped, or the
+    # verb parser would be handed an ability name as an instruction.
+    assert split_clauses("【Special Play】 Draw up to 1 card from your deck.") == [
+        "Draw up to 1 card from your deck."]
 
 
 # --- "for each"/"for every" scaling ----------------------------------------
@@ -1951,3 +1959,436 @@ def test_magic_lettering_pens_goes_colourless_after_a_faint(ctx, db):
     rewritten = _pens_cost(ctx)
     assert rewritten.total == 1
     assert not rewritten.colored
+
+
+# --- "if activated during your turn", and a static taunt --------------------
+def test_a_flip_can_tell_whose_turn_it_went_off_on(ctx, db):
+    """Pistachio Cookie (BS9-041): a FLIP fires whenever its host loses HP,
+    which is usually the *opponent's* turn — so which turn it was is a real
+    distinction and not a formality."""
+    program = compile_text("Draw up to 1 card from your deck. Then, if "
+                           "activated during your turn, select up to 1 of your "
+                           "opponent's Cookies. That Cookie receives 1 damage.")
+    victim = ctx.opp.battle[0]
+    before = victim.remaining_hp
+
+    ctx.state.turn_player = ctx.opp.index
+    program(ctx)
+    assert victim.remaining_hp == before, "their turn: only the draw happens"
+
+    ctx.state.turn_player = ctx.me.index
+    program(ctx)
+    assert victim.remaining_hp == before - 1
+
+
+def test_animatronic_forces_attacks_onto_itself_only_beside_its_master(db):
+    """BS9-082: "If [Shadow Milk Cookie] is in your battle area, your
+    opponent's Cookies can only attack this Cookie." A rule about which
+    attacks are legal, so it lives where attacks are enumerated."""
+    from braverse.effects import forced_attack_target
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=31)
+    game.setup()
+    defender = game.state.players[1]
+    defender.battle.clear()
+    animatronic = game._deploy_cookie(defender, CardInstance.make("BS9-082", 1),
+                                      run_on_play=False)
+    game._deploy_cookie(defender, CardInstance.make("ST8-004", 1),
+                        run_on_play=False)
+
+    assert forced_attack_target(db, defender) is None, "no master, no taunt"
+
+    game._deploy_cookie(defender, CardInstance.make("BS9-079", 1),
+                        run_on_play=False)      # a Shadow Milk Cookie
+    assert forced_attack_target(db, defender) is animatronic
+
+
+def test_a_dangling_select_with_no_consequence_is_refused(db):
+    """Mala Sauce Cookie (BS9-025)'s text ends "you can select another of your
+    Cookies" with nothing following it — the dump lost the half that says what
+    happens to the Cookie you picked. A selection that binds nothing is a card
+    that does nothing, and offering it would report a choice that changes the
+    game not at all."""
+    from braverse.effects import is_implemented
+
+    assert not is_implemented("BS9-025")
+    with pytest.raises(CompileError):
+        compile_text("You can select another of your Cookies.")
+
+
+# --- view N, take one, dispose of the rest ---------------------------------
+def test_a_view_takes_what_it_may_and_files_the_rest_where_it_says(ctx, db):
+    """Rambirdtan Handler Glove (BS5-108). "Then, place the remaining cards in
+    the trash" is not an instruction of its own — "the remaining cards" only
+    means anything to the look that just happened — so it is folded back into
+    that look rather than compiled to ops that must find them again."""
+    program = compile_text(
+        "View 3 cards from the top of your deck, reveal up to 1 {P} Cookie "
+        "from the viewed cards, and add it to your hand. Then, place the "
+        "remaining cards in the trash.")
+    hand_before = len(ctx.me.hand)
+    trash_before = len(ctx.me.trash)
+    top_three = ctx.me.deck[:3]
+
+    program(ctx)
+
+    for card in top_three:
+        assert card not in ctx.me.deck, "all three left the deck"
+    moved = len(ctx.me.hand) - hand_before
+    assert len(ctx.me.trash) == trash_before + (3 - moved)
+
+
+def test_the_remainder_can_be_named_a_sentence_later(ctx):
+    """Tales of the Lotus (BS5-086) plays the Cookie it found before it says
+    where the rest go, and "the remaining cards" still means the same look."""
+    from braverse.compiler import ViewTop
+
+    program = compile_text(
+        "View 3 cards from the top of your deck and select up to 1 {B} Cookie "
+        "from the viewed cards. Play that Cookie with +1 HP. Then, place the "
+        "remaining cards on the bottom of your deck in any order.")
+    looks = [op for clause in program.clauses for op in clause.ops
+             if isinstance(op, ViewTop)]
+    assert len(looks) == 1
+    assert looks[0].rest == "bottom"
+
+
+def test_a_sentence_the_one_before_it_carried_out_is_not_an_empty_clause():
+    """Squishy Jelly Watch (BS6-019): "Select up to 2 cards in your opponent's
+    support area. Rest those cards." is one action across two sentences, and
+    the first carries it out. An empty op list would be indistinguishable from
+    text that routed nowhere."""
+    from braverse.compiler import Done
+
+    program = compile_text("Select up to 2 cards in your opponent's support "
+                           "area. Rest those cards.")
+    assert any(isinstance(op, Done) for clause in program.clauses
+               for op in clause.ops)
+
+
+# --- "apply the effect below based on ..." ---------------------------------
+def test_a_dispatch_runs_the_branch_the_board_picks(ctx):
+    """Flipped Coin (BS9-114). Same bullet layout as "Select 1 of the
+    following", the opposite mechanic: nobody is asked."""
+    program = compile_text(
+        "Apply the effect below based on the number of cards in your trash.\n"
+        "・ 14 cards or less: Place 5 cards from the top of your deck into "
+        "your trash.\n"
+        "・ 15 cards or more: Place 3 cards from the top of your opponent's "
+        "deck into your opponent's trash.")
+    ctx.me.trash.clear()
+    theirs = len(ctx.opp.deck)
+
+    program(ctx)
+    assert len(ctx.me.trash) == 5, "the low branch mills my own deck"
+    assert len(ctx.opp.deck) == theirs
+
+    while len(ctx.me.trash) < 15:
+        ctx.me.trash.append(ctx.me.deck.pop(0))
+    theirs = len(ctx.opp.deck)
+    program(ctx)
+    assert len(ctx.opp.deck) == theirs - 3, "the high branch mills theirs"
+
+
+def test_a_dispatch_label_it_cannot_read_is_refused():
+    with pytest.raises(CompileError):
+        compile_text("Apply the effect below based on the phase of the moon.\n"
+                     "・ Waxing: Draw up to 1 card from your deck.\n"
+                     "・ Waning: Draw up to 2 cards from your deck.")
+
+
+# --- costs and riders on items ---------------------------------------------
+def test_a_reveal_cost_keeps_the_card_in_hand(ctx, db):
+    """Light of Deceit (BS9-091): showing the card is the whole price."""
+    from braverse.compiler import parse_cost
+
+    named = CardInstance.make("BS9-079", 0)      # a Shadow Milk Cookie
+    ops = parse_cost("<Reveal 1 [Shadow Milk Cookie] from your hand.>")
+    assert not all(op.run(ctx, {}) for op in ops), "not holding one"
+
+    ctx.me.hand.append(named)
+    assert all(op.run(ctx, {}) for op in ops)
+    assert named in ctx.me.hand, "a reveal spends nothing"
+
+
+def test_damage_reduction_from_equipment_is_re_read_every_time(db):
+    """BS9-092's rider is conditional on the board, so it cannot be banked at
+    the moment the jam went on: a hand that grew past five turns it off."""
+    from braverse.effects import continuous_damage_reduction
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=41)
+    game.setup()
+    me = game.state.players[0]
+    cookie = me.battle[0]
+    cookie.equipment.append(CardInstance.make("BS9-092", 0))
+    game.state.turn_player = 0
+    del me.hand[5:]
+
+    assert continuous_damage_reduction(db, game.state, cookie) == 3
+
+    while len(me.hand) <= 5:
+        me.hand.append(me.deck.pop(0))
+    assert continuous_damage_reduction(db, game.state, cookie) == 0
+
+    del me.hand[5:]
+    game.state.turn_player = 1
+    assert continuous_damage_reduction(db, game.state, cookie) == 0, "their turn"
+
+
+# --- "during this battle" is resolved after the battle ---------------------
+def test_a_battle_scoped_trap_is_held_until_the_battle_has_happened(db):
+    """The Trap Step runs *before* damage (7-1-2), so "if your Cookie faints
+    during this battle" cannot be answered when the card is played — nothing
+    has fainted yet. Held to the end of the battle, it is asked when the card
+    means it."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=51)
+    game.setup()
+
+    assert game._waits_for_the_battle(CardInstance.make("P-029", 0)), \
+        "Ritual of Life asks about the battle it is played into"
+    assert not game._waits_for_the_battle(CardInstance.make("BS3-116", 0)), \
+        "an ordinary item resolves on the spot"
+
+
+def test_battle_faints_are_counted_per_battle_not_per_turn(db):
+    """Two attacks in one turn are two battles, and a trap in the second one
+    must not see what died in the first."""
+    from braverse.effect_ir import Condition
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=52)
+    game.setup()
+    _plain_hp(game, db)
+    me, opp = game.state.players
+    ctx = Ctx(game=game, state=game.state, db=db, me=opp, opp=me,
+              source_cookie=None, source_card=None)
+    condition = Condition("battle_faints", ">=", 1)
+
+    game._battle_faints = []
+    assert not condition.holds(ctx)
+
+    victim = opp.battle[0]
+    game.faint(victim)
+    assert condition.holds(ctx), "their own Cookie fainting is what it asks about"
+
+    game._battle_faints = []            # the next battle starts clean
+    assert not condition.holds(ctx)
+
+
+# --- refresh, taunts and redirects -----------------------------------------
+def test_a_cookie_can_rewrite_what_a_refresh_costs(db):
+    """Nosy Wizard waives it for its controller; Everything Pie Cookie raises
+    it for the seat across the table."""
+    from braverse.effects import refresh_break_cost
+
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=53)
+    game.setup()
+    me, opp = game.state.players
+    printed = game.rules.refresh_break_cost
+
+    assert refresh_break_cost(db, me, opp, printed) == printed
+
+    game._deploy_cookie(opp, CardInstance.make("BS9-111", 1), run_on_play=False)
+    assert refresh_break_cost(db, me, opp, printed) == 2
+
+    game._deploy_cookie(me, CardInstance.make("BS9-096", 0), run_on_play=False)
+    assert refresh_break_cost(db, me, opp, printed) == 0, "the waiver wins"
+
+
+def test_a_redirect_moves_the_attack_onto_a_different_cookie(ctx, db):
+    """Broken Signpost (BS1-050): the same outcome as a 【Blocker】 by another
+    route, and "a different Cookie" is the whole card."""
+    from braverse.compiler import RedirectAttack
+
+    attacker = ctx.opp.battle[0]
+    target = ctx.me.battle[0]
+    ctx.game._pending_attack = (attacker, target)
+
+    if len(ctx.me.battle) < 2:
+        ctx.game._deploy_cookie(ctx.me, CardInstance.make("ST9-007", 0),
+                                run_on_play=False)
+    op = RedirectAttack()
+    assert op.is_live(ctx, {})
+    assert op.run(ctx, {})
+    assert ctx.game._redirect_to is not None
+    assert ctx.game._redirect_to is not target
+
+
+def test_a_redirect_with_nowhere_to_go_is_not_a_move(ctx):
+    """One Cookie on the board means there is no different Cookie to redirect
+    to, so the trap is not on offer."""
+    from braverse.compiler import RedirectAttack
+
+    attacker = ctx.opp.battle[0]
+    target = ctx.me.battle[0]
+    del ctx.me.battle[1:]
+    ctx.me.battle[0] = target
+    ctx.game._pending_attack = (attacker, target)
+
+    assert not RedirectAttack().is_live(ctx, {})
+
+
+# --- "If you did" ----------------------------------------------------------
+def test_if_you_did_reads_whether_the_sentence_before_happened(ctx):
+    """Carrot Farm Scarecrow (BS2-021) only refills a support area it emptied."""
+    program = compile_text("Return 1 card from your support area to your hand. "
+                           "If you did, place 1 card from your hand into your "
+                           "support area as rested.")
+    ctx.me.support.clear()
+    hand_before = len(ctx.me.hand)
+
+    program(ctx)
+    assert len(ctx.me.support) == 0, "nothing came back, so nothing goes in"
+    assert len(ctx.me.hand) == hand_before
+
+    ctx.me.support.append(ctx.me.deck.pop(0))
+    program(ctx)
+    assert len(ctx.me.support) == 1, "one out, one in"
+
+
+def test_if_you_did_does_not_veto_the_move_at_probe_time(ctx):
+    """A probe cannot know whether a sentence that has not run yet succeeded,
+    so it does not get to say the card is dead either."""
+    program = compile_text("Return 1 card from your support area to your hand. "
+                           "If you did, draw up to 1 card from your deck.")
+    ctx.me.support.append(ctx.me.deck.pop(0))
+    assert program.is_live(ctx)
+
+
+# --- "up to N" is one question with a confirm ------------------------------
+class _Batching:
+    """A seat that can answer a whole selection at once, as a browser can."""
+
+    def __init__(self, take=None):
+        self.take = take
+        self.singles: list = []
+        self.batches: list = []
+
+    def choose_action(self, state, options):
+        return options[0] if options else None
+
+    def choose(self, state, prompt, options, *, optional):
+        self.singles.append(prompt)
+        return options[0] if options else None
+
+    def choose_many(self, state, prompt, options, *, count, optional,
+                    up_to=False):
+        self.batches.append({"prompt": prompt, "count": count, "up_to": up_to,
+                             "offered": len(options)})
+        wanted = count if self.take is None else self.take
+        return options[:wanted]
+
+
+def _stock_enemy_board(ctx, n=3):
+    while len(ctx.opp.battle) < n:
+        ctx.game._deploy_cookie(ctx.opp, CardInstance.make("ST9-007", 1),
+                                run_on_play=False)
+
+
+def test_selecting_up_to_two_is_one_question_not_two(ctx):
+    """"Select up to 2" asked twice in a row gives no way to say "that is all"
+    except declining the second question, and no way to change the first
+    answer at all. One question, pick as many as you want, confirm."""
+    _stock_enemy_board(ctx)
+    seat = _Batching()
+    _seat(ctx, seat)
+
+    compile_text("Select up to 2 of your opponent's Cookies. During this turn, "
+                 "those Cookies deal -1 attack damage each.")(ctx)
+
+    assert seat.singles == [], "nothing should be asked one at a time"
+    assert len(seat.batches) == 1
+    assert seat.batches[0]["count"] == 2
+    assert seat.batches[0]["up_to"] is True
+    assert seat.batches[0]["offered"] == 3, "every legal target is on offer"
+
+
+def test_a_short_answer_to_up_to_is_accepted(ctx):
+    """Confirming with one of two picked is a real answer, not a short one."""
+    _stock_enemy_board(ctx)
+    seat = _Batching(take=1)
+    _seat(ctx, seat)
+    before = {c.uid: c.attack_damage(ctx.db) for c in ctx.opp.battle}
+
+    compile_text("Select up to 2 of your opponent's Cookies. During this turn, "
+                 "those Cookies deal -1 attack damage each.")(ctx)
+
+    weakened = [c for c in ctx.opp.battle
+                if c.attack_damage(ctx.db) < before[c.uid]]
+    assert len(weakened) == 1
+
+
+def test_a_fixed_count_is_not_an_up_to(ctx):
+    """"Select 2 of your Cookies" has no short answer, and the flag says so —
+    it is what keeps the confirm button gated on exactly two."""
+    seat = _Batching()
+    _seat(ctx, seat)
+    while len(ctx.me.battle) < 2:
+        ctx.game._deploy_cookie(ctx.me, CardInstance.make("ST9-007", 0),
+                                run_on_play=False)
+
+    compile_text("Select 2 of your Cookies and place 1 of their HP cards in "
+                 "the trash.")(ctx)
+
+    assert seat.batches[0]["up_to"] is False
+
+
+def test_up_to_one_stays_a_single_question(ctx):
+    """One card is already one question, and its "none" is the Decline button.
+    Putting it on a confirm strip would be two clicks for one decision."""
+    _stock_enemy_board(ctx)
+    seat = _Batching()
+    _seat(ctx, seat)
+
+    compile_text("Select up to 1 of your opponent's Cookies. That Cookie "
+                 "receives 1 damage.")(ctx)
+
+    assert seat.batches == []
+    assert len(seat.singles) == 1
+
+
+def test_a_scripted_seat_is_still_asked_one_card_at_a_time(ctx):
+    """The bot path is deliberately untouched: a bot asked N questions and a
+    bot asked one question for N cards make different games out of the same
+    seed, and self-play numbers are the regression check for the engine."""
+    _stock_enemy_board(ctx)
+    assert not hasattr(ctx.game.controller(ctx.me.index), "choose_many")
+    assert ctx.choose_many("anything", list(ctx.opp.battle),
+                           count=2, up_to=True) is None
+
+
+def test_taking_up_to_two_from_a_pile_is_one_question(ctx):
+    """The same rule for a trash or break-area pile, not just the board."""
+    for _ in range(4):
+        ctx.me.trash.append(ctx.me.deck.pop(0))
+    seat = _Batching()
+    _seat(ctx, seat)
+
+    compile_text("Return up to 2 cards from your trash to your hand.")(ctx)
+
+    assert seat.singles == []
+    assert seat.batches[0]["count"] == 2 and seat.batches[0]["up_to"] is True
+
+
+def test_adding_up_to_two_viewed_cards_is_one_question(ctx):
+    """"View 3 cards ... add up to 2 of them to your hand" — the three are on
+    screen together, and picking one should not hide the rest behind a second
+    prompt. The count belongs in the prompt: a strip with a confirm button
+    does not otherwise say how many you may keep."""
+    seat = _Batching()
+    _seat(ctx, seat)
+
+    ctx.view_top(3, take=2)
+
+    assert seat.singles == []
+    assert seat.batches[0]["count"] == 2
+    assert "up to 2" in seat.batches[0]["prompt"]

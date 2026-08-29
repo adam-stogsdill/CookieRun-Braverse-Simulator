@@ -12,6 +12,7 @@ import argparse
 import time
 
 from braverse import STARTER_DECKS, default_db
+from braverse.agentfile import AGENT_DIR, find_checkpoint
 from braverse.rl import TrainConfig, Trainer
 from braverse.console import utf8_output
 
@@ -31,7 +32,11 @@ def main() -> None:
                         help="fraction of training games on freshly generated\n                              legal decks drawn from the whole playable pool")
     parser.add_argument("--deck0", choices=STARTER_DECKS, default="st9_sea_fairy")
     parser.add_argument("--deck1", choices=STARTER_DECKS, default="st8_wind_archer")
-    parser.add_argument("--out", default="rl_agent.pt")
+    parser.add_argument("--out", default=f"{AGENT_DIR}/rl_agent.pt")
+    parser.add_argument("--resume", metavar="CHECKPOINT",
+                        help="continue from an existing checkpoint. Pass a "
+                             "fresh --seed too, or the run replays the same "
+                             "games it has already learned from")
     parser.add_argument("--eval-only", help="load a checkpoint and just score it")
     args = parser.parse_args()
 
@@ -45,15 +50,24 @@ def main() -> None:
     )
 
     if args.eval_only:
-        trainer = Trainer(decks, config, db=db, net=Trainer.load_net(args.eval_only))
+        scoring = Trainer.load_net(find_checkpoint(args.eval_only))
+        trainer = Trainer(decks, config, db=db, net=scoring)
         print(f"vs heuristic, starter decks {trainer.evaluate(400):.1%}")
         print(f"vs heuristic, unseen decks  "
               f"{trainer.evaluate(400, unseen_decks=True):.1%}")
         print(f"vs random,    starter decks {trainer.evaluate(400, opponent='random'):.1%}")
         return
 
-    trainer = Trainer(decks, config, db=db)
-    print(f"baseline (untrained) vs heuristic {trainer.evaluate(200):.1%}")
+    resume = find_checkpoint(args.resume) if args.resume else None
+    resuming = Trainer.load_net(resume) if resume else None
+    trainer = Trainer(decks, config, db=db, net=resuming)
+    if args.resume:
+        found = trainer.restore(resume)
+        print(f"resumed {resume}: {found['games_trained']} games trained, "
+              f"league {found['league']}, optimizer "
+              f"{'restored' if found['optimizer'] else 'reset (pre-0.2.54 file)'}")
+    label = "resumed" if args.resume else "untrained"
+    print(f"baseline ({label}) vs heuristic {trainer.evaluate(200):.1%}")
 
     started = time.time()
     trainer.train()

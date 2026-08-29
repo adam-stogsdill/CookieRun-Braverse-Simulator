@@ -11,8 +11,10 @@ half-resolving.
 from __future__ import annotations
 
 from braverse.cost import Cost
-from braverse.effects import (OPPONENT_DAMAGE_SHIELDS, STATIC_ABILITY_CARDS,
-                              Ctx, Trigger, effect, playable_if)
+from braverse.effects import (DAMAGE_REDUCERS, OPPONENT_DAMAGE_SHIELDS,
+                              REFRESH_COST_MODIFIERS, STATIC_ABILITY_CARDS,
+                              TAUNT_PROVIDERS, Ctx, Trigger, effect,
+                              playable_if)
 from braverse.enums import Color, Keyword
 from braverse.state import card_label
 
@@ -482,3 +484,96 @@ def blueberry_pie_activate(ctx: Ctx) -> None:
     ctx.view_top(3, pick=lambda d: d.color is Color.PURPLE,
                  criterion="{P}", reveal=True, rest="trash")
     
+
+# --- BS9-082 Animatronic of Deceit ------------------------------------------
+def _animatronic_taunt(db, defender):
+    """"If [Shadow Milk Cookie] is in your battle area, your opponent's Cookies
+    can only attack this Cookie."
+
+    A targeting restriction, enforced where attacks are enumerated rather than
+    as a trigger — the same shape as Kumiho Cookie (BS4-024), and for the same
+    reason: there is no event here to fire on, only a rule about what is a
+    legal attack while the Animatronic and its master share a battle area.
+
+    Two of them out at once is not a contradiction the rules resolve, so the
+    first one found is the one that holds — which is also what a player would
+    do with two identical restrictions on the table.
+    """
+    animatronic = next((c for c in defender.battle
+                        if c.defn(db).base_id == "BS9-082"), None)
+    if animatronic is None:
+        return None
+    has_master = any(c.name(db) == "Shadow Milk Cookie" for c in defender.battle)
+    return animatronic if has_master else None
+
+
+TAUNT_PROVIDERS.append(_animatronic_taunt)
+STATIC_ABILITY_CARDS.add("BS9-082")
+
+
+# --- BS9-092 Soul Jam: Light of Deceit --------------------------------------
+def _deceit_jam_reduction(db, state, cookie) -> int:
+    """"If there are 5 cards or less in your hand, during your turn, that
+    Cookie receives -3 damage."
+
+    A rider on the jam, not on the Cookie, so it is read off the equipment and
+    leaves with it. Both halves of the condition are re-read every time damage
+    lands rather than banked when the jam went on: a hand that grew past five,
+    or the opponent's turn coming round, turns it off again.
+    """
+    if not any(c.card_id.split("@")[0] == "BS9-092" for c in cookie.equipment):
+        return 0
+    owner = state.players[cookie.owner]
+    if state.turn_player != owner.index or len(owner.hand) > 5:
+        return 0
+    return 3
+
+
+DAMAGE_REDUCERS.append(_deceit_jam_reduction)
+
+
+@effect("BS9-092", Trigger.ITEM)
+def soul_jam_deceit(ctx: Ctx) -> None:
+    """<{B}{N}> <Discard 2 cards.> Select up to 1 of your opponent's Cookies.
+    That Cookie receives 2 damage. Then, you can 【Equip】 this card to your
+    [Shadow Milk Cookie]. If there are 5 cards or less in your hand, during
+    your turn, that Cookie receives -3 damage.
+
+    The discard is a cost, so it is paid before anything happens and the card
+    does nothing if it cannot be met.
+    """
+    if len(ctx.me.hand) < 2:
+        return
+    ctx.discard(2, optional=False)
+    target = ctx.select_enemy()
+    if target is not None:
+        ctx.deal_damage(target, 2)
+
+    holder = ctx.select_own(lambda c: c.name(ctx.db) == "Shadow Milk Cookie",
+                            prompt="Equip to Shadow Milk Cookie?")
+    card = ctx.source_card
+    if holder is not None and card is not None:
+        if card in ctx.me.trash:
+            ctx.me.trash.remove(card)
+        holder.equipment.append(card)
+
+
+# --- BS9-096 Nosy Wizard / BS9-111 Everything Pie Cookie --------------------
+def _refresh_cost_rewrite(db, player, opponent):
+    """Two Cookies rewrite what a [refresh] costs, pulling opposite ways.
+
+    Nosy Wizard waives it for its own controller; Everything Pie Cookie
+    doubles it for the seat across the table. Asked about whoever is
+    refreshing, so both are read from that player's point of view — and the
+    waiver wins, because a cost of none cannot be raised by making it two.
+    """
+    if any(c.defn(db).base_id == "BS9-096" for c in player.battle):
+        return 0
+    if any(c.defn(db).base_id == "BS9-111" for c in opponent.battle):
+        return 2
+    return None
+
+
+REFRESH_COST_MODIFIERS.append(_refresh_cost_rewrite)
+STATIC_ABILITY_CARDS.add("BS9-096")
+STATIC_ABILITY_CARDS.add("BS9-111")

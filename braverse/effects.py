@@ -17,8 +17,16 @@ from .enums import Color
 from .state import Cookie, CardInstance, GameState, PlayerState, card_label
 
 
-def _view_prompt(criterion: str) -> str:
-    """"Add a {P} card to your hand", or just "Add a card to your hand"."""
+def _view_prompt(criterion: str, take: int = 1) -> str:
+    """"Add a {P} card to your hand", or "Add up to 2 {P} cards to your hand".
+
+    The count is in the prompt because it is the question: a strip of three
+    cards with a confirm button under it does not otherwise say how many of
+    them you are allowed to keep.
+    """
+    if take > 1:
+        what = f"{criterion} cards" if criterion else "cards"
+        return f"Add up to {take} {what} to your hand"
     what = f"{criterion} card" if criterion else "card"
     return f"Add a {what} to your hand"
 
@@ -217,6 +225,33 @@ EFFECT_DAMAGE_BONUSES: list = []
 # attack becomes {N}". Each entry takes (db, player, cookie, cost) and returns
 # a replacement Cost, or None to leave it alone.
 ATTACK_COST_MODIFIERS: list = []
+
+# Rewrites of how many Cookies a [refresh] sends to the break area. Each entry
+# takes (db, player, opponent) and returns a replacement count, or None. Two
+# Cookies print this and they pull in opposite directions — one waives the cost
+# for its controller, one raises it for the other seat — so the rule has to be
+# asked about the player who is refreshing, from both sides of the table.
+REFRESH_COST_MODIFIERS: list = []
+
+
+def refresh_break_cost(db, player, opponent, printed: int) -> int:
+    for modifier in REFRESH_COST_MODIFIERS:
+        replacement = modifier(db, player, opponent)
+        if replacement is not None:
+            return replacement
+    return printed
+
+
+# Continuous "this Cookie receives -N damage" abilities. Each entry takes
+# (db, state, cookie) and returns how much to shave off incoming damage.
+# A registry rather than a field on the Cookie because these are conditional
+# on the board — the condition has to be re-read every time damage lands, not
+# banked at the moment the ability was granted.
+DAMAGE_REDUCERS: list = []
+
+
+def continuous_damage_reduction(db, state, cookie) -> int:
+    return sum(rule(db, state, cookie) for rule in DAMAGE_REDUCERS)
 
 def modified_attack_cost(db, player, cookie, cost):
     for modifier in ATTACK_COST_MODIFIERS:
@@ -503,7 +538,17 @@ class Ctx:
             with self.game.showing(viewed):
                 self.confirm(f"Nothing among the {len(viewed)} viewed cards "
                              f"can be taken")
-        for _ in range(take):
+        # "Add up to 2 of them to your hand" is one question about the whole
+        # run, not two in a row: the viewed cards are on screen together and
+        # picking one should not hide the rest behind another prompt.
+        if take > 1 and eligible:
+            with self.game.showing(viewed):
+                batched = self.choose_many(prompt or _view_prompt(criterion, take),
+                                           eligible, count=take, up_to=True)
+            if batched is not None:
+                taken = list(batched)
+                eligible = [c for c in eligible if c not in taken]
+        for _ in range(take - len(taken)):
             if not eligible:
                 break
             with self.game.showing(viewed):
@@ -906,6 +951,23 @@ class Ctx:
         return plan_payment(cost, colors) is not None
 
     # -- decisions -------------------------------------------------------
+    def choose_many(self, prompt: str, options: Sequence, *, count: int,
+                    up_to: bool):
+        """Ask for a whole selection in one question, or say it cannot be.
+
+        Returns ``None`` when this seat has no batched form — every scripted
+        agent, which answers one card at a time. That is deliberate and load
+        bearing: a bot asked N separate questions and a bot asked one question
+        for N cards make different games out of the same seed, and self-play
+        numbers are the regression check for the whole engine. Only a seat that
+        implements ``choose_many`` (a person at a browser) takes this path.
+        """
+        controller = self.game.controller(self.me.index)
+        if getattr(controller, "choose_many", None) is None:
+            return None
+        return ask_many(controller, self.state, prompt, list(options), count,
+                        optional=up_to, up_to=up_to)
+
     def choose(self, prompt: str, options: Sequence, *, optional: bool = True):
         if not options:
             return None

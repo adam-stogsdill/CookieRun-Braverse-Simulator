@@ -476,3 +476,34 @@ register_special_play("BS11-113", 1, 1)     # Venom Dough Cookie
 # 【Special Play】 Place 2 {K} LV.2 Cookies that have Special Play from your
 # battle area into your trash.
 register_special_play("BS11-115", 2, 2, marked=True)   # Dark Enchantress Cookie
+
+
+# --- BS11-106 World-reflecting Mirrors --------------------------------------
+def _mirrors_is_free(ctx: Ctx) -> bool:
+    """"If there is a Cookie that is LV.5 or higher **or** a Cookie that has
+    【Special Play】 in your battle area, the cost to activate this card is
+    reduced by 1 {K}."
+
+    The whole printed cost is one {K}, so "reduced by 1 {K}" means free. It is
+    written here rather than compiled because the discount is one sentence and
+    the cost it discounts is the next one — the compiler pulls a `<...>` out of
+    the clause it sits in, and cannot see back to a sentence that changes it.
+    """
+    return any(c.level(ctx.db) >= 5 or c.defn(ctx.db).has(Marker.SPECIAL_PLAY)
+               for c in ctx.me.battle)
+
+
+@effect("BS11-106", Trigger.ITEM)
+def world_reflecting_mirrors(ctx: Ctx) -> None:
+    """<{K}> Select up to 1 of your opponent's Cookies. During this turn, that
+    Cookie deals -1 attack damage."""
+    if not _mirrors_is_free(ctx) and not ctx.pay(Cost.parse("{K}")):
+        return
+    target = ctx.select_enemy()
+    if target is not None:
+        ctx.modify_attack(target, -1)
+
+
+world_reflecting_mirrors.playable = lambda ctx: (
+    bool(ctx.enemy_cookies())
+    and (_mirrors_is_free(ctx) or ctx.can_pay(Cost.parse("{K}"))))

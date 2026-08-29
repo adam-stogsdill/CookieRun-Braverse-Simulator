@@ -132,12 +132,14 @@ class DeckEvolver:
         question closer to the one you care about. Slower — roughly half the
         games per second — so budget accordingly.
         """
-        from .features import Encoder
-        from .rl import RLAgent, Trainer
+        from .agentfile import find_checkpoint
+        from .rl import RLAgent, Trainer, encoder_for
 
         db = db or default_db()
-        net = Trainer.load_net(checkpoint)
-        encoder = Encoder(db)
+        net = Trainer.load_net(find_checkpoint(checkpoint))
+        # Built once and shared across candidates, but read off the policy
+        # rather than assumed — a wide checkpoint wants different rows.
+        encoder = encoder_for(net, db)
 
         def factory(seat: int, seed: int):
             return RLAgent(net, seat, encoder=encoder, db=db,

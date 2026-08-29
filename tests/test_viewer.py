@@ -967,3 +967,39 @@ def test_an_ordinary_question_carries_no_attack():
         assert pending and pending.get("responding") is None
     finally:
         match.stop()
+
+
+def test_the_picker_explains_a_click_it_had_to_ignore():
+    """At the limit, a click on an unpicked card cannot be taken.
+
+    Silently ignoring it reads as a broken card — you pressed it and nothing
+    moved — so the strip says what the limit is, says which click frees a
+    slot, and marks the cards already taken so it is obvious which ones those
+    are. `renderPicker` owns all three.
+    """
+    src = (VIEWER / "app.js").read_text()
+    picker = src[src.index("function renderPicker"):src.index("function renderOptions")]
+
+    assert "state.pickFull" in picker, "nothing records why the click did nothing"
+    assert "swap it" in picker, "the notice does not say what to do about it"
+    # Cleared whenever the selection changes, or the message outlives its click.
+    assert picker.count('state.pickFull = ""') >= 3
+
+    css = (VIEWER / "style.css").read_text()
+    assert ".picker-row.full .picker-card.picked" in css, (
+        "nothing marks the picked cards when the limit is reached")
+    assert ".picker-foot .hint.over" in css, "the notice is not distinguished"
+
+
+def test_a_batched_question_is_never_also_answerable_on_the_board():
+    """A "pick N of these" answer is a list. One index sent to a question
+    expecting a list is padded out by the engine with cards nobody chose, so
+    pointing at a single card must not answer it — and the board must not
+    invite the click either.
+    """
+    src = (VIEWER / "app.js").read_text()
+    direct = src[src.index("function directOption"):src.index("function closeCardMenu")]
+    assert "pending.upTo" in direct and "pending.count" in direct
+
+    sets = src[src.index("function actionSets"):src.index("function markActionable")]
+    assert "pending.upTo" in sets and "pending.pick" in sets

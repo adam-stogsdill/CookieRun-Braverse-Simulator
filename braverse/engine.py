@@ -23,9 +23,11 @@ from . import actions as A
 from . import config as cfg
 from .cards import CardDB, CardDef, blocker_price, default_db
 from .cost import Cost, plan_payment
-from .effects import (Ctx, Trigger, ask_many, cannot_attack, effect_is_live,
+from .effects import (Ctx, Trigger, ask_many, cannot_attack,
+                      continuous_damage_reduction, effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
-                      may_play, modified_attack_cost, special_play_of)
+                      may_play, modified_attack_cost,
+                      refresh_break_cost, special_play_of)
 from .enums import CardType, Color, Keyword, Marker, Phase
 from .state import (CardInstance, Cookie, GameState, PlayerState,
                     card_label)
@@ -151,6 +153,12 @@ class Game:
         self._fainting: set = set()
         self._response_player: int | None = None
         self._trap_used = 0
+        # (owner index, colour, level) for every Cookie that fainted in the
+        # battle being resolved, and the traps held back until it is over.
+        self._battle_faints: list = []
+        self._end_of_battle: list = []
+        # Set by a trap that moves the attack onto a different Cookie.
+        self._redirect_to: Cookie | None = None
         # "trap" or "block" once the defender has answered this attack; either
         # one rules the other out for the rest of the window.
         self._responded: str | None = None
@@ -327,6 +335,7 @@ class Game:
         player.played_from_break_this_turn.clear()
         player.played_from_trash_this_turn.clear()
         player.support_trashed_this_turn = 0
+        player.special_plays_this_turn = 0
         player.cookies_to_deck_bottom_this_turn = 0
         player.cookies_to_deck_this_turn = 0
         player.hp_gain_locked = False
@@ -794,6 +803,7 @@ class Game:
                 return
             self._take_from_hand(player, action.card_uid)
             self._deploy_cookie(player, card, onto=action.onto)
+            player.special_plays_this_turn += 1
 
     @contextlib.contextmanager
     def _holding_refill(self, player: PlayerState):
@@ -956,8 +966,17 @@ class Game:
         cost = modified_attack_cost(self.db, player, attacker, attack.cost)
         if not self.pay_cost(player, cost):
             return
+        # A battle is the unit five traps ask about ("if your Cookie faints
+        # during this battle"), and it starts here — before the attack is
+        # declared, so a rider that faints something on the way in counts.
+        self._battle_faints = []
+        self._end_of_battle = []
         # Static 【Your Turn】 buffs read the board as the attack is declared.
         self._run_cookie_effect(attacker, Trigger.ATTACK_START, player)
+        # A stage can watch its controller's Cookies swing ("When your [Shadow
+        # Milk Cookie] attacks, ..."), so it is asked at the same moment, with
+        # the attacking Cookie as the source it is talking about.
+        self._run_stage_effects(player, Trigger.ATTACK_START, attacker)
         attacker.rested = True
         # 7-1-1-3: "At the end of the Attack Step, if the attacking card or the
         # attacked card was moved to another zone, the Trap Step is skipped and
@@ -1017,6 +1036,42 @@ class Game:
         if not state.over:
             self._run_cookie_effect(attacker, Trigger.ATTACK, player)
         self._check_battle_area(defender)
+        self._resolve_end_of_battle()
+
+    def _waits_for_the_battle(self, card: CardInstance) -> bool:
+        """Whether this card's effect asks about the battle it was played into.
+
+        Read off the compiled program rather than guessed from the text: a
+        `Guard` on a battle-scoped condition is exactly the shape that cannot
+        be answered before damage.
+        """
+        from .effect_ir import Condition, Guard
+
+        program = get_effect(self.db[card.card_id].id, Trigger.ITEM)
+        for clause in getattr(program, "clauses", ()):
+            for op in clause.ops:
+                if not isinstance(op, Guard):
+                    continue
+                for condition in op.conditions:
+                    if (isinstance(condition, Condition)
+                            and condition.kind == "battle_faints"):
+                        return True
+        return False
+
+    def _resolve_end_of_battle(self) -> None:
+        """Run the traps that were held back until the battle had happened.
+
+        7-1-2 puts the Trap Step before damage, so a card gated on "if your
+        Cookie faints during this battle" cannot answer its own question at
+        the moment it is played — nothing has fainted yet. Held to here, it is
+        asked once the battle is over, which is when the card means it.
+        """
+        pending, self._end_of_battle = self._end_of_battle, []
+        for card, player in pending:
+            if self.state.over:
+                break
+            self.state.record(f"{card_label(self.db[card.card_id])} resolves")
+            self._run_effect(card, Trigger.ITEM, player)
 
     def _response_window(self, defender: PlayerState, attacker: Cookie,
                          target: Cookie) -> Cookie | None:
@@ -1047,8 +1102,23 @@ class Game:
                         break
                     self._take_from_hand(defender, choice.card_uid)
                     self.state.record(f"springs trap {card_label(defn)}")
-                    self._run_effect(card, Trigger.ITEM, defender)
+                    self._redirect_to = None
+                    if self._waits_for_the_battle(card):
+                        # "If your Cookie faints during this battle" cannot be
+                        # answered here — the Trap Step is before damage and
+                        # nothing has fainted yet. Held until the battle is
+                        # over, which is when the card means it.
+                        self._end_of_battle.append((card, defender))
+                    else:
+                        self._run_effect(card, Trigger.ITEM, defender)
                     defender.trash.append(card)
+                    # A trap that redirects the swing has answered the attack
+                    # the way a block does — the target changes, and nothing
+                    # else about the battle does.
+                    if self._redirect_to is not None:
+                        target = self._redirect_to
+                        self._pending_attack = (attacker, target)
+                        self._redirect_to = None
                     self._trap_used += 1
                     self._responded = "trap"
                 elif isinstance(choice, A.Block) and not blocked:
@@ -1108,6 +1178,7 @@ class Game:
             self.state.record(f"{name} takes no {kind} damage{by} (shielded)")
             return
         amount -= cookie.all_damage_reduction
+        amount -= continuous_damage_reduction(self.db, self.state, cookie)
         if amount <= 0:
             self.state.record(f"{name} takes no {kind} damage{by} (reduced)")
             return
@@ -1388,6 +1459,8 @@ class Game:
         owner.break_area.append(cookie.card)
         owner.trash.extend(cookie.equipment)
         owner.cookies_fainted_this_turn += 1
+        self._battle_faints.append((owner.index, cookie.defn(self.db).color,
+                                    cookie.level(self.db)))
         owner.faint_log.append((self.state.turn_counter,
                                 cookie.defn(self.db).color,
                                 cookie.level(self.db)))
@@ -1460,7 +1533,10 @@ class Game:
             self.state.record(
                 f"refresh — {len(returning)} EXTRA card(s) return to the EXTRA deck")
 
-        for _ in range(self.rules.refresh_break_cost):
+        cost = refresh_break_cost(self.db, player,
+                                  self.state.opponent_of(player.index),
+                                  self.rules.refresh_break_cost)
+        for _ in range(cost):
             # A *Cookie* card of LV.1 or higher, not merely a card with a
             # Level: nothing else may be placed in a break area (3-8-3).
             options = [c for c in player.trash
@@ -1535,6 +1611,25 @@ class Game:
                 fn(self._ctx(player, source_cookie=cookie, source_card=cookie.card,
                              trigger=trigger.value))
         self._run_equipment_effects(cookie, trigger, player)
+
+    def _run_stage_effects(self, player: PlayerState, trigger: Trigger,
+                           cookie: Cookie | None = None) -> None:
+        """A stage card reacting to something that happened on the board.
+
+        The stage is `source_card`, the Cookie the event was about is
+        `source_cookie` — which is what lets "when your [Shadow Milk Cookie]
+        attacks" tell whose swing this is.
+        """
+        for card in list(player.stage):
+            fn = get_effect(self.db[card.card_id].id, trigger)
+            if fn is None:
+                continue
+            defn = self.db[card.card_id]
+            with self._effect_source(defn.name,
+                                     source_kind(self.db, card, trigger),
+                                     label=card_label(defn)):
+                fn(self._ctx(player, source_cookie=cookie, source_card=card,
+                             trigger=trigger.value))
 
     def _run_equipment_effects(self, cookie: Cookie, trigger: Trigger,
                                player: PlayerState) -> None:

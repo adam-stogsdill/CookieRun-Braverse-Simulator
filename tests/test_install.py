@@ -66,6 +66,7 @@ def test_the_folders_are_the_ones_the_game_reads(fake_game: Path, tmp_path: Path
     monkeypatch.setattr(play_server, "SIDE", target)
 
     read_by_the_game = {
+        "agents": play_server.AGENT_DIR,
         "decks": play_server.DECK_DIR,
         "card_images": play_server.CARD_DIR,
         "profiles": play_server.PROFILE_DIR_NAME,

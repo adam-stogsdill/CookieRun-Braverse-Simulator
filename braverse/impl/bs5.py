@@ -6,8 +6,8 @@ for the compiler to hang an effect on.
 
 from __future__ import annotations
 
-from braverse.effects import Ctx, Trigger, effect
-from braverse.enums import Color
+from braverse.effects import DAMAGE_REDUCERS, Ctx, Trigger, effect
+from braverse.enums import Color, Keyword
 
 
 # --- BS5-001 Dark Choco Cookie ----------------------------------------------
@@ -186,3 +186,54 @@ def scorpion_static(ctx: Ctx) -> None:
     bonus = len(ctx.me.trash) // 15
     if ctx.source_cookie and bonus:
         ctx.modify_attack(ctx.source_cookie, bonus)
+
+
+# --- BS5-111 Wrath of the Dragons -------------------------------------------
+def _dragon_wrath_reduction(db, state, cookie) -> int:
+    """"receives -1 attack damage" while the jam is on and its host is hurt.
+
+    Read off the equipment every time damage lands, not banked when the card
+    was attached: the condition is the host's *current* HP, and a Cookie that
+    was healed back above 3 is no longer the Cookie the card describes.
+    """
+    if not any(c.card_id.split("@")[0] == "BS5-111" for c in cookie.equipment):
+        return 0
+    return 1 if cookie.remaining_hp <= 3 else 0
+
+
+DAMAGE_REDUCERS.append(_dragon_wrath_reduction)
+
+
+@effect("BS5-111", Trigger.ATTACK_START)
+def dragon_wrath_aura(ctx: Ctx) -> None:
+    """"that Cookie gains +1 attack damage" — the other half of the same rider.
+
+    Registered against the jam's card id and reached through
+    `Game._run_equipment_effects`, with the host as `source_cookie`.
+    """
+    cookie = ctx.source_cookie
+    if cookie is not None and cookie.remaining_hp <= 3:
+        ctx.modify_attack(cookie, 1)
+
+
+@effect("BS5-111", Trigger.ITEM)
+def dragon_wrath(ctx: Ctx) -> None:
+    """<{N}> 【Equip】 this card to one of your 【Dragon】 Cookies. If that
+    Cookie's remaining HP is 3 or less, that Cookie gains +1 attack damage and
+    receives -1 attack damage.
+
+    【Equip】 here is not optional — the card has no other effect, so a copy
+    with nowhere to attach is simply not a legal play (`playable_if`).
+    """
+    card = ctx.source_card
+    holder = ctx.select_own(lambda c: Keyword.DRAGON in c.defn(ctx.db).keywords,
+                            prompt="Equip to which 【Dragon】 Cookie?")
+    if holder is None or card is None:
+        return
+    if card in ctx.me.trash:
+        ctx.me.trash.remove(card)
+    holder.equipment.append(card)
+
+
+dragon_wrath.playable = lambda ctx: any(
+    Keyword.DRAGON in c.defn(ctx.db).keywords for c in ctx.me.battle)

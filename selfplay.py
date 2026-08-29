@@ -26,9 +26,10 @@ def make_agent(kind: str, seat: int, seed: int, checkpoint: str | None = None):
         # Imported lazily: torch costs about a second of start-up that a plain
         # heuristic run should not pay.
         global _RL_NET
+        from braverse.agentfile import find_checkpoint
         from braverse.rl import RLAgent, Trainer
         if _RL_NET is None:
-            _RL_NET = Trainer.load_net(checkpoint or "rl_agent.pt")
+            _RL_NET = Trainer.load_net(find_checkpoint(checkpoint or "rl_agent.pt"))
         return RLAgent(_RL_NET, seat, training=False, seed=seed)
     return SeatedAgent(AGENTS[kind](seed=seed), seat)
 

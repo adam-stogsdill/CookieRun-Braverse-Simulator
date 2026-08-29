@@ -121,6 +121,7 @@ _LEAD_COST_RE = re.compile(r"^\s*<((?:\{[A-Za-z]+\})+)>")
 # this (P-082); it carries both alternatives in its own effect instead.
 _ALTERNATIVE_LEAD_COST = re.compile(r"^\s*<[^>]*>\s*or\s*<", re.I)
 _LEAD_ANY_COST_RE = re.compile(r"^\s*<[^>]*>\s*")
+_STRAY_DAMAGE = re.compile(r"^\s*deals?\s+\d+\s+(?=<)", re.I)
 _MARKER_RE = re.compile(r"【([^】]*)】")
 
 
@@ -419,6 +420,11 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
     # is what lets the lead cost and the compiler see it at all. Cookies and NPCs
     # are left alone: for them attackText really is an attack.
     if card_type in (CardType.ITEM, CardType.TRAP, CardType.STAGE) and attack_text.strip():
+        # One row (BS6-021) also keeps the tail of an attack line in front of
+        # its rules text — "deals 1 <{R}> Place in your stage area." A stage
+        # has no attack to deal anything with, so the fragment is dropped
+        # rather than handed to the compiler as an instruction.
+        attack_text = _STRAY_DAMAGE.sub("", attack_text)
         description = "\n".join(
             part for part in (description.strip(), attack_text.strip()) if part)
         attack_text = ""

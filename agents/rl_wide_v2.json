@@ -1,0 +1,423 @@
+{
+ "encoder": "WideEncoder",
+ "feature_dim": 142,
+ "state_dim": 109,
+ "config": {
+  "games": 200000,
+  "batch_games": 32,
+  "lr": 0.0003,
+  "entropy_coef": 0.01,
+  "value_coef": 0.5,
+  "temperature": 0.9,
+  "league_every": 500,
+  "league_size": 6,
+  "heuristic_share": 0.4,
+  "eval_every": 0,
+  "eval_games": 120,
+  "seed": 0,
+  "random_deck_share": 0.5,
+  "random_deck_cache": 200
+ },
+ "history": [
+  {
+   "policy_loss": 0.009447416290640831,
+   "value_loss": 0.6886327862739563,
+   "entropy": 0.6321635246276855,
+   "decisions": 776,
+   "games": 198432,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": 0.001293854438699782,
+   "value_loss": 0.8874902129173279,
+   "entropy": 0.6428719758987427,
+   "decisions": 750,
+   "games": 198464,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.035581354051828384,
+   "value_loss": 0.7872292399406433,
+   "entropy": 0.6467831134796143,
+   "decisions": 803,
+   "games": 198496,
+   "train_winrate": 0.40625
+  },
+  {
+   "policy_loss": -0.013968142680823803,
+   "value_loss": 0.660319447517395,
+   "entropy": 0.642503559589386,
+   "decisions": 795,
+   "games": 198528,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": 0.024285510182380676,
+   "value_loss": 0.595127284526825,
+   "entropy": 0.6449492573738098,
+   "decisions": 820,
+   "games": 198560,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": 0.040212150663137436,
+   "value_loss": 0.7474431395530701,
+   "entropy": 0.6161701083183289,
+   "decisions": 847,
+   "games": 198592,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": 0.01887095905840397,
+   "value_loss": 0.7051002383232117,
+   "entropy": 0.5841259956359863,
+   "decisions": 844,
+   "games": 198624,
+   "train_winrate": 0.40625
+  },
+  {
+   "policy_loss": -0.0072471993044018745,
+   "value_loss": 0.6911829113960266,
+   "entropy": 0.6342789530754089,
+   "decisions": 821,
+   "games": 198656,
+   "train_winrate": 0.59375
+  },
+  {
+   "policy_loss": -0.023886775597929955,
+   "value_loss": 0.7102787494659424,
+   "entropy": 0.6704685688018799,
+   "decisions": 749,
+   "games": 198688,
+   "train_winrate": 0.4375
+  },
+  {
+   "policy_loss": 0.008119340054690838,
+   "value_loss": 0.6974665522575378,
+   "entropy": 0.6451371312141418,
+   "decisions": 789,
+   "games": 198720,
+   "train_winrate": 0.40625
+  },
+  {
+   "policy_loss": 0.013407872058451176,
+   "value_loss": 0.5834616422653198,
+   "entropy": 0.6520364880561829,
+   "decisions": 794,
+   "games": 198752,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": -0.08141874521970749,
+   "value_loss": 0.6369074583053589,
+   "entropy": 0.6466435194015503,
+   "decisions": 784,
+   "games": 198784,
+   "train_winrate": 0.375
+  },
+  {
+   "policy_loss": -0.02422078512609005,
+   "value_loss": 0.7475315928459167,
+   "entropy": 0.6779663562774658,
+   "decisions": 792,
+   "games": 198816,
+   "train_winrate": 0.65625
+  },
+  {
+   "policy_loss": -0.02676972933113575,
+   "value_loss": 0.8556161522865295,
+   "entropy": 0.6246508359909058,
+   "decisions": 874,
+   "games": 198848,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.02339656837284565,
+   "value_loss": 0.7125017642974854,
+   "entropy": 0.6596505641937256,
+   "decisions": 829,
+   "games": 198880,
+   "train_winrate": 0.5625
+  },
+  {
+   "policy_loss": 0.03956072777509689,
+   "value_loss": 0.785531759262085,
+   "entropy": 0.6834942698478699,
+   "decisions": 827,
+   "games": 198912,
+   "train_winrate": 0.5625
+  },
+  {
+   "policy_loss": -0.02696043811738491,
+   "value_loss": 0.7895752787590027,
+   "entropy": 0.6813317537307739,
+   "decisions": 813,
+   "games": 198944,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.014180353842675686,
+   "value_loss": 0.71268630027771,
+   "entropy": 0.6958732008934021,
+   "decisions": 816,
+   "games": 198976,
+   "train_winrate": 0.59375
+  },
+  {
+   "policy_loss": 0.022417819127440453,
+   "value_loss": 0.6732625961303711,
+   "entropy": 0.6398652791976929,
+   "decisions": 828,
+   "games": 199008,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": -0.015768423676490784,
+   "value_loss": 0.6772559285163879,
+   "entropy": 0.6319587826728821,
+   "decisions": 762,
+   "games": 199040,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": -0.013140635564923286,
+   "value_loss": 0.7782182693481445,
+   "entropy": 0.6425107717514038,
+   "decisions": 825,
+   "games": 199072,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.010886943899095058,
+   "value_loss": 0.6735580563545227,
+   "entropy": 0.6472650766372681,
+   "decisions": 803,
+   "games": 199104,
+   "train_winrate": 0.65625
+  },
+  {
+   "policy_loss": -0.0158848874270916,
+   "value_loss": 0.5042827129364014,
+   "entropy": 0.6626651287078857,
+   "decisions": 812,
+   "games": 199136,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": 0.003449484007433057,
+   "value_loss": 0.6340141296386719,
+   "entropy": 0.6535637974739075,
+   "decisions": 782,
+   "games": 199168,
+   "train_winrate": 0.4375
+  },
+  {
+   "policy_loss": -0.04578787088394165,
+   "value_loss": 0.6566045880317688,
+   "entropy": 0.611291229724884,
+   "decisions": 835,
+   "games": 199200,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.004898580722510815,
+   "value_loss": 0.790001392364502,
+   "entropy": 0.6569708585739136,
+   "decisions": 766,
+   "games": 199232,
+   "train_winrate": 0.59375
+  },
+  {
+   "policy_loss": 0.030246801674365997,
+   "value_loss": 0.7619753479957581,
+   "entropy": 0.6265003681182861,
+   "decisions": 815,
+   "games": 199264,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.003070010105147958,
+   "value_loss": 0.6750293374061584,
+   "entropy": 0.6495227217674255,
+   "decisions": 770,
+   "games": 199296,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": 0.03583589196205139,
+   "value_loss": 0.6605326533317566,
+   "entropy": 0.6347911953926086,
+   "decisions": 767,
+   "games": 199328,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.009267051704227924,
+   "value_loss": 0.6806865930557251,
+   "entropy": 0.5939611792564392,
+   "decisions": 797,
+   "games": 199360,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.03554798290133476,
+   "value_loss": 0.6442713141441345,
+   "entropy": 0.6266123652458191,
+   "decisions": 782,
+   "games": 199392,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.00824178196489811,
+   "value_loss": 0.713983952999115,
+   "entropy": 0.6350052356719971,
+   "decisions": 807,
+   "games": 199424,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.03740852698683739,
+   "value_loss": 0.6730918884277344,
+   "entropy": 0.5889937877655029,
+   "decisions": 913,
+   "games": 199456,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": 0.011077679693698883,
+   "value_loss": 0.6001080274581909,
+   "entropy": 0.6120589375495911,
+   "decisions": 788,
+   "games": 199488,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.031475361436605453,
+   "value_loss": 0.49010172486305237,
+   "entropy": 0.6484718322753906,
+   "decisions": 790,
+   "games": 199520,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": 0.003840232966467738,
+   "value_loss": 0.7236072421073914,
+   "entropy": 0.6821361780166626,
+   "decisions": 805,
+   "games": 199552,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": 0.009579495526850224,
+   "value_loss": 0.603933572769165,
+   "entropy": 0.6442548632621765,
+   "decisions": 806,
+   "games": 199584,
+   "train_winrate": 0.5625
+  },
+  {
+   "policy_loss": 0.03458024188876152,
+   "value_loss": 0.6414301991462708,
+   "entropy": 0.6847705841064453,
+   "decisions": 804,
+   "games": 199616,
+   "train_winrate": 0.65625
+  },
+  {
+   "policy_loss": -0.025424199178814888,
+   "value_loss": 0.6277121901512146,
+   "entropy": 0.6929548382759094,
+   "decisions": 831,
+   "games": 199648,
+   "train_winrate": 0.4375
+  },
+  {
+   "policy_loss": 0.030493423342704773,
+   "value_loss": 0.5965070128440857,
+   "entropy": 0.648854672908783,
+   "decisions": 813,
+   "games": 199680,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.006039680913090706,
+   "value_loss": 0.6178348064422607,
+   "entropy": 0.6677055358886719,
+   "decisions": 828,
+   "games": 199712,
+   "train_winrate": 0.625
+  },
+  {
+   "policy_loss": -0.025311825796961784,
+   "value_loss": 0.6944273114204407,
+   "entropy": 0.6766042113304138,
+   "decisions": 771,
+   "games": 199744,
+   "train_winrate": 0.46875
+  },
+  {
+   "policy_loss": -0.04059576988220215,
+   "value_loss": 0.4704901874065399,
+   "entropy": 0.6811525821685791,
+   "decisions": 788,
+   "games": 199776,
+   "train_winrate": 0.71875
+  },
+  {
+   "policy_loss": -0.062122318893671036,
+   "value_loss": 0.7767723202705383,
+   "entropy": 0.6574304103851318,
+   "decisions": 822,
+   "games": 199808,
+   "train_winrate": 0.6875
+  },
+  {
+   "policy_loss": -0.011755494400858879,
+   "value_loss": 0.5927472710609436,
+   "entropy": 0.6074206829071045,
+   "decisions": 795,
+   "games": 199840,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": 0.022433554753661156,
+   "value_loss": 0.7379928231239319,
+   "entropy": 0.6927861571311951,
+   "decisions": 795,
+   "games": 199872,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": 0.04053152725100517,
+   "value_loss": 0.6323752403259277,
+   "entropy": 0.6757649183273315,
+   "decisions": 784,
+   "games": 199904,
+   "train_winrate": 0.5
+  },
+  {
+   "policy_loss": -0.004985368344932795,
+   "value_loss": 0.540774405002594,
+   "entropy": 0.665000319480896,
+   "decisions": 773,
+   "games": 199936,
+   "train_winrate": 0.65625
+  },
+  {
+   "policy_loss": -0.04003763198852539,
+   "value_loss": 0.5668255686759949,
+   "entropy": 0.6736876964569092,
+   "decisions": 814,
+   "games": 199968,
+   "train_winrate": 0.53125
+  },
+  {
+   "policy_loss": 0.02502746321260929,
+   "value_loss": 0.7060952186584473,
+   "entropy": 0.6686412692070007,
+   "decisions": 797,
+   "games": 200000,
+   "train_winrate": 0.6875
+  }
+ ]
+}

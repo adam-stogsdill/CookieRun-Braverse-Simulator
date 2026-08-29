@@ -1,0 +1,10 @@
+[
+ {
+  "encoder": "wide",
+  "dim": 142,
+  "out": "rl_wide_v3.pt",
+  "vs_heuristic": 0.0,
+  "vs_unseen": 0.03,
+  "minutes": 0.041085501511891685
+ }
+]

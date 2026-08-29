@@ -184,6 +184,10 @@ class PlayerState:
     # this turn, so the trash case is tracked the same way as the break one.
     played_from_trash_this_turn: set = field(default_factory=set)
     support_trashed_this_turn: int = 0
+    # Cookies you played via 【Special Play】 this turn. BS11-108 is the card
+    # that asks; it is counted where the play happens rather than inferred
+    # from the battle area, which cannot tell how a Cookie got there.
+    special_plays_this_turn: int = 0
     # Cookies that left your battle area for the bottom of your deck this turn.
     # BS9-088's 【Awaken】 gate is the only card that asks, and it asks because
     # the two BS9 Cookies that bury themselves are what set it up.

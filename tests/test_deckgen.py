@@ -152,10 +152,14 @@ def test_priced_blockers_are_in_the_deckbuilder_pool(db):
     assert "ST8-011" in pool          # Kiwi Cookie, 【Blocker】 <{G}>
     assert "BS4-047" in pool          # Blue Lily Cookie, <Rest this card.>
 
-    # A card that merely *mentions* 【Blocker】 keeps its real text and stays
-    # out until someone codes it.
+    # An *item* that merely mentions 【Blocker】 carries the marker without
+    # being a Blocker — only a Cookie can block, which is why `priced` above
+    # filters on that. The pool tracks whether its text is coded, and
+    # BS3-018's now is: the marker survives normalisation as the filter it is
+    # in that sentence.
     assert db["BS3-018"].has(Marker.BLOCKER)
-    assert "BS3-018" not in pool
+    assert not db["BS3-018"].is_cookie
+    assert "BS3-018" in pool
 
 
 def test_an_unreadable_blocker_price_keeps_the_card_out_of_the_pool(db):

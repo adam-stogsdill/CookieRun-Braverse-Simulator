@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.53
+Current Version: 0.2.58
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -148,7 +148,7 @@ That covers the whole game: the engine, the player against the
 which `braverse.features` imports. The browser front end has no build step and
 no dependencies of its own — no npm, no bundler.
 
-The one thing you give up is the RL pilots: the `rl_agent*.pt` checkpoints will
+The one thing you give up is the RL pilots: the checkpoints in `agents/` will
 not be selectable as opponents in the visual player, and `train_rl.py` /
 `coevolve.py` will not run. Everything else behaves identically.
 
@@ -506,7 +506,7 @@ container, which squeezed the mats until they overlapped each other.
 The board shows the two battle areas with their face-down
 HP piles, the support area, the stage, deck and trash, the break-area clock, and
 both hands. Pick a pilot and a deck for each seat — `human`, `heuristic`,
-`random`, or any `rl_agent*.pt` checkpoint in the directory — plus any decklist
+`random`, or any `.pt` checkpoint in `agents/` — plus any decklist
 `evolve_deck.py` has written. Two bots means spectating, with pause,
 single-step, and a speed slider; a `human` seat means you play that side.
 
@@ -2298,7 +2298,7 @@ python train_rl.py --games 40000 --random-decks 0.5
 ```
 
 ```bash
-python train_rl.py --eval-only rl_agent.pt
+python train_rl.py --eval-only rl_agent.pt      # a bare name resolves in agents/
 ```
 
 The action set is variable-length and heterogeneous — "attack with A into B",

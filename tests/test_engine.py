@@ -752,11 +752,11 @@ def test_unimplemented_card_is_still_offered(db):
     the rules say. Hiding it would be a different kind of lie."""
     from braverse.effects import is_implemented
 
-    assert not is_implemented("ST2-019")
+    assert not is_implemented("BS11-047")
     game = new_game(seed=3, db=db)
     me = game.state.current
-    _stock_support(me, "ST7-016", 4)           # yellow, pays {Y}{Y}
-    card = _add_to_hand(me, "ST2-019")
+    _stock_support(me, "ST8-016", 4)           # green, pays {G}
+    card = _add_to_hand(me, "BS11-047")
     assert _offered(game, card.uid)
 
 
@@ -1437,6 +1437,37 @@ def test_mystic_flour_trashes_hp_off_every_enemy_cookie():
     assert len(me.hand) == hand + 2, "the two {G} support cards did not come back"
     assert len(me.support) == 1
 
+
+# --- BS8-047 Puny Strength --------------------------------------------------
+def test_puny_strength_survives_the_revealed_cookie_leaving_the_hand():
+    """"Play up to 1 {Y} LV.3 Cookie from your break area. Then, place the
+    revealed Cookie in your break area." — the Cookie played in the middle of
+    that sentence runs its own 【On Play】, and BS11-035's optional cost places
+    a Cookie from the hand into the break area. If it takes the revealed one,
+    the card used to crash trying to move a card that had already moved."""
+    from braverse.effects import Ctx, Trigger, get_effect
+    from braverse.state import CardInstance
+
+    db = default_db()
+    game = new_game(seed=13, db=db)
+    me, them = game.state.players[0], game.state.players[1]
+
+    item = CardInstance.make("BS8-047", 0)
+    revealed = CardInstance.make("BS11-034", 0)      # the only LV.3 in hand
+    me.hand = [item, revealed]
+    me.break_area = [CardInstance.make("BS11-035", 0)]
+    me.support = [CardInstance.make("BS11-034", 0) for _ in range(4)]
+    for card in me.support:
+        card.rested = False
+    del me.battle[1:]                                 # leave room to deploy
+
+    fn = get_effect("BS8-047", Trigger.ITEM)
+    fn(Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+           source_card=item, trigger=Trigger.ITEM.value))
+
+    assert revealed not in me.hand
+    assert [c.card_id for c in me.break_area] == ["BS11-034"], "moved twice"
+    assert "BS11-035" in [c.card.card_id for c in me.battle]
 
 # --- BS5-063 Hero Cookie ----------------------------------------------------
 def test_hero_cookie_counts_active_support_not_the_whole_area():

@@ -9,7 +9,7 @@ from __future__ import annotations
 from braverse.cost import Cost
 from braverse.effects import (SELECTION_PROTECTORS, STATIC_ABILITY_CARDS,
                               TRASH_PROTECTORS, Ctx, Trigger, effect)
-from braverse.enums import Color, Marker
+from braverse.enums import Color, Keyword, Marker
 
 
 # --- BS3-001 Princess Cookie ------------------------------------------------
@@ -565,3 +565,43 @@ def soul_jam_resolution(ctx: Ctx) -> None:
         ctx.trash_hp(target, 1)
 
     _equip_soul_jam(ctx, "Dark Cacao Cookie")
+
+
+# --- BS3-121 Age of Heroes and Kingdoms -------------------------------------
+def _five_different(cards, key) -> bool:
+    """Five *different* cards by whatever names them — copies do not count."""
+    return len({key(c) for c in cards}) >= 5
+
+
+@effect("BS3-121", Trigger.STAGE_ACTIVATE)
+def age_of_heroes(ctx: Ctx) -> None:
+    """<{R}{Y}{G}{B}{P}> <Rest this card.> If your battle area and support area
+    contain 5 different [Ancient] Cookies and 5 different [Soul Jam] cards, you
+    win the game.
+
+    An alternate win condition, and the only one in the pool, so it is written
+    by hand — "5 different" is about printed names rather than counts, and it
+    reads across two zones at once, neither of which the compiler expresses.
+    The colours are the whole of the difficulty: five different Ancients means
+    five different kingdoms, which is five colours on the table at once.
+    """
+    if not ctx.pay(Cost.parse("{R}{Y}{G}{B}{P}")):
+        return
+    card = ctx.source_card
+    if card is not None:
+        card.rested = True
+
+    ancients = [c for c in ctx.me.battle
+                if Keyword.ANCIENT in c.defn(ctx.db).keywords]
+    # A Soul Jam is in the support area as energy, or riding a Cookie as
+    # 【Equip】 — both are "in your battle area and support area", and a deck
+    # that got five of them out has almost certainly attached some.
+    jam_cards = [c for c in ctx.me.support
+                 if ctx.db[c.card_id].name.startswith("Soul Jam")]
+    jam_cards += [e for cookie in ctx.me.battle for e in cookie.equipment
+                  if ctx.db[e.card_id].name.startswith("Soul Jam")]
+
+    if (_five_different(ancients, lambda c: c.name(ctx.db))
+            and _five_different(jam_cards, lambda c: ctx.db[c.card_id].name)):
+        ctx.note("Age of Heroes and Kingdoms — the age is complete")
+        ctx.game._lose(ctx.opp.index, "Age of Heroes and Kingdoms")

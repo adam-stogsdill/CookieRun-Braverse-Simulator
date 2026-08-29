@@ -1,5 +1,109 @@
 # Changelog
 
+## 0.2.58
+
+- **Puny Strength no longer crashes the game.** If the Cookie it revives from
+  your break area takes the revealed Cookie out of your hand as its own cost,
+  the card now finishes cleanly instead of ending the match with an error. The
+  revealed Cookie stays wherever that effect put it — it cannot be placed in
+  your break area twice.
+
+## 0.2.57
+
+- **"Select up to 2" is now one question instead of two.** Every card that
+  lets you pick more than one thing — Cookies on the board, cards in your
+  trash or break area, cards you just looked at off the top of your deck —
+  shows them all at once. Pick as many as you want up to the limit and press
+  the button when you are done. You could not previously say "that is all"
+  except by declining the second question, and you could not change the first
+  answer at all.
+- **Clicking past the limit now tells you why nothing happened.** The strip
+  says how many you may take, outlines the ones you have already picked, and
+  asks you to click one of those to swap it out.
+- **The count is in the prompt.** "Add up to 2 {P} cards to your hand" rather
+  than "Add a card to your hand" — a strip of three cards with a confirm
+  button under it does not otherwise say how many of them you may keep.
+
+## 0.2.56
+
+- **Traps and stages are almost all playable now — 23 more of them.** Broken
+  Signpost redirects an attack, Petrification and Puppet Theater of Chaos
+  debuff properly, Cookies of Legend sweeps both battle areas, Age of Heroes
+  and Kingdoms can win you the game outright, and Nosy Wizard and Everything
+  Pie Cookie rewrite what a [refresh] costs.
+- **Traps that ask about the battle they were played into now work.** "If your
+  Cookie faints during this battle" could never be true when the card was
+  played — traps resolve before damage — so five of them did nothing at all.
+  They are now held back and resolved once the battle is over, which is when
+  the card means it. Salt Crystal Trident, Golden Cheese Colosseum, Battle on
+  the Edge, Ritual of Life and Breath of the Flute.
+- **"If you did" cards work.** Carrot Farm Scarecrow, Erratic Yakgwa Robot,
+  Guardian Tree's Blessing and Cookie Games Stadium each do something only if
+  the sentence before them actually happened, and now they check.
+- **Fixed: "Return up to 3 cards from your support area" returned one.** The
+  number was being ignored on every card that printed it.
+- **Fixed: two cards reached into the wrong Cookie's HP.** Tonic Spray and
+  Draconic Aura say "return a card from **your** Cookie's HP", and were taking
+  it off the opponent's Cookie they had just selected.
+- **Fixed: TBD Hallway had a stray fragment of an attack line** glued to the
+  front of its rules text, which stopped the card working at all.
+
+## 0.2.55
+
+- **Items are almost all playable now — 21 of the 23 that were not.** Bear
+  Jelly Ice Cream, Sugar Crystal Lamp, Heart of the Deep Sea, Magma Pendulum,
+  Wind Gems, Tales of the Lotus, Flipped Coin, Light of Deceit, Squishy Jelly
+  Watch, Multi-Vitamin Honey Bomb, Flimsy Screwdriver and a dozen more.
+- **"View 3 cards, take one, put the rest away" cards work.** Six items print
+  that shape and none of them ran; they now show you the whole run, let you
+  take only what the card allows, and put the rest exactly where the text says
+  — the trash, or the bottom or top of your deck.
+- **Two more Soul Jams.** Soul Jam: Light of Deceit (BS9-092) rides Shadow Milk
+  Cookie and shields it while your hand is small, and Wrath of the Dragons
+  (BS5-111) equips a 【Dragon】 Cookie and pays out while it is hurt. Both
+  conditions are checked as damage lands, so healing back up or drawing past
+  five cards turns them off again.
+- **Cards that pick a branch for you** — Flipped Coin (BS9-114) and Shadow Milk
+  Cookie's Tarot Card (BS9-094) — read the board and apply the line that
+  matches, instead of doing nothing.
+- **Three FLIP cards can tell whose turn they went off on.** Yoga Cookie,
+  Pistachio Cookie and friends print "if activated during your turn", which is
+  a real distinction: a FLIP usually fires while your opponent is attacking.
+- **Animatronic of Deceit (BS9-082) taunts again.** With Shadow Milk Cookie
+  beside it, your opponent's Cookies can only attack the Animatronic.
+- **Fixed: five BS11 cards fired unconditionally.** "If there is a Cookie that
+  has 【Special Play】 in your battle area" was being read as "if you have any
+  Cookie" — true whenever anything was on the board. Red Velvet Dragon
+  (BS11-105) and Mushroom Spore Punch (BS3-018) were wrong the same way and now
+  work properly.
+- **Fixed: Light of Deceit and Hero Cookie each dropped half a sentence.**
+  BS9-091 bounced a Cookie and never played the one it was making room for;
+  P-019 returned Cookies to your deck without shuffling it, and ignored the
+  restriction on which ones.
+
+## 0.2.54
+
+Housekeeping for the practice bots — the rules at the table are unchanged.
+
+- **Trained opponents now live in their own folder.** They sit in `agents/`
+  beside the game, next to `decks/`, instead of loose among everything else.
+  The opponent list is unchanged — every one of them still appears, by the
+  same name — and a file left where it used to be still works.
+- **Newer trained opponents are playable at all.** An agent trained to read
+  the fuller picture of the board was listed as an opponent like any other,
+  then broke the moment it was asked for its first move — which looked like
+  the game hanging rather than like a bad pick. Every listed opponent now
+  starts.
+- **Trained opponents from older builds work again.** The policy network grew
+  deeper a while back, and every agent file saved before that quietly stopped
+  loading — picking one as your opponent failed instead of starting a game.
+  The shape of a saved agent is now read from the file itself, so all of them
+  open again, however old.
+- **Training can pick up where it left off.** A training run can continue from
+  a saved agent rather than starting over, and the file now carries enough for
+  that to be a real continuation instead of a fresh start wearing the old
+  agent's weights.
+
 ## 0.2.53
 
 Checked the engine against the official **Comprehensive Rules Ver.1.8**
