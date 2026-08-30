@@ -103,6 +103,18 @@
   color: var(--dim);
 }
 
+/* Which build this is, in the corner opposite the profile chip. It is the
+   first thing to ask for in a bug report, so it is on the front door rather
+   than buried in a settings screen. The text is stamped from the version the
+   server named on its last answer — the page never carries its own copy. */
+.title-version {
+  position: absolute;
+  top: 18px; left: 20px;
+  font-size: 11px;
+  letter-spacing: .08em;
+  color: var(--dim);
+}
+
 /* ------------------------------------------------------- end of a match */
 #gameover {
   position: fixed;

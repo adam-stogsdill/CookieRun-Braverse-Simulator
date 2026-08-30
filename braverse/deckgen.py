@@ -22,6 +22,7 @@ from .cards import CardDB, CardDef, default_db, strip_blocker_text
 from .decks import validate
 from .effects import Trigger, is_implemented
 from .engine import Game
+from .enums import CardType
 
 TRIGGERS = list(Trigger)
 
@@ -83,7 +84,56 @@ class DeckGenConfig:
     # Mono is where the search should start; crossover between two differently
     # coloured parents still reaches two-colour lists from there.
     color_identity: int = 1
+    # Nothing in a win rate rewards consistency, so a GA left alone builds a
+    # list of 1-ofs: at the margin many slots are interchangeable, and a
+    # singleton is as good as a playset *on average over many games*. It is not
+    # the same deck to play. `consolidation_weight` prices that difference —
+    # the search maximises win rate minus this weight times the share of the 60
+    # sitting in stacks below `consolidation_floor`, so a thin slot has to earn
+    # its keep. It is deliberately small: a tiebreaker between candidates the
+    # gauntlet cannot separate, not a term that outvotes winning games. 0.05
+    # costs a wholly singleton deck five points of win rate against a fully
+    # consolidated one; the champion in `decks/green_run/` was 23/60 singles,
+    # which that prices at ~1.9 points.
+    consolidation_weight: float = 0.0
+    # How many copies a card number needs before it stops costing anything. 2
+    # is "no 1-ofs"; 4 asks for playsets throughout and is usually too strict
+    # to be worth the win rate it spends.
+    consolidation_floor: int = 2
+    # Chance that a mutation, instead of rolling a fresh card, duplicates a
+    # card the deck already runs thin. Without it the penalty is unclimbable:
+    # every random swap makes another singleton, so the search can only pay the
+    # cost and never collect. Only consulted when the weight is non-zero.
+    consolidation_bias: float = 0.5
     rules: cfg.RulesConfig = field(default_factory=lambda: cfg.DEFAULT)
+
+
+def copies_by_number(deck: Sequence[str], db: CardDB) -> Counter:
+    """How many of each card *number* the deck runs.
+
+    Counted by `base_id`, the same key the 4-per-number rule uses, so two
+    printings of one card are one stack here as well as in `validate`.
+    """
+    counts: Counter = Counter()
+    for card_id in deck:
+        if card_id in db:
+            counts[db[card_id].base_id] += 1
+    return counts
+
+
+def thin_share(deck: Sequence[str], db: CardDB, *, floor: int = 2) -> float:
+    """Share of the deck sitting in stacks of fewer than ``floor`` copies.
+
+    The quantity `consolidation_weight` is charged against: 0.0 is a deck of
+    playsets, 1.0 a deck of nothing but singletons. Measured in *cards*, not in
+    stacks, so it says how much of a draw is unrepeatable rather than how long
+    the list is.
+    """
+    if not deck:
+        return 0.0
+    counts = copies_by_number(deck, db)
+    thin = sum(n for n in counts.values() if n < floor)
+    return thin / sum(counts.values()) if counts else 0.0
 
 
 class DeckEvolver:
@@ -94,7 +144,15 @@ class DeckEvolver:
                  agent_factories: Sequence[Callable[[int, int], object]] | None = None,
                  colors: Sequence | None = None):
         self.db = db or default_db()
-        self.pool = list(pool)
+        # An EXTRA card is never a card in the 60. It is played out of its own
+        # pile and `validate` rejects a main deck holding one, so a search that
+        # can draw one builds decks that are illegal by construction — which is
+        # exactly what happened the first time this was pointed at
+        # `--pool implemented`: the champion of a 25-generation run was three
+        # copies of an EXTRA Cookie deep and could not be played.
+        self.pool = [c for c in pool
+                     if config.rules.extra_cards_in_main_deck
+                     or c.type is not CardType.EXTRA]
         self.gauntlet = [list(d) for d in gauntlet]
         self.cfg = config
         self.rng = random.Random(config.seed)
@@ -208,6 +266,9 @@ class DeckEvolver:
             if card_id not in db:
                 continue
             card = db[card_id]
+            if (card.type is CardType.EXTRA
+                    and not rules.extra_cards_in_main_deck):
+                continue        # never in the 60, whatever a parent carried
             if by_number[card.base_id] >= rules.max_copies_by_number:
                 continue
             if card.is_flip and flips >= rules.max_flip_cards:
@@ -244,11 +305,30 @@ class DeckEvolver:
         cards, cookies = self._subpool(colors)
         # Seed with a healthy Cookie count; a deck that cannot refill its
         # battle area loses on the spot and teaches the search nothing.
-        seed_cookies = [self.rng.choice(cookies).id for _ in range(30)]
-        rest = [self.rng.choice(cards).id for _ in range(40)]
+        seed_cookies = self._draw(cookies, 30)
+        rest = self._draw(cards, 40)
         deck = seed_cookies + rest
         self.rng.shuffle(deck)
         return self.repair(deck, colors)
+
+    def _draw(self, cards, n: int) -> list[str]:
+        """``n`` card ids sampled from ``cards``.
+
+        In stacks rather than one at a time when the run is priced on
+        consolidation: starting every candidate as sixty singletons hands the
+        search a population that is uniformly bad on the term it is being
+        judged on, which is no gradient at all.
+        """
+        if not self.cfg.consolidation_weight:
+            return [self.rng.choice(cards).id for _ in range(n)]
+        out: list[str] = []
+        floor = max(1, self.cfg.consolidation_floor)
+        while len(out) < n:
+            card = self.rng.choice(cards)
+            copies = min(n - len(out),
+                         self.rng.randint(floor, self.cfg.rules.max_copies_by_number))
+            out.extend([card.id] * copies)
+        return out
 
     # -- genetic operators ----------------------------------------------
     def mutate(self, deck: list[str]) -> list[str]:
@@ -260,8 +340,30 @@ class DeckEvolver:
         child = list(deck)
         for _ in range(self.rng.randint(1, self.cfg.mutations)):
             index = self.rng.randrange(len(child))
-            child[index] = self.rng.choice(cards).id
+            child[index] = self._replacement(child, index, cards)
         return self.repair(child, colors)
+
+    def _replacement(self, deck: list[str], index: int, cards) -> str:
+        """What a mutation puts in a slot: a fresh card, or a second copy.
+
+        A random swap almost always creates another singleton, so a search
+        priced on consolidation could only ever pay that price -- it needs a
+        move that *thickens* the list to have anywhere to climb. Duplicating a
+        card the deck already runs is that move, and it costs the slot it took,
+        so it is still selection that decides whether it was worth it.
+        """
+        cfg_ = self.cfg
+        if cfg_.consolidation_weight and self.rng.random() < cfg_.consolidation_bias:
+            counts = copies_by_number(deck, self.db)
+            thin = [c for c in set(deck)
+                    if c in self.db
+                    and counts[self.db[c].base_id] < cfg_.consolidation_floor]
+            # Never duplicate the card being replaced -- that is a no-op that
+            # spends a mutation.
+            thin = [c for c in thin if c != deck[index]]
+            if thin:
+                return self.rng.choice(sorted(thin))
+        return self.rng.choice(cards).id
 
     def crossover(self, a: list[str], b: list[str]) -> list[str]:
         cut = self.rng.randrange(10, self.cfg.rules.deck_size - 10)
@@ -296,6 +398,27 @@ class DeckEvolver:
         self._cache[key] = score
         return score
 
+    def consolidation_penalty(self, deck: Sequence[str]) -> float:
+        """What this deck's thin slots cost it, in win rate."""
+        cfg_ = self.cfg
+        if not cfg_.consolidation_weight:
+            return 0.0
+        return cfg_.consolidation_weight * thin_share(
+            deck, self.db, floor=cfg_.consolidation_floor)
+
+    def objective(self, deck: list[str], seed_block: int = 0, *,
+                  games: int | None = None) -> float:
+        """What the search maximises: `fitness` minus the consolidation price.
+
+        Kept separate from `fitness` on purpose. Every number this module
+        reports to a person -- the holdout, the validation score, a checkpoint
+        header -- is a *win rate*, and a win rate that has quietly had a
+        deckbuilding preference subtracted from it is a number nobody can
+        compare against anything. The penalty exists to break ties inside the
+        search; it does not belong in the result.
+        """
+        return self.fitness(deck, seed_block, games=games) - self.consolidation_penalty(deck)
+
     def _score(self, deck: list[str], seed_block: int, games: int,
                factory) -> float:
         base = self.cfg.seed + seed_block * 1_000_003
@@ -323,9 +446,41 @@ class DeckEvolver:
         contenders = [self.rng.choice(scored) for _ in range(self.cfg.tournament)]
         return max(contenders, key=lambda t: t[0])[1]
 
-    def evolve(self, *, log=print) -> tuple[list[str], float, list[dict]]:
+    def evolve(self, *, log=print,
+               seeds: Sequence[Sequence[str]] | None = None,
+               on_generation: Callable[[int, list[str], dict], None] | None = None
+               ) -> tuple[list[str], float, list[dict]]:
+        """Run the search. ``seeds`` starts it from decks somebody already built.
+
+        Without seeds the first generation is noise, and most of the budget
+        goes on rediscovering that a deck should pick a colour and curve. Given
+        a real list — a tournament deck, a previous champion — the population
+        starts as that list plus mutations of it, and the run is a *tuning*
+        pass rather than a search from scratch. Half the population is still
+        random, because a seeded population that is nothing but one deck's
+        children cannot leave the neighbourhood it started in.
+
+        A seed is repaired first: it may be somebody else's format, a deck with
+        an EXTRA pile, or simply illegal here.
+
+        ``on_generation(generation, champion, row)`` is called once a
+        generation with that generation's best deck and its history row. A run
+        against a real field is measured in hours, and until this existed the
+        only way to see any of it was to wait for the end — a crash, a laptop
+        lid, or simply a number that stopped climbing threw the whole budget
+        away. The callback is where a caller writes a checkpoint; it is handed
+        a copy, so what it does with the list cannot reach the search.
+        """
         cfg_ = self.cfg
-        population = [self.random_deck() for _ in range(cfg_.population)]
+        population: list[list[str]] = []
+        for seed in (seeds or ()):
+            repaired = self.repair(list(seed), self._deck_colors(seed))
+            population.append(repaired)
+            while len(population) < cfg_.population // 2 and seeds:
+                population.append(self.mutate(list(repaired)))
+        population = population[:cfg_.population]
+        population += [self.random_deck()
+                       for _ in range(cfg_.population - len(population))]
         history: list[dict] = []
         finalists: list[list[str]] = []
 
@@ -333,15 +488,25 @@ class DeckEvolver:
             block = generation if cfg_.reseed_each_generation else 0
             # Elites are re-scored on the new block too, so a deck cannot ride
             # one lucky evaluation to the end of the run.
-            scored = sorted(((self.fitness(d, block), d) for d in population),
-                            key=lambda t: -t[0])
-            finalists.append(list(scored[0][1]))
+            # (objective, win rate, deck): selection reads the first, every
+            # number a person is shown comes from the second.
+            ranked = sorted(((self.objective(d, block), self.fitness(d, block), d)
+                             for d in population), key=lambda t: -t[0])
+            scored = [(obj, deck) for obj, _, deck in ranked]
+            champion = ranked[0]
+            finalists.append(list(champion[2]))
 
-            mean = sum(s for s, _ in scored) / len(scored)
-            history.append({"generation": generation, "best": scored[0][0],
-                            "mean": mean})
-            log(f"  gen {generation:3}  best {scored[0][0]:6.1%}  "
-                f"mean {mean:6.1%}")
+            mean = sum(rate for _, rate, _ in ranked) / len(ranked)
+            thin = thin_share(champion[2], self.db,
+                              floor=cfg_.consolidation_floor)
+            row = {"generation": generation, "best": champion[1],
+                   "mean": mean, "objective": champion[0], "thin": thin}
+            history.append(row)
+            log(f"  gen {generation:3}  best {champion[1]:6.1%}  "
+                f"mean {mean:6.1%}"
+                + (f"  thin {thin:5.1%}" if cfg_.consolidation_weight else ""))
+            if on_generation is not None:
+                on_generation(generation, list(scored[0][1]), dict(row))
 
             nxt = [list(d) for _, d in scored[:cfg_.elite]]
             while len(nxt) < cfg_.population:
@@ -374,17 +539,24 @@ class DeckEvolver:
         shortlist = unique[:8]
 
         log(f"  validating {len(shortlist)} champions on unseen shuffles")
-        scored = [(self.fitness(d, seed_block=9_999,
-                                games=max(self.cfg.games_per_eval, 120)), d)
+        games = max(self.cfg.games_per_eval, 120)
+        scored = [(self.objective(d, seed_block=9_999, games=games),
+                   self.fitness(d, seed_block=9_999, games=games), d)
                   for d in shortlist]
-        score, deck = max(scored, key=lambda t: t[0])
+        _, score, deck = max(scored, key=lambda t: t[0])
         history.append({"validation_best": score,
                         "validated": len(shortlist)})
         return deck, score, history
 
 
-def describe(deck: Sequence[str], db: CardDB) -> str:
-    """Human-readable decklist, grouped and sorted."""
+def describe(deck: Sequence[str], db: CardDB, *, legality: bool = True) -> str:
+    """Human-readable decklist, grouped and sorted.
+
+    ``legality`` off drops the footer. An EXTRA pile is six cards and holds
+    nothing but EXTRA cards, so running the main-deck rules over it prints two
+    problems that are not problems -- and a reader who sees "legal: False" on a
+    file believes it.
+    """
     counts = Counter(deck)
     lines = []
     by_type: dict[str, list[tuple[int, CardDef]]] = {}
@@ -400,6 +572,8 @@ def describe(deck: Sequence[str], db: CardDB) -> str:
         for n, card in sorted(entries, key=lambda t: (-t[0], t[1].id)):
             extra = (f"LV{card.level} HP{card.hp}" if card.is_cookie else "")
             lines.append(f"  {n}x {card.id:10} {card.name:32} {extra}")
+    if not legality:
+        return "\n".join(lines)
     report = validate(list(deck), db)
     lines.append(f"\nlegal: {report.ok}  size {report.size}  flips {report.flip_count}")
     if report.problems:

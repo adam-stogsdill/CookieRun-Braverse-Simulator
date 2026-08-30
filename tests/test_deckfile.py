@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from braverse import default_db, starter_deck, validate
-from braverse.deckfile import (archetype_name, deck_path, run_tag, write_deck,
-                               write_archetypes)
+from braverse.deckfile import (META_DIR, archetype_name, deck_path, read_any,
+                               read_pool, run_tag, write_deck, write_archetypes)
 from export_decks import best_by_archetype
 
 
@@ -97,3 +97,64 @@ def test_a_run_from_before_per_archetype_still_splits_by_colour(db):
     assert set(best) == {"BLUE", "GREEN"}
     assert best["BLUE"]["round"] == 3      # 0.6 beats round 1's 0.5
     assert best["GREEN"]["round"] == 2
+
+
+# --- the tournament pool ----------------------------------------------------
+def test_a_pool_is_every_list_in_one_folder_in_a_fixed_order(db, tmp_path):
+    """A pool is read as a set, and the order cannot depend on the filesystem.
+
+    A training run seeded the same way has to see the same decks in the same
+    order, or the seed does not describe the run.
+    """
+    write_deck(tmp_path / "b_second.txt", starter_deck(db, "ST9"), db)
+    write_deck(tmp_path / "a_first.txt", starter_deck(db, "ST8"), db)
+    (tmp_path / "README.txt").write_text("not a decklist", encoding="utf-8")
+    (tmp_path / "half-written.txt").write_text("{", encoding="utf-8")
+
+    pool = read_pool(tmp_path)
+    assert [name for name, _, _ in pool] == ["a_first", "b_second"]
+    assert all(len(deck) == 60 for _, deck, _ in pool)
+    assert all(extra == [] for _, _, extra in pool)
+
+
+def test_the_tournament_pool_on_disk_is_legal_and_reachable(db):
+    """The lists imported from topdeck.gg, checked as decks rather than files.
+
+    They are what `train_rl.py --deck-pool` and `evolve_deck.py --gauntlet`
+    read by default, so a list that stopped validating would be trained
+    against without anything else noticing.
+    """
+    pool = read_pool(META_DIR)
+    assert len(pool) >= 18
+    for name, deck, extra in pool:
+        report = validate(deck, db, extra=extra)
+        assert report.ok, (name, report.problems)
+        assert report.size == 60, name
+
+
+def test_read_any_falls_back_to_the_importer_for_a_hand_written_list(db, tmp_path):
+    """A list somebody exported or typed has no JSON blob and must still load."""
+    path = tmp_path / "typed.txt"
+    path.write_text("--COOKIE--\n4x Aloe Cookie ST3-010 LV2\n\n"
+                    "--EXTRA--\n2x Peak of Apathy BS8-069 LV2\n",
+                    encoding="utf-8")
+    deck, extra = read_any(path)
+    assert deck == ["ST3-010"] * 4
+    assert extra == ["BS8-069"] * 2
+
+
+def test_read_any_still_prefers_our_own_format(db, tmp_path):
+    path = write_deck(tmp_path / "ours.txt", starter_deck(db, "ST9"), db,
+                      extra=["BS8-069"])
+    deck, extra = read_any(path)
+    assert len(deck) == 60 and extra == ["BS8-069"]
+
+
+def test_an_extra_pile_is_not_judged_by_the_main_deck_rules(db, tmp_path):
+    """`describe` on a six-card EXTRA pile must not report "legal: False"."""
+    path = write_deck(tmp_path / "withextra.txt", starter_deck(db, "ST9"),
+                      db, extra=["BS10-073"] * 4 + ["BS8-069"] * 2)
+    text = path.read_text(encoding="utf-8")
+    assert text.count("legal:") == 1        # the main deck's, and only that
+    assert "expected 60" not in text
+    assert _parse(path)["extra"] == ["BS10-073"] * 4 + ["BS8-069"] * 2

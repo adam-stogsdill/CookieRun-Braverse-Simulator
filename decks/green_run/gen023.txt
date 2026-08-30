@@ -1,0 +1,153 @@
+# generation: 23
+# score: 0.7778
+# mean: 0.6242
+
+COOKIE (27)
+  3x BS6-053    Cherry Ball Cookie               LV1 HP3
+  3x ST8-011    Kiwi Cookie                      LV1 HP3
+  2x BS5-063    Hero Cookie                      LV3 HP5
+  2x BS7-046    Green Tea Mousse Cookie          LV2 HP4
+  2x ST3-010    Aloe Cookie                      LV2 HP3
+  2x ST8-005    Wind Archer Cookie               LV3 HP6
+  1x BS1-058    Poison Mushroom Cookie           LV2 HP2
+  1x BS1-070    Kiwi Cookie                      LV2 HP3
+  1x BS10-057   Churro Cookie                    LV3 HP3
+  1x BS11-051   Mercurial Knight Cookie          LV2 HP4
+  1x BS3-055    White Lily Cookie                LV3 HP5
+  1x BS4-060    Adventurer Cookie                LV1 HP3
+  1x BS5-056    Longan Dragon Cookie             LV3 HP5
+  1x BS6-055    Grapefruit Cookie                LV2 HP4
+  1x BS6-059    Apple Cookie                     LV2 HP3
+  1x BS8-054    Leek Cookie                      LV1 HP1
+  1x BS8-059    Mystic Flour Cookie              LV3 HP6
+  1x BS8-062    Shrimp Dumpling King             LV2 HP4
+  1x ST8-008    Sugar Swan Cookie                LV2 HP4
+FLIP (12)
+  3x BS4-050    Biscuit Giraffe                  LV1 HP1
+  3x ST3-011    Onion Cookie                     LV2 HP2
+  3x ST8-007    Blue Slushy Cookie               LV1 HP1
+  2x ST3-007    Sparkling Cookie                 LV3 HP3
+  1x BS2-019    Cheesecake Cookie                LV2 HP2
+ITEM (11)
+  4x BS1-075    Wanderer's Apple Pie             
+  2x BS7-063    Grand Cookie Games Trophy        
+  1x BS1-074    Ancient Forest Luckstone         
+  1x BS10-068   A Single Lily                    
+  1x BS11-049   Emerald of the Wind              
+  1x P-012      Mischievous Ladybug              
+  1x ST3-016    Ancient Healer's Gaze            
+TRAP (8)
+  3x ST8-018    Piercing Arrow of Purity         
+  2x BS9-069    Broken Seal                      
+  1x P-029      Ritual of Life                   
+  1x ST3-019    Supreme Whipped Cream            
+  1x ST3-020    Divine Light Crystal             
+STAGE (2)
+  1x BS10-067   Mossy Silver Bridge              
+  1x BS9-070    Puppet Theater Stage             
+
+legal: True  size 60  flips 12
+
+EXTRA deck
+EXTRA (6)
+  4x BS10-073   White Lily Cookie                LV3 HP1
+  2x BS8-069    Peak of Apathy                   LV2 HP4
+
+{
+ "deck": [
+  "BS5-063",
+  "BS5-063",
+  "BS5-056",
+  "BS1-074",
+  "BS8-059",
+  "BS6-055",
+  "ST3-010",
+  "BS6-053",
+  "ST3-010",
+  "BS7-046",
+  "BS10-068",
+  "ST8-005",
+  "ST8-011",
+  "ST8-011",
+  "BS4-060",
+  "ST8-011",
+  "ST3-011",
+  "ST3-007",
+  "ST3-007",
+  "ST8-005",
+  "BS8-054",
+  "ST3-011",
+  "ST3-011",
+  "BS7-063",
+  "BS4-050",
+  "BS4-050",
+  "BS9-070",
+  "ST8-007",
+  "ST8-007",
+  "ST8-007",
+  "BS6-053",
+  "BS2-019",
+  "BS1-058",
+  "BS4-050",
+  "ST3-016",
+  "BS7-063",
+  "BS10-067",
+  "ST8-008",
+  "BS11-051",
+  "P-012",
+  "BS8-062",
+  "P-029",
+  "BS1-075",
+  "BS1-075",
+  "BS1-075",
+  "BS1-075",
+  "BS9-069",
+  "BS9-069",
+  "BS6-059",
+  "ST3-020",
+  "ST8-018",
+  "ST8-018",
+  "BS7-046",
+  "ST8-018",
+  "ST3-019",
+  "BS11-049",
+  "BS1-070",
+  "BS3-055",
+  "BS10-057",
+  "BS6-053"
+ ],
+ "extra": [
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS8-069",
+  "BS8-069"
+ ],
+ "generation": 23,
+ "score": 0.7778,
+ "mean": 0.6242,
+ "gauntlet": [
+  "na25_01_green_windarcher",
+  "na25_02_yellow_millennialtree",
+  "na25_03_purple_moonlight",
+  "na25_04_red_hollyberry",
+  "na25_05_red_hollyberry",
+  "na25_06_yellow_millennialtree",
+  "na25_07_red_hollyberry",
+  "na25_08_purple_moonlight",
+  "na25_09_red_hollyberry",
+  "na25_10_purple_moonlight",
+  "na25_11_yellow_millennialtree",
+  "na25_12_yellow_millennialtree",
+  "na25_13_green_windarcher",
+  "na25_14_yellow_millennialtree",
+  "na25_15_yellow_millennialtree",
+  "na25_16_purple_moonlight",
+  "na25_17_purple_moonlight",
+  "na25_18_red_hollyberry"
+ ],
+ "seeded_from": [
+  "MyGreenDeck"
+ ]
+}

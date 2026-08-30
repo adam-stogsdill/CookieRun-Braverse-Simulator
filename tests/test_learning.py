@@ -568,3 +568,55 @@ def test_the_wide_encoder_actually_trains(db):
                       db=db, encoder=WideEncoder(db))
     trainer.train(log=lambda *_: None)
     assert 0.0 <= trainer.evaluate(20) <= 1.0
+
+
+# --- training on a pool of decks -------------------------------------------
+def test_a_trainer_holding_a_pool_samples_from_all_of_it(db):
+    """Every deck in the pool is played, not just the first two.
+
+    `sample_decks` is what turns "18 lists on disk" into "a run that saw 18
+    lists": two decks is one fixed match-up, and anything more is a pool the
+    run is supposed to be drawing from.
+    """
+    from braverse.deckfile import read_pool
+
+    pool = [deck for _, deck, _ in read_pool()]
+    assert len(pool) > 2
+    trainer = Trainer(pool, TrainConfig(seed=3), db=db)
+    seen = set()
+    for _ in range(400):
+        for deck in trainer.sample_decks():
+            seen.add(tuple(deck))
+    assert len(seen) == len(pool), "some deck in the pool is never dealt"
+
+
+def test_a_pool_is_evaluated_across_the_pool(db, monkeypatch):
+    """The reported win rate covers the pool, not `decks[0]` vs `decks[-1]`.
+
+    A fixed pairing would be a report on two of the eighteen decks the run
+    trained against, which is the number people would then quote.
+    """
+    from braverse.deckfile import read_pool
+
+    pool = [deck for _, deck, _ in read_pool()]
+    trainer = Trainer(pool, TrainConfig(seed=1), db=db)
+    played: list[tuple] = []
+    original = trainer.play_game
+
+    def spy(learner, other, seed, decks=None):
+        played.append(tuple(tuple(d) for d in (decks or [])))
+        return 0.0            # a draw: no game is actually played out
+
+    monkeypatch.setattr(trainer, "play_game", spy)
+    trainer.evaluate(12)
+    assert all(pair for pair in played), "the pool was not passed to the games"
+    assert len({p[0] for p in played}) > 1, "one pairing stood in for the pool"
+
+    # Two decks is still the plain fixed match-up it has always been.
+    pair_trainer = Trainer(pool[:2], TrainConfig(seed=1), db=db)
+    seen: list = []
+    monkeypatch.setattr(pair_trainer, "play_game",
+                        lambda learner, other, seed, decks=None: seen.append(decks) or 0.0)
+    pair_trainer.evaluate(4)
+    assert seen == [None] * 4
+    assert original is not None

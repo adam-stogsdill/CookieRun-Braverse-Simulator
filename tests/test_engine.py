@@ -132,6 +132,36 @@ def test_derived_starter_decks_are_legal_and_playable(set_id, db):
     assert game.play_out().winner is not None
 
 
+def test_every_starter_product_is_offered_as_a_deck(db):
+    """All ten ST products are decks you can pick, one per set and in set order.
+
+    The menu is built from `STARTER_DECKS`, so a set missing from it is a
+    starter deck nobody can play. Two are transcribed from the box and the
+    other eight are derived from their set — a real difference, and one the
+    deck list labels rather than hides.
+    """
+    from braverse import DERIVED_DECK_NAMES, TRANSCRIBED_DECKS
+
+    assert len(STARTER_DECKS) == len(STARTER_SET_IDS)
+    assert set(TRANSCRIBED_DECKS) | set(DERIVED_DECK_NAMES.values()) == set(STARTER_DECKS)
+    assert list(STARTER_DECKS) == sorted(
+        STARTER_DECKS, key=lambda n: int(n.split("_")[0][2:]))
+    for name, deck in STARTER_DECKS.items():
+        set_id = "ST" + name.split("_")[0][2:]
+        assert {db[c].set_id for c in deck} == {set_id}, name
+
+
+def test_the_deck_list_says_which_starters_are_derived():
+    """A list built from a set is not the list in the box, and the menu says so."""
+    import play_server
+
+    assert play_server.deck_source("st8_wind_archer") == "starter"
+    assert play_server.deck_source("st1_red") == "derived"
+    offered = play_server.available_decklists()
+    for name in STARTER_DECKS:
+        assert name in offered, name
+
+
 def test_starter_deck_accepts_a_transcribed_name(db):
     assert starter_deck(db, "st9_sea_fairy") == list(STARTER_DECKS["st9_sea_fairy"])
 
@@ -1014,6 +1044,42 @@ def test_divine_light_crystal_survives_a_lethal_swing():
     assert not defender.break_area
     assert any("HP cannot reach 0" in line for line in game.state.log), \
         game.state.log[-5:]
+
+
+def test_the_floor_lasts_one_battle_and_not_the_whole_turn():
+    """"during this battle" is one battle, not the rest of your opponent's turn.
+
+    The flag was only cleared in the Active Phase, so a Cookie a trap had saved
+    from the first swing walked through every attack that came after it — the
+    second attacker, and the third, could not kill something the card had
+    protected against exactly one.
+    """
+    db = default_db()
+    game = new_game(seed=9, db=db)
+    them = game.state.players[1]
+    victim = them.battle[0]
+    victim.hp_cannot_reach_zero = True
+
+    us = game.state.current
+    first = us.battle[0]
+    second = game._deploy_cookie(us, CardInstance.make("ST8-011", us.index),
+                                 run_on_play=False)
+
+    def _swing(attacker):
+        """One attack, with the support to pay for it and one HP card left."""
+        us.support = [CardInstance.make("ST8-011", us.index) for _ in range(6)]
+        for card in us.support:
+            card.rested = False
+        while len(victim.hp_cards) > 1:
+            them.trash.append(victim.hp_cards.pop())
+        game._do_attack(A.Attack(attacker.uid, victim.uid))
+
+    _swing(first)
+    assert victim in them.battle, "the battle it was played into is the one it covers"
+    assert not victim.hp_cannot_reach_zero, "the protection outlived its battle"
+
+    _swing(second)
+    assert victim not in them.battle, "the next Cookie could not finish it off"
 
 
 def test_the_floor_also_holds_against_hp_placed_into_the_trash():

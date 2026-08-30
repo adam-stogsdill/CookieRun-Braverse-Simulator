@@ -1,0 +1,136 @@
+# generation: 2
+# score: 0.65
+# mean: 0.4292
+
+COOKIE (20)
+  4x ST3-010    Aloe Cookie                      LV2 HP3
+  4x ST8-011    Kiwi Cookie                      LV1 HP3
+  3x BS8-059    Mystic Flour Cookie              LV3 HP6
+  2x BS1-068    Cauliflower Cookie               LV2 HP4
+  2x BS5-056    Longan Dragon Cookie             LV3 HP5
+  2x BS5-063    Hero Cookie                      LV3 HP5
+  2x ST8-010    Cookiemals                       LV1 HP2
+  1x P-131      Spinach Cookie                   LV1 HP2
+FLIP (15)
+  4x BS4-050    Biscuit Giraffe                  LV1 HP1
+  4x ST3-007    Sparkling Cookie                 LV3 HP3
+  4x ST8-007    Blue Slushy Cookie               LV1 HP1
+  3x ST3-011    Onion Cookie                     LV2 HP2
+ITEM (13)
+  4x BS1-075    Wanderer's Apple Pie             
+  4x P-012      Mischievous Ladybug              
+  3x ST3-016    Ancient Healer's Gaze            
+  2x ST3-018    Parsley Tea of Invigoration      
+TRAP (11)
+  4x BS9-069    Broken Seal                      
+  3x ST3-020    Divine Light Crystal             
+  3x ST8-018    Piercing Arrow of Purity         
+  1x ST3-019    Supreme Whipped Cream            
+STAGE (1)
+  1x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 15
+
+EXTRA deck
+EXTRA (6)
+  4x BS10-073   White Lily Cookie                LV3 HP1
+  2x BS8-069    Peak of Apathy                   LV2 HP4
+
+{
+ "deck": [
+  "BS5-063",
+  "BS5-063",
+  "BS5-056",
+  "BS5-056",
+  "BS8-059",
+  "BS8-059",
+  "ST3-010",
+  "ST3-010",
+  "ST3-010",
+  "ST3-010",
+  "ST8-010",
+  "ST8-010",
+  "ST8-011",
+  "ST8-011",
+  "ST8-011",
+  "ST8-011",
+  "ST3-007",
+  "ST3-007",
+  "ST3-007",
+  "ST3-007",
+  "ST8-020",
+  "ST3-011",
+  "ST3-011",
+  "ST3-011",
+  "BS4-050",
+  "BS4-050",
+  "BS4-050",
+  "BS4-050",
+  "ST8-007",
+  "ST8-007",
+  "ST8-007",
+  "ST8-007",
+  "BS1-068",
+  "ST3-016",
+  "ST3-016",
+  "ST3-016",
+  "P-012",
+  "P-012",
+  "P-012",
+  "P-012",
+  "ST3-018",
+  "ST3-018",
+  "BS1-075",
+  "BS1-075",
+  "BS1-075",
+  "BS1-075",
+  "BS9-069",
+  "BS9-069",
+  "BS9-069",
+  "BS9-069",
+  "ST3-020",
+  "ST3-020",
+  "ST3-020",
+  "ST8-018",
+  "ST8-018",
+  "BS8-059",
+  "ST8-018",
+  "ST3-019",
+  "BS1-068",
+  "P-131"
+ ],
+ "extra": [
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS8-069",
+  "BS8-069"
+ ],
+ "generation": 2,
+ "score": 0.65,
+ "mean": 0.4292,
+ "gauntlet": [
+  "na25_01_green_windarcher",
+  "na25_02_yellow_millennialtree",
+  "na25_03_purple_moonlight",
+  "na25_04_red_hollyberry",
+  "na25_05_red_hollyberry",
+  "na25_06_yellow_millennialtree",
+  "na25_07_red_hollyberry",
+  "na25_08_purple_moonlight",
+  "na25_09_red_hollyberry",
+  "na25_10_purple_moonlight",
+  "na25_11_yellow_millennialtree",
+  "na25_12_yellow_millennialtree",
+  "na25_13_green_windarcher",
+  "na25_14_yellow_millennialtree",
+  "na25_15_yellow_millennialtree",
+  "na25_16_purple_moonlight",
+  "na25_17_purple_moonlight",
+  "na25_18_red_hollyberry"
+ ],
+ "seeded_from": [
+  "MyGreenDeck"
+ ]
+}

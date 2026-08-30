@@ -54,8 +54,10 @@ from typing import Any, Optional, Sequence
 
 from braverse.console import utf8_output
 from braverse.agentfile import AGENT_DIR, AGENT_GLOB
-from braverse.deckfile import DECK_DIR, parse_decklist, read_decklist
-from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS, CardDB, Game,
+from braverse.deckfile import (DECK_DIR, META_DIR, parse_decklist,
+                               read_decklist)
+from braverse import (DEFAULT_RULES as RULES, STARTER_DECKS,
+                      TRANSCRIBED_DECKS, CardDB, Game,
                       HeuristicAgent, RandomAgent, SeatedAgent, __version__,
                       default_db, implemented_pool, validate)
 from braverse import actions as A
@@ -352,14 +354,18 @@ def scan(pattern: str) -> list[Path]:
 
 
 def deck_files() -> dict[str, Path]:
-    """Decklist files by name: loose beside the script, then in `decks/`.
+    """Decklist files by name: loose beside the script, `decks/`, `decks/meta/`.
 
     `decks/` is scanned second so the curated folder wins a name clash with a
     loose file — co-evolution writes there, and those lists are the ones a run
-    actually stands behind.
+    actually stands behind. `decks/meta/` is scanned last and is the one
+    sub-folder that is read: the tournament lists are decks people want to
+    play, not only a pool to train against, and a deck the game cannot offer
+    is a deck nobody can try.
     """
     found = {p.stem: p for p in scan("*.txt")}
     found.update({p.stem: p for p in scan(f"{DECK_DIR}/*.txt")})
+    found.update({p.stem: p for p in scan(f"{META_DIR}/*.txt")})
     return found
 
 
@@ -400,9 +406,16 @@ def deck_source(name: str) -> str:
     """Where a deck in `available_decks()` came from, for the UI."""
     if name in load_saved_decks():
         return "saved"
-    if name in STARTER_DECKS:
+    if name in TRANSCRIBED_DECKS:
         return "starter"
+    # The other eight starter products are built from their set rather than
+    # transcribed from the box, and the menu says so rather than passing them
+    # off as the printed list.
+    if name in STARTER_DECKS:
+        return "derived"
     path = deck_files().get(name)
+    if path is not None and path.parent.name == Path(META_DIR).name:
+        return "tournament"
     if path is not None and path.parent.name == DECK_DIR:
         return "evolved"
     return "file"

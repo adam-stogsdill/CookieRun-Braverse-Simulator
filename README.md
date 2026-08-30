@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.58
+Current Version: 0.2.66
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -30,6 +30,7 @@ I am a Python programmer specializing in ML, so game development is not my forte
     - [Learn: the guided first game](#learn-the-guided-first-game)
     - [A misclick is not a move](#a-misclick-is-not-a-move)
     - [Playing someone else](#playing-someone-else)
+    - [The ten starter decks](#the-ten-starter-decks)
     - [The deck builder tab](#the-deck-builder-tab)
     - [Watching a game back](#watching-a-game-back)
     - [Your profile, and what it keeps](#your-profile-and-what-it-keeps)
@@ -54,6 +55,7 @@ I am a Python programmer specializing in ML, so game development is not my forte
   - [Rules fidelity](#rules-fidelity)
   - [Self-play RL](#self-play-rl)
   - [Deck generation](#deck-generation)
+    - [Real decklists, and what they are worth here](#real-decklists-and-what-they-are-worth-here)
     - [Not overfitting the shuffles](#not-overfitting-the-shuffles)
     - [Using the RL agent as the pilot](#using-the-rl-agent-as-the-pilot)
     - [Co-evolution](#co-evolution)
@@ -1360,6 +1362,36 @@ outside party involved is a public STUN server, used only to discover how your
 machine looks from behind a NAT — it carries no game data, and two people on the
 same network do not need it at all.
 
+### The ten starter decks
+
+All ten ST products are pickable decks, in set order, everywhere a deck is
+chosen — the viewer's menus, `selfplay.py --deck0`, `train_rl.py`,
+`compare_decks.py`. They are two different kinds of list and the deck menu
+labels them as such:
+
+- **ST8 and ST9 are transcribed** from the printed products, card for card
+  (`TRANSCRIBED_DECKS`). They are what a self-play number means when it says
+  "starter decks", and they are the pair everything in this README was measured
+  on. Source: `starter`.
+- **The other eight are derived** from their set by `build_starter_deck` — four
+  copies each of a 5/4/3 LV1/LV2/LV3 Cookie line, then 3+3 items, 2+2 traps and
+  2 stages, topped up from the rest of the set where a set is short at a level.
+  They are legal, monocolour and playable, but they are *not* the list in the
+  box: nobody has transcribed those, and a guess dressed up as the product
+  would be worse than an honest derivation. Source: `derived`, which is what
+  the deck list prints beside the name.
+
+Derived is not a synonym for competitive. The engine plays the same share of
+each list's printed text (76–82% across all ten), but the derivation picks by
+card number rather than by what the deck wants, and the older sets are weaker
+besides: over 30 heuristic games apiece against ST9, ST10 goes even and ST6
+takes 43%, while ST1–ST5 win between 3% and 20%. Transcribing a real list is
+what would fix that, and any of the eight can be replaced by dropping a
+transcribed `.txt` into `decks/`.
+
+Self-play numbers are unchanged by their arrival: `STARTER_DECKS` still hands
+back the very same two lists for ST8 and ST9.
+
 ### The deck builder tab
 
 The second tab in the header is a deck builder, so a deck can be put together
@@ -1802,6 +1834,19 @@ skipped the engine's payment entirely — and then *asserted the double charge*
 broken. It goes through `_response_window` now, with exactly the two green
 support the printed cost needs and not a card more, which is the only version
 that fails when the card does.
+
+And then it worked for too long. "During this battle" was being cleared in the
+Active Phase, which is a whole turn away: the flag survived the battle that set
+it, so a Cookie the trap saved from the first swing could not be killed by the
+second, the third, or anything else the attacker had that turn — a two-mana
+trap answering an entire turn's offence. The battle is a unit with a close as
+well as an opening, so `_do_attack` is now a `try`/`finally` around the battle
+itself (`Game._battle`) with `_expire_battle_protection` in the `finally` —
+half a dozen paths end a battle early and every one of them ends it. Only the
+flags the cards scope that way are dropped there; "until the end of your
+opponent's turn" (the damage caps, the effect immunities) is a different clock
+and is still cleared in the Active Phase. Self-play is bit-identical across the
+change: neither starter list runs the two cards that set it.
 
 ### The mulligan
 
@@ -2367,11 +2412,110 @@ lists, so every candidate is forced back inside the construction rules (60 cards
 ≤4 per card number, ≤16 FLIP, at least one Cookie) before it is ever evaluated.
 Tests assert legality holds even from adversarial input like an all-FLIP pool.
 
+There is a fifth construction rule and `repair()` used to be missing it: **an
+EXTRA card is not a card in the 60.** `--pool implemented` offers 17 of them,
+nothing dropped them, and `validate` rejects a main deck holding one — so the
+search was free to build decks that were illegal by construction. It did:
+pointed at the tournament gauntlet for 25 generations, the champion came back
+three copies of an EXTRA Dark Enchantress Cookie deep. They are now filtered out
+of the evolver's pool *and* dropped in `repair`, so neither a seeded parent nor
+a crossover from outside can carry one in. `evolve_deck.py` also refuses to
+write a champion that does not validate: it had printed `legal: False` and saved
+the file anyway, which puts a list in `decks/` that looks like every other list
+and cannot be played.
+
+`--gauntlet` chooses what a candidate is scored against — starter names,
+decklist files, or a folder of them (`decks/meta` is the tournament pool) — and
+it is the most consequential argument here, because a deck is only ever as
+strong as the field it was measured on. `--seed-deck` takes the same kinds of
+argument and starts the population from those lists plus mutations of them,
+turning a run into a tuning pass on a real deck rather than a search from
+noise.
+
 The pool defaults to ST8+ST9, the sets whose effects are fully implemented.
 `--pool implemented` widens it to every card the engine plays correctly (coded
 effects plus genuinely vanilla bodies); `--pool all` opens the whole database,
 but every uncoded card plays as a vanilla body there, so the search would be
 optimising against a fiction.
+
+### Real decklists, and what they are worth here
+
+```bash
+python train_rl.py --deck-pool --games 40000       # train on the tournament pool
+python evolve_deck.py --gauntlet decks/meta --pool implemented
+python compare_decks.py --decks decks/meta/na25_09_red_hollyberry.txt st9_sea_fairy
+```
+
+`decks/meta/` holds 18 lists played at the $11,000 CookieRun: Braverse North
+America Championship (83 players, 13 December 2025), read off that event's
+public standings on topdeck.gg and stored in the ordinary decklist format with
+their placing and record in the header. Four archetypes: RED Hollyberry, GREEN
+Wind Archer, YELLOW Millennial Tree, PURPLE Moonlight. Every one of them is
+legal here and every card in them is a card this database knows; the engine
+plays 76–100% of each list's printed text, so they are being *played*, not
+approximated.
+
+Two caveats that matter before any number below is quoted:
+
+- **They are main decks only.** topdeck.gg's decklist field is the 60, and the
+  EXTRA deck is not in it. These lists play with no EXTRA pile, which is not
+  how they were played in the room.
+- **A decklist is half of a deck.** The other half is the pilot, and that is
+  not a hedge here — it is the whole result.
+
+Under `HeuristicAgent`, the tournament decks *lose to the ST9 starter*: 27-40%
+across the four archetype leaders, which reads as "the real decks are bad".
+Under the RL agent in `agents/rl_agent.pt`, the strongest of them (the 9th-place
+RED list) pulls level with ST9 — 47.5% head to head, and 72.5% against the field
+where ST9 takes 71.9%. The same cardboard, two pilots, opposite conclusions.
+The heuristic is a small pile of hand-written priorities; it can fly a starter
+deck, and it cannot fly a control deck built around setting up a turn ahead. So
+a win rate here is a statement about a deck *and* the agent flying it, and
+`compare_decks.py --agent` exists precisely so both can be asked.
+
+That is also the argument for training on these lists rather than only on
+starter decks. `--deck-pool DIR` (bare: `decks/meta`) makes every training game
+draw its two decks from the folder, and every reported win rate is then measured
+across that pool rather than on one pairing out of it — `Trainer.evaluate`
+switches to pool-wide scoring on its own as soon as it holds more than two
+decks, because a number from `decks[0]` vs `decks[-1]` would be a report on two
+of the eighteen. `evolve_deck.py --gauntlet` takes the same folder, so a deck
+can be evolved against the field people actually brought instead of against two
+starter lists.
+
+#### Trying to beat them, and not managing it
+
+Three evolution runs against that gauntlet, each validated on shuffles the
+search never saw, then re-measured head to head on a further held-out seed block
+under both pilots. `--seed-deck` was added for the third: instead of a first
+generation of noise, the population starts as a real list plus mutations of it,
+which opened at 75% where the from-scratch run opened at 65.6%.
+
+Average win rate against the same six-deck field, 120 games a pairing under the
+heuristic and 60 under the RL agent:
+
+| deck | heuristic | RL agent | worse of the two |
+|---|---|---|---|
+| na25_09, the 9th-place RED list, untouched | 52.3% | **65.4%** | **52.3%** |
+| ST9 starter | 58.0% | 50.4% | 50.4% |
+| evolved, heuristic pilot, 25 generations | **60.8%** | 31.7% | 31.7% |
+| evolved from the RED lists, RL pilot | 39.0% | 58.8% | 39.0% |
+| ST8 starter | 49.2% | 38.3% | 38.3% |
+
+The deck that wins on the measure this repo already argues for — the *worse* of
+its two pilots, since a deck that only works for one of them is tuned to that
+pilot's blind spots — is the tournament list, unmodified. The search did not
+beat it: evolving under the heuristic produced the best heuristic deck in the
+table and the second-worst RL deck (60.8% → 31.7%), which is the pilot-overfit
+this README warns about showing up in the plainest form it can take; and tuning
+the RED list under the RL pilot made it *worse* than the list it started from,
+under both pilots. None of the three was kept — a deck that loses to its own
+seed does not belong in `decks/` where it would sit looking like an
+improvement.
+
+That is a result about the search, not about the decks: 60 slots, a 1526-card
+pool and a fitness signal a few hundred games wide is a thin budget against
+lists that human players iterated on for a season.
 
 ### Not overfitting the shuffles
 
@@ -2403,6 +2547,120 @@ block, so the comparison is like-for-like.
 So the evolved list beats both hand-built starters, but narrowly — and note the
 validation score was 63.3% against a 56.4% holdout, so a few points of
 selection bias survive even now. Trust the holdout column.
+
+### Tuning a deck you already play
+
+```bash
+python evolve_deck.py --seed-deck decks/MyGreenDeck.txt --gauntlet decks/meta \
+    --pool implemented --agent both --checkpoints decks/green_run \
+    --out decks/MyGreenDeck_evolved.txt
+```
+
+`--seed-deck` starts the population from lists somebody already built rather
+than from noise, which turns the run from a search into a *tuning pass*: half
+the population is the seed and mutations of it, half is still random, because a
+population that is nothing but one deck's children cannot leave the
+neighbourhood it started in. A seed is repaired first — it may be somebody
+else's format, or simply illegal here — and any decklist file works, including
+one exported from the deck builder or typed out by hand.
+
+The seed's **EXTRA pile is carried through unchanged and takes no part in any
+of the numbers.** `DeckEvolver` fields one pile per seat, so evolution searches
+the main 60 only; the pile rides along so the file you get back is still the
+deck you play, and the run says so on the way past. Read a win rate here as the
+60's, not the whole deck's.
+
+`--checkpoints DIR` writes each generation's champion into that folder as an
+ordinary decklist, plus a `_best.txt` rewritten whenever the champion actually
+improves. They are decklists, not snapshots of the search: `decks/green_run/
+gen023.txt` loads in the deck menu, goes into `compare_decks.py`, and can seed
+the next run, without anything having to know where it came from. A run against
+the eighteen tournament lists under two pilots is the better part of an hour,
+and until this existed a crash, a closed lid, or a number that stopped climbing
+threw the whole budget away. `--checkpoint-every N` thins the numbered files;
+the last generation is always written.
+
+**Measured result** — a hand-built GREEN list seeded into the run above, 36
+population × 50 generations × 144 games under both pilots, 48 minutes. Both
+columns are 200 games per opponent against each of the eighteen tournament
+lists, seats alternated, on a seed block the search never touched:
+
+| | hand-built | tuned |
+|---|---|---|
+| average vs the field, heuristic pilot | 47.7% | **84.8%** |
+| average vs the field, RL pilot | 54.9% | **81.8%** |
+| lists beaten, heuristic pilot | 6 / 18 | **18 / 18** |
+| lists beaten, RL pilot | 12 / 18 | **18 / 18** |
+
+The evolver's own holdout said 80.0%, so for once the holdout was if anything
+pessimistic. It clears 18/18 under *both* pilots, which is what `--agent both`
+is for — the earlier single-pilot runs in the table below each collapsed when
+the other pilot flew them.
+
+What it changed is a legible strategy shift, not a card-swap: 26 Cookies to 30
+and most of them LV1 for 3 HP, FLIP down from the legal maximum of 16 to 10,
+traps halved from 14 to 7, items up to 12. It abandoned the trap-heavy control
+plan for a wide cheap board. **What it is not is a tidy list** — 23 of the 60
+are singletons, because nothing in a GA rewards consistency beyond what the win
+rate already measures, and at this margin many of those slots are
+interchangeable. Read the archetype, not the 1-ofs. (That is what
+`--consolidate` below is for; this run predates it.)
+
+Two caveats on the numbers. Nobody in these games has an EXTRA pile — the
+tournament lists were published without one and evolution does not field them —
+so the carried EXTRA deck is untested here. And the field is fixed: a deck
+tuned against these eighteen lists is tuned against a field that does not
+adapt, which is the thing co-evolution below was supposed to fix.
+
+### Pricing the 1-ofs: `--consolidate`
+
+A win rate is indifferent to consistency. Over four hundred games a singleton
+and a playset of the same card are worth nearly the same number, because the
+average of "drew it" and "did not" is what the gauntlet measures — so the
+search spends its slots on twenty different cards that are each fine, and the
+champion is a list of 1-ofs that plays a slightly different game every shuffle.
+Twenty-three of the sixty in the tuned GREEN deck above are singletons.
+
+So the search maximises win rate *minus* a price on thin slots:
+
+    objective = fitness(deck) - W * (share of the 60 in stacks under N copies)
+
+`--consolidate W` (default 0.05) and `--min-copies N` (default 2, i.e. "no
+1-ofs"). At the default a wholly singleton deck gives up five points of win
+rate against a fully consolidated one, and the green champion's 23 singles cost
+it about 1.9. That is deliberately smaller than the noise on one generation's
+evaluation: this is a **tiebreaker between candidates the gauntlet cannot
+separate**, not a term that outvotes winning games. A 1-of that is genuinely
+carrying the deck keeps its slot; one that is merely not hurting loses it to a
+second copy of something already there.
+
+Two pieces make it climbable rather than a constant everyone pays:
+
+- **A mutation can duplicate instead of rolling.** A random swap creates
+  another singleton nearly every time, so a search priced this way could only
+  pay and never collect. `consolidation_bias` (0.5) is how often a mutation
+  puts a second copy of a card the deck already runs thin into the slot
+  instead. It still costs whatever was there, so selection decides.
+- **Random candidates are seeded in stacks.** Sixty singletons in every member
+  of generation 0 is the same number for everybody — no gradient.
+
+Measured, ten-set pool against two starters, 8 population × 6 generations ×
+8 games, identical seed:
+
+| | win rate | share of the deck in 1-ofs |
+|---|---|---|
+| `--consolidate 0` | 73.3% | 21.7% |
+| `--consolidate 0.05` | **87.5%** | **1.7%** |
+
+The win rate going *up* is not the claim — one seed at this budget is noise,
+and the honest expectation is that consolidation costs a little. The claim is
+the right-hand column: 13 singleton slots became 1.
+
+**The price never reaches a reported number.** `fitness`, `holdout`, the
+validation score and every checkpoint header stay plain win rates; only
+`objective` carries the charge, and only the search reads it. A holdout that
+had a deckbuilding preference quietly subtracted from it could not be compared
+against anything else in this file.
 
 ### Using the RL agent as the pilot
 

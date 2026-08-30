@@ -34,14 +34,33 @@ ST8_WIND_ARCHER = _expand({
     "ST8-020": 2,                                                          # stage
 })
 
-STARTER_DECKS = {
+# The two lists above are transcribed from the printed products, card for card.
+TRANSCRIBED_DECKS = {
     "st9_sea_fairy": ST9_SEA_FAIRY,
     "st8_wind_archer": ST8_WIND_ARCHER,
 }
 
-# Every ST set is a monocolour preconstructed product, but only ST8 and ST9 are
-# transcribed above. The rest are derived on demand by build_starter_deck.
+# Every ST set is a monocolour preconstructed product. The other eight are not
+# transcribed — `build_starter_deck` derives a legal 60 from the set instead —
+# so they are named after what is printed on the box rather than after an ace
+# Cookie the derived list is not guaranteed to contain. ST1-ST5 shipped as
+# "Starter Deck <COLOUR>" and have no other name.
+DERIVED_DECK_NAMES = {
+    "ST1": "st1_red",
+    "ST2": "st2_yellow",
+    "ST3": "st3_green",
+    "ST4": "st4_blue",
+    "ST5": "st5_purple",
+    "ST6": "st6_flames_of_immortality",
+    "ST7": "st7_tree_of_life",
+    "ST10": "st10_glorious_moonlight",
+}
 STARTER_SET_IDS = tuple(f"ST{i}" for i in range(1, 11))
+# Which set each transcribed list is, so the ten can be ordered ST1 -> ST10.
+_TRANSCRIBED_SETS = {"ST8": "st8_wind_archer", "ST9": "st9_sea_fairy"}
+
+# Filled in at the bottom of this module, once `build_starter_deck` exists.
+STARTER_DECKS: dict[str, list[str]] = {}
 
 
 def build_starter_deck(db: CardDB, set_id: str,
@@ -189,3 +208,34 @@ def validate(deck: list[str], db: CardDB, rules: cfg.RulesConfig = cfg.DEFAULT,
         flip_count=flips,
         level_counts=dict(sorted(levels.items(), key=lambda kv: kv[0] or 0)),
     )
+
+
+def _starter_decks() -> dict[str, list[str]]:
+    """Every starter product as a playable list, in set order.
+
+    A player picking a deck means all ten of them, not the two that happen to
+    be typed out in this file, so the derived lists are built here rather than
+    left to whoever remembers `build_starter_deck` exists. They are two
+    different kinds of thing and the UI says so — `play_server.deck_source`
+    reports the derived ones as "derived", because a list built from a set is
+    not the list in the box.
+
+    Building all eight costs a couple of milliseconds against a database this
+    module's caller has already loaded, so it is done once at import rather
+    than lazily behind a cache that every reader would then have to reason
+    about.
+    """
+    from .cards import default_db
+
+    db = default_db()
+    decks: dict[str, list[str]] = {}
+    for set_id in sorted(STARTER_SET_IDS, key=lambda s: int(s[2:])):
+        transcribed = _TRANSCRIBED_SETS.get(set_id)
+        if transcribed is not None:
+            decks[transcribed] = TRANSCRIBED_DECKS[transcribed]
+        else:
+            decks[DERIVED_DECK_NAMES[set_id]] = build_starter_deck(db, set_id)
+    return decks
+
+
+STARTER_DECKS.update(_starter_decks())

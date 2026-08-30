@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.2.66
+
+- **Deck evolution can be told to build a tidy list.** `evolve_deck.py` now
+  prices thin slots: the search maximises win rate *minus* a small charge on
+  the share of the 60 sitting in stacks of 1. A card that is only as good as
+  the next one now loses the slot to a second copy of something already in the
+  deck, so runs come back with playsets and pairs instead of twenty
+  interchangeable singletons. It is on by default at 5% (`--consolidate 0`
+  turns it off, `--min-copies 4` asks for full playsets), and the win rates
+  printed at the end of a run are still plain win rates — the charge is only
+  ever used to choose between candidates.
+
+## 0.2.65
+
+- **The "CookieRun: Braverse" title in the top-left corner is now a way back to
+  the title screen.** Click it from the deck builder, the replay shelf or a
+  finished game and the menu comes up. It stays inert during a match in
+  progress and in a room — there is nothing to go back to yet, and a room is
+  left with its own Leave button.
+
+## 0.2.64
+
+- **A tuned GREEN deck that beats all eighteen tournament lists.**
+  `decks/MyGreenDeck_evolved.txt` — seeded from the hand-built GREEN list and
+  evolved against the whole championship field under both pilots. It went from
+  beating 6 of the 18 to beating all 18, averaging 84.8% against them. Every
+  generation of that run is in `decks/green_run/` if you want to see how it got
+  there.
+- **Deck evolution can now save its work as it goes.** `evolve_deck.py
+  --checkpoints DIR` drops each generation's best deck into that folder as an
+  ordinary decklist — loadable in the deck menu, playable, and usable as the
+  seed for another run — plus a `_best.txt` that always holds the strongest
+  list found so far. A run against the tournament field takes the better part
+  of an hour; before this, closing the laptop threw all of it away.
+- **The deck tools now read any decklist you point them at.** `--seed-deck`,
+  `--gauntlet` and `compare_decks.py --decks` used to fail with an unhelpful
+  error on a list exported from the deck builder or typed out by hand. They now
+  read those the same way the Import button does.
+- **A deck's EXTRA pile survives a tuning run.** Seeding evolution with a deck
+  that plays an EXTRA deck used to hand back a file with the pile missing. The
+  pile is carried through unchanged (evolution still only searches the main 60,
+  and the run says so).
+- **An EXTRA pile is no longer labelled illegal in saved files.** A six-card
+  EXTRA deck was being checked against the 60-card main-deck rules and printed
+  "legal: False" underneath a perfectly legal deck.
+
+## 0.2.63
+
+- **Eighteen tournament decks are now in the game.** The lists played at the
+  $11,000 CookieRun: Braverse North America Championship — RED Hollyberry,
+  GREEN Wind Archer, YELLOW Millennial Tree and PURPLE Moonlight — are in the
+  deck menu marked "tournament", with each one's placing in its file. They are
+  main decks only: the EXTRA deck is not part of what the event published, so
+  these lists play without one.
+- **Practice bots can be trained on those decks.** `train_rl.py --deck-pool`
+  draws both decks of every training game from the folder instead of playing
+  the same starter match-up over and over.
+- **A generated deck can no longer come out illegal.** Deck evolution could put
+  EXTRA cards in the main 60 — they belong to their own pile — and then saved
+  the deck anyway. It now keeps them out, and refuses to write a deck that does
+  not validate.
+- **Deck evolution can start from a deck you already have.** `--seed-deck`
+  tunes a real list instead of searching from scratch, and `--gauntlet` picks
+  what the search is scored against — including the tournament folder, so a
+  deck can be built against the field people actually brought.
+
+## 0.2.62
+
+- **All ten starter decks are now on the deck menu.** ST1 through ST10, in set
+  order, wherever a deck is picked. ST8 and ST9 are the printed lists as
+  before; the other eight are built from their set rather than transcribed from
+  the box, and the deck list marks those "derived" so you know which is which.
+
+## 0.2.61
+
+- **"HP cannot reach 0" now lasts one battle, not the rest of the turn.**
+  Divine Light Crystal (and Squid Ink Cookie's defence) protected the Cookie
+  against every attack for the whole of your opponent's turn. It covers the
+  battle it was played into, as printed — the next Cookie to attack can finish
+  the job.
+
+## 0.2.60
+
+- **The card you hover is now shown whole in the side panel.** On a short
+  window — or with the panel size turned up — the art was drawn taller than the
+  slot it sits in and the bottom of the card was cut off until you scrolled.
+  The card is now sized to the space it actually has, so it fits at any window
+  size and at every panel size.
+
+## 0.2.59
+
+- **The title screen now shows which version you are playing.** It sits in the
+  top-left corner, opposite the profile chip, so it is there to quote when
+  reporting a problem.
+
 ## 0.2.58
 
 - **Puny Strength no longer crashes the game.** If the Cookie it revives from

@@ -13,12 +13,32 @@ quirks of whoever scored it during evolution.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from braverse import (STARTER_DECKS, Game, HeuristicAgent, SeatedAgent,
                       default_db, validate)
+from braverse.deckfile import read_any, read_pool
 from braverse.console import utf8_output
+
+
+def load_decks(entries: list[str]) -> list[tuple[str, list[str], list[str]]]:
+    """Resolve ``--decks`` into lists, expanding a folder into everything in it.
+
+    A folder is how the tournament pool is compared in one word
+    (``--decks decks/meta st9_sea_fairy``), and it is the same expansion
+    ``evolve_deck.py --gauntlet`` does, so the two commands take the same
+    argument.
+    """
+    out: list[tuple[str, list[str], list[str]]] = []
+    for entry in entries:
+        if entry not in STARTER_DECKS and Path(entry).is_dir():
+            pool = read_pool(entry)
+            if not pool:
+                raise SystemExit(f"no decklists in {entry}")
+            out.extend(pool)
+            continue
+        out.append(load_deck(entry))
+    return out
 
 
 def load_deck(name: str) -> tuple[str, list[str], list[str]]:
@@ -26,10 +46,11 @@ def load_deck(name: str) -> tuple[str, list[str], list[str]]:
     if name in STARTER_DECKS:
         return name, list(STARTER_DECKS[name]), []
     path = Path(name)
-    text = path.read_text(encoding="utf-8")
-    # evolve_deck.py writes a human-readable block, then a JSON blob.
-    blob = json.loads(text[text.index("{", text.rindex("\n\n")):])
-    return path.stem, list(blob["deck"]), list(blob.get("extra") or [])
+    # `read_any` reads the human-readable-plus-JSON format evolve_deck.py
+    # writes, and falls back to the importer for a list somebody exported from
+    # the deck builder or wrote out by hand.
+    deck, extra = read_any(path)
+    return path.stem, deck, extra
 
 
 def pilot_factory(kind: str, checkpoint: str, db):
@@ -76,7 +97,7 @@ def main() -> None:
     args = parser.parse_args()
 
     db = default_db()
-    decks = [load_deck(name) for name in args.decks]
+    decks = load_decks(args.decks)
     for name, deck, extra in decks:
         report = validate(deck, db, extra=extra)
         if not report.ok:

@@ -12,14 +12,15 @@
 # Kept in step with "Current Version" at the top of README.md. Written into
 # every replay file, so a recording that will not play back can say which build
 # made it.
-__version__ = "0.2.58"
+__version__ = "0.2.66"
 
 from .agents import HeuristicAgent, RandomAgent, SeatedAgent
 from .cards import CardDB, CardDef, default_db, load_cards
 from .config import DEFAULT as DEFAULT_RULES, RulesConfig
 from .deckgen import DeckEvolver, DeckGenConfig, implemented_pool, set_pool
-from .decks import (STARTER_DECKS, STARTER_SET_IDS, build_starter_deck,
-                    starter_deck, validate)
+from .decks import (DERIVED_DECK_NAMES, STARTER_DECKS, STARTER_SET_IDS,
+                    TRANSCRIBED_DECKS, build_starter_deck, starter_deck,
+                    validate)
 from .effects import Ctx, Trigger, effect, implemented_cards
 from .engine import Game
 from .enums import CardType, Color, Marker, Phase, Zone
@@ -55,8 +56,8 @@ __all__ = [
     "Game", "GameState", "PlayerState", "Cookie",
     "HeuristicAgent", "RandomAgent", "SeatedAgent",
     "CardDB", "CardDef", "default_db", "load_cards",
-    "STARTER_DECKS", "STARTER_SET_IDS", "build_starter_deck", "starter_deck",
-    "validate",
+    "STARTER_DECKS", "STARTER_SET_IDS", "TRANSCRIBED_DECKS",
+    "DERIVED_DECK_NAMES", "build_starter_deck", "starter_deck", "validate",
     "DeckEvolver", "DeckGenConfig", "implemented_pool", "set_pool", "Encoder",
     "Ctx", "Trigger", "effect", "implemented_cards",
     "RulesConfig", "DEFAULT_RULES",

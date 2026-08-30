@@ -1,0 +1,140 @@
+# generation: 0
+# score: 0.7
+# mean: 0.3792
+
+COOKIE (35)
+  4x BS11-092   Licorice Cookie                  LV2 HP4
+  4x BS11-094   Jam Skelecake Grunt              LV1 HP3
+  4x BS11-104   Cake Witch                       LV1 HP2
+  4x BS11-111   Mold Dough Cookie                LV2 HP4
+  3x BS11-102   Cake Warrior                     LV1 HP2
+  3x BS11-105   Red Velvet Dragon                LV3 HP5
+  3x BS11-113   Venom Dough Cookie               LV2 HP4
+  2x BS11-097   Cream Jelly Worm                 LV1 HP3
+  2x BS11-098   Cream Skelecake Archer           LV1 HP2
+  2x BS11-103   Skelecake Bomber                 LV1 HP2
+  2x BS11-114   Pomegranate Cookie               LV1 HP2
+  1x BS11-099   Cream Roll Hog Rider             LV1 HP2
+  1x BS11-115   Dark Enchantress Cookie          LV3 HP6
+FLIP (16)
+  4x P-156      Black Sapphire Cookie            LV1 HP1
+  3x BS11-100   Agar Agar Cookie                 LV1 HP1
+  2x BS11-095   Matcha Cookie                    LV1 HP1
+  2x BS11-096   Butter Roll Cookie               LV1 HP1
+  2x BS11-101   Schwarzwälder                    LV1 HP1
+  2x P-162      Candy Apple Cookie               LV1 HP1
+  1x BS11-093   Poison Mushroom Cookie           LV1 HP1
+ITEM (5)
+  4x BS11-107   Oven of Burning Fate             
+  1x BS11-109   Emblem of Darkness               
+TRAP (2)
+  1x BS11-106   World-reflecting Mirrors         
+  1x BS11-110   Draining Magic Circle            
+STAGE (2)
+  2x BS11-108   Dark Enchantress's Castle        
+
+legal: True  size 60  flips 16
+
+EXTRA deck
+EXTRA (6)
+  4x BS10-073   White Lily Cookie                LV3 HP1
+  2x BS8-069    Peak of Apathy                   LV2 HP4
+
+{
+ "deck": [
+  "BS11-107",
+  "BS11-095",
+  "BS11-105",
+  "BS11-107",
+  "BS11-094",
+  "BS11-100",
+  "BS11-100",
+  "BS11-092",
+  "BS11-094",
+  "P-156",
+  "P-162",
+  "BS11-101",
+  "BS11-102",
+  "BS11-092",
+  "BS11-094",
+  "BS11-095",
+  "P-162",
+  "BS11-097",
+  "P-156",
+  "BS11-096",
+  "BS11-096",
+  "BS11-113",
+  "P-156",
+  "BS11-104",
+  "BS11-111",
+  "BS11-111",
+  "BS11-103",
+  "BS11-094",
+  "BS11-107",
+  "BS11-101",
+  "BS11-104",
+  "BS11-100",
+  "BS11-098",
+  "P-156",
+  "BS11-092",
+  "BS11-093",
+  "BS11-105",
+  "BS11-111",
+  "BS11-092",
+  "BS11-098",
+  "BS11-103",
+  "BS11-111",
+  "BS11-113",
+  "BS11-102",
+  "BS11-107",
+  "BS11-097",
+  "BS11-104",
+  "BS11-104",
+  "BS11-109",
+  "BS11-113",
+  "BS11-114",
+  "BS11-099",
+  "BS11-108",
+  "BS11-106",
+  "BS11-105",
+  "BS11-114",
+  "BS11-108",
+  "BS11-115",
+  "BS11-102",
+  "BS11-110"
+ ],
+ "extra": [
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS8-069",
+  "BS8-069"
+ ],
+ "generation": 0,
+ "score": 0.7,
+ "mean": 0.3792,
+ "gauntlet": [
+  "na25_01_green_windarcher",
+  "na25_02_yellow_millennialtree",
+  "na25_03_purple_moonlight",
+  "na25_04_red_hollyberry",
+  "na25_05_red_hollyberry",
+  "na25_06_yellow_millennialtree",
+  "na25_07_red_hollyberry",
+  "na25_08_purple_moonlight",
+  "na25_09_red_hollyberry",
+  "na25_10_purple_moonlight",
+  "na25_11_yellow_millennialtree",
+  "na25_12_yellow_millennialtree",
+  "na25_13_green_windarcher",
+  "na25_14_yellow_millennialtree",
+  "na25_15_yellow_millennialtree",
+  "na25_16_purple_moonlight",
+  "na25_17_purple_moonlight",
+  "na25_18_red_hollyberry"
+ ],
+ "seeded_from": [
+  "MyGreenDeck"
+ ]
+}

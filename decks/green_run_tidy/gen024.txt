@@ -1,0 +1,150 @@
+# generation: 24
+# score: 0.9028
+# mean: 0.8059
+
+COOKIE (24)
+  4x ST8-008    Sugar Swan Cookie                LV2 HP4
+  3x BS6-053    Cherry Ball Cookie               LV1 HP3
+  3x ST8-005    Wind Archer Cookie               LV3 HP6
+  3x ST8-011    Kiwi Cookie                      LV1 HP3
+  2x BS7-050    Rockstar Cookie                  LV1 HP2
+  2x P-044      Almond Cookie                    LV2 HP3
+  1x BS1-071    Pumpkin Pie Cookie               LV3 HP4
+  1x BS10-072   Elder Faerie Cookie              LV2 HP5
+  1x BS11-044   Silverbell Cookie                LV1 HP3
+  1x BS11-053   Mystic Flour Cookie              LV2 HP4
+  1x BS7-080    Peperoncino Cookie               LV2 HP4
+  1x BS8-059    Mystic Flour Cookie              LV3 HP6
+  1x P-095      Tiger Lily Cookie                LV2 HP4
+FLIP (15)
+  3x ST3-007    Sparkling Cookie                 LV3 HP3
+  2x BS2-019    Cheesecake Cookie                LV2 HP2
+  2x BS4-050    Biscuit Giraffe                  LV1 HP1
+  2x ST3-011    Onion Cookie                     LV2 HP2
+  2x ST8-002    Muscle Cookie                    LV2 HP4
+  2x ST8-007    Blue Slushy Cookie               LV1 HP1
+  1x ST8-006    Basil Pesto Cookie               LV3 HP4
+  1x ST8-009    Cucumber Cookie                  LV2 HP3
+ITEM (11)
+  2x BS7-063    Grand Cookie Games Trophy        
+  2x ST8-015    Essence of the Tempest           
+  2x ST8-016    Wind's Grace Earrings            
+  1x BS1-075    Wanderer's Apple Pie             
+  1x BS11-049   Emerald of the Wind              
+  1x P-012      Mischievous Ladybug              
+  1x ST8-013    Windgrass                        
+  1x ST8-014    Cape of the Vanquisher           
+TRAP (8)
+  4x BS7-108    Arena of Glory                   
+  1x BS4-064    Night Raven's Arrow              
+  1x BS8-074    White Flour Fog                  
+  1x BS9-069    Broken Seal                      
+  1x ST8-017    Hindering Darkness               
+STAGE (2)
+  2x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 15
+
+EXTRA deck
+EXTRA (6)
+  4x BS10-073   White Lily Cookie                LV3 HP1
+  2x BS8-069    Peak of Apathy                   LV2 HP4
+
+{
+ "deck": [
+  "P-044",
+  "BS7-108",
+  "BS11-053",
+  "BS7-050",
+  "BS8-059",
+  "BS7-108",
+  "ST8-008",
+  "ST8-016",
+  "ST8-017",
+  "ST8-008",
+  "ST8-015",
+  "ST8-005",
+  "ST8-008",
+  "ST8-011",
+  "BS2-019",
+  "ST8-011",
+  "BS7-108",
+  "BS7-050",
+  "ST3-007",
+  "ST8-005",
+  "ST8-009",
+  "ST3-011",
+  "ST3-011",
+  "BS7-063",
+  "BS4-050",
+  "ST8-013",
+  "ST8-011",
+  "BS4-064",
+  "ST8-007",
+  "BS1-071",
+  "BS6-053",
+  "BS2-019",
+  "BS11-044",
+  "BS4-050",
+  "ST8-014",
+  "BS7-063",
+  "ST3-007",
+  "BS9-069",
+  "P-095",
+  "P-012",
+  "ST8-015",
+  "ST8-006",
+  "ST8-020",
+  "BS8-074",
+  "BS1-075",
+  "BS7-108",
+  "BS11-049",
+  "BS6-053",
+  "BS6-053",
+  "ST8-020",
+  "ST8-002",
+  "ST8-016",
+  "ST3-007",
+  "ST8-008",
+  "BS7-080",
+  "BS10-072",
+  "ST8-002",
+  "P-044",
+  "ST8-005",
+  "ST8-007"
+ ],
+ "extra": [
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS8-069",
+  "BS8-069"
+ ],
+ "generation": 24,
+ "score": 0.9028,
+ "mean": 0.8059,
+ "gauntlet": [
+  "na25_01_green_windarcher",
+  "na25_02_yellow_millennialtree",
+  "na25_03_purple_moonlight",
+  "na25_04_red_hollyberry",
+  "na25_05_red_hollyberry",
+  "na25_06_yellow_millennialtree",
+  "na25_07_red_hollyberry",
+  "na25_08_purple_moonlight",
+  "na25_09_red_hollyberry",
+  "na25_10_purple_moonlight",
+  "na25_11_yellow_millennialtree",
+  "na25_12_yellow_millennialtree",
+  "na25_13_green_windarcher",
+  "na25_14_yellow_millennialtree",
+  "na25_15_yellow_millennialtree",
+  "na25_16_purple_moonlight",
+  "na25_17_purple_moonlight",
+  "na25_18_red_hollyberry"
+ ],
+ "seeded_from": [
+  "_best"
+ ]
+}

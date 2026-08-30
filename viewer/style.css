@@ -122,6 +122,9 @@ body {
 }
 .brand { font-weight: 700; letter-spacing: .2px; }
 .brand span { color: var(--accent); font-weight: 500; }
+/* Only a way home when `Title.markHome` says the menu could stay up. */
+.brand.home { cursor: pointer; }
+.brand.home:hover { color: var(--accent); }
 .turnline { color: var(--dim); flex: 1; }
 .turnline b { color: var(--ink); }
 .controls { display: flex; align-items: center; gap: 8px; }
@@ -615,7 +618,14 @@ body.has-cardback .card.back::after { content: none; }
   width: calc(var(--panel-w) / var(--panel-scale));
   --card-scale: 1;
   display: grid;
-  grid-template-rows: auto minmax(200px, 1fr) auto auto auto minmax(84px, 20%);
+  /* The card slot asks for 200px and gets it on any ordinary window. The
+     second half of that floor is what a short screen needs: 200px is more than
+     the whole panel has once the prompt, the moves and the log have taken
+     theirs, and a floor that cannot yield puts the slot — and the card in it —
+     off the bottom of the screen rather than making it smaller. The percentage
+     is of the panel, which is the height that actually ran out; it only binds
+     when the panel is too short for the printed number. */
+  grid-template-rows: auto minmax(min(200px, 38%), 1fr) auto auto auto minmax(84px, 20%);
   border-left: 1px solid var(--line);
   background: var(--panel);
   min-height: 0;
@@ -720,11 +730,27 @@ body.has-cardback .card.back::after { content: none; }
 .preview.indock {
   position: static; width: auto; padding: 0;
   border: none; box-shadow: none; background: none;
+  /* Full height of the slot, so the art below can be measured against the
+     slot rather than against the window. */
+  height: 100%; min-height: 0;
+  display: flex; flex-direction: column;
 }
 /* Art first and as big as the slot allows, then the words under it. Capping
-   the height rather than the width is what keeps a tall card whole. */
+   the height rather than the width is what keeps a tall card whole — a card is
+   taller than it is wide, so the height is what runs out first.
+   The cap is a share of *the slot*, not of the window. Both other readings are
+   wrong on a real screen: `vh` does not know that the panel above and below the
+   dock has already taken its share, so a short window drew a card taller than
+   the space it had and sliced the bottom off it; and `vh` is not scaled by the
+   panel's `zoom` either, so the same card grew instead of shrinking as the
+   panel was made larger. A percentage is in the dock's own coordinates and is
+   right under both. The printed 400px stays as the ceiling, so a tall window
+   still draws the card at a readable size rather than an enormous one, and the
+   share leaves room for the name and the first lines of text underneath. */
 .preview.indock img {
-  width: auto; max-width: 100%; max-height: min(46vh, 400px);
+  flex: 0 0 auto;
+  width: auto; max-width: 100%; max-height: min(68%, 400px);
+  object-fit: contain;
   margin: 0 auto 9px; border-radius: 6px;
 }
 

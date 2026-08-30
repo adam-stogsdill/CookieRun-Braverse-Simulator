@@ -1,0 +1,107 @@
+# source: topdeck.gg
+# event: Saturday: $11,000 CookieRun: Braverse North America Championship
+# event_date: 2025-12-13
+# standing: 18
+# field: 83
+# record: 5-1
+# archetype: RED
+# retrieved: 2026-08-29
+
+COOKIE (27)
+  4x BS3-009    Wildberry Cookie                 LV2 HP4
+  4x BS3-010    Pitaya Dragon Cookie             LV3 HP5
+  4x BS3-017    Hollyberry Cookie                LV3 HP5
+  3x BS1-006    Mala Sauce Cookie                LV2 HP2
+  3x BS1-012    Wildberry Cookie                 LV3 HP6
+  3x BS3-006    Snapdragon Cookie                LV1 HP2
+  3x BS3-016    Tarte Tatin Cookie               LV1 HP2
+  2x BS1-008    Pomegranate Cookie               LV2 HP5
+  1x BS3-013    Tiger Lily Cookie                LV1 HP2
+FLIP (16)
+  4x BS1-002    Kumiho Cookie                    LV3 HP3
+  4x ST1-001    Princess Cookie                  LV2 HP2
+  4x ST1-013    Adventurer Cookie                LV1 HP1
+  2x BS3-004    Royal Berry Cookie               LV2 HP2
+  2x ST1-004    Carrot Cookie                    LV1 HP1
+ITEM (10)
+  4x BS3-019    Soul Jam: Light of Passion       
+  3x BS1-022    Giant Cherry Bomb                
+  3x BS1-023    Spicy Power Juice                
+TRAP (7)
+  4x ST1-020    Overhydrated Dough Swamp         
+  3x BS2-007    Prickly Cactus Bat               
+
+legal: True  size 60  flips 16
+
+{
+ "deck": [
+  "ST1-013",
+  "ST1-013",
+  "ST1-013",
+  "ST1-013",
+  "ST1-004",
+  "ST1-004",
+  "BS1-022",
+  "BS1-022",
+  "BS1-022",
+  "BS3-017",
+  "BS3-017",
+  "BS3-017",
+  "BS3-017",
+  "BS1-002",
+  "BS1-002",
+  "BS1-002",
+  "BS1-002",
+  "BS1-006",
+  "BS1-006",
+  "BS1-006",
+  "ST1-020",
+  "ST1-020",
+  "ST1-020",
+  "ST1-020",
+  "BS3-010",
+  "BS3-010",
+  "BS3-010",
+  "BS3-010",
+  "BS1-008",
+  "BS1-008",
+  "BS2-007",
+  "BS2-007",
+  "BS2-007",
+  "ST1-001",
+  "ST1-001",
+  "ST1-001",
+  "ST1-001",
+  "BS3-004",
+  "BS3-004",
+  "BS3-006",
+  "BS3-006",
+  "BS3-006",
+  "BS3-019",
+  "BS3-019",
+  "BS3-019",
+  "BS3-019",
+  "BS1-023",
+  "BS1-023",
+  "BS1-023",
+  "BS3-016",
+  "BS3-016",
+  "BS3-016",
+  "BS3-013",
+  "BS1-012",
+  "BS1-012",
+  "BS1-012",
+  "BS3-009",
+  "BS3-009",
+  "BS3-009",
+  "BS3-009"
+ ],
+ "source": "topdeck.gg",
+ "event": "Saturday: $11,000 CookieRun: Braverse North America Championship",
+ "event_date": "2025-12-13",
+ "standing": 18,
+ "field": 83,
+ "record": "5-1",
+ "archetype": "RED",
+ "retrieved": "2026-08-29"
+}

@@ -953,6 +953,36 @@ class Game:
     # combat
     # ------------------------------------------------------------------
     def _do_attack(self, action: A.Attack) -> None:
+        """One battle, and the end of whatever it granted.
+
+        A battle is a unit with a *close*, not just an opening. Protection
+        printed as "during this battle" was only ever cleared in the Active
+        Phase, which is the wrong clock by a whole turn: the Cookie a trap
+        saved from the first swing was still unkillable by the second, the
+        third, and everything else the attacker had that turn. The clean-up is
+        in a `finally` because a battle has half a dozen ways to end early —
+        the target bounced, the attacker removed, the game won — and every one
+        of them ends the battle just as much as running to the last line does.
+        """
+        try:
+            self._battle(action)
+        finally:
+            self._expire_battle_protection()
+
+    def _expire_battle_protection(self) -> None:
+        """Drop the flags whose printed duration is the battle just finished.
+
+        Only the ones the cards scope that way: "during this battle" (ST3-020
+        Divine Light Crystal, BS5-081 Squid Ink Cookie). Anything printed
+        "until the end of your opponent's turn" — the damage caps, the effect
+        immunities — is on the turn clock and is still cleared in the Active
+        Phase, which is where its duration ends.
+        """
+        for player in self.state.players:
+            for cookie in player.battle:
+                cookie.hp_cannot_reach_zero = False
+
+    def _battle(self, action: A.Attack) -> None:
         state = self.state
         player = state.current
         defender = state.opponent_of(player.index)

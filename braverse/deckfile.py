@@ -51,6 +51,57 @@ def read_decklist(path: str | Path) -> tuple[list[str], list[str]]:
     return list(blob["deck"]), list(blob.get("extra") or [])
 
 
+def read_any(path: str | Path, db: CardDB | None = None
+             ) -> tuple[list[str], list[str]]:
+    """``(deck, extra)`` from *any* decklist file a person might point at.
+
+    ``read_decklist`` reads the format we write, and raises on anything else —
+    which is what a person gets for pointing `--seed-deck` at the list they
+    exported from the deck builder, or typed by hand, or was mailed by a
+    friend. Those are the same lists `parse_decklist` already reads, so fall
+    back to it rather than failing: a file that names 60 cards is a deck
+    whatever shape it names them in.
+
+    Cards it cannot place are dropped the way the importer drops them, so a
+    caller that cares about the size should `validate` what comes back.
+    """
+    path = Path(path)
+    try:
+        return read_decklist(path)
+    except (ValueError, KeyError, json.JSONDecodeError):
+        pass
+    from .cards import default_db
+    imported = parse_decklist(path.read_text(encoding="utf-8"), db or default_db())
+    return imported.deck, imported.extra
+
+
+META_DIR = "decks/meta"       # tournament lists, one folder, read as a set
+
+
+def read_pool(directory: str | Path = META_DIR) -> list[tuple[str, list[str], list[str]]]:
+    """Every decklist in one folder, as ``(name, deck, extra)``, name-sorted.
+
+    A folder of lists is a different thing from a folder of decks you might
+    pick one of: it is a *pool*, meant to be trained or evolved against as a
+    set, which is why it is read in one call and why the order is fixed. Sorted
+    by name, because a training run seeded the same way must see the same decks
+    in the same order or it is not the run it says it is.
+
+    Files that are not ours are skipped rather than raising, the way
+    ``play_server.available_decklists`` skips them: a folder people drop lists
+    into will eventually have a README or a half-written file in it.
+    """
+    pool: list[tuple[str, list[str], list[str]]] = []
+    for path in sorted(Path(directory).glob("*.txt")):
+        try:
+            deck, extra = read_decklist(path)
+        except Exception:
+            continue
+        if len(deck) >= 10:
+            pool.append((path.stem, deck, extra))
+    return pool
+
+
 # ---------------------------------------------------------------------------
 # reading a decklist somebody else wrote
 # ---------------------------------------------------------------------------
@@ -271,7 +322,7 @@ def write_deck(path: str | Path, deck: Sequence[str], db: CardDB,
     extra = list(extra or [])
     readable = describe(deck, db)
     if extra:
-        readable += "\n\nEXTRA deck\n" + describe(extra, db)
+        readable += "\n\nEXTRA deck\n" + describe(extra, db, legality=False)
     blob = json.dumps({"deck": list(deck), **({"extra": extra} if extra else {}),
                        **meta}, indent=1)
     # UTF-8 and LF explicitly: card names are not ASCII, and a decklist

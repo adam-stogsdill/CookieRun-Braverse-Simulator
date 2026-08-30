@@ -1,0 +1,156 @@
+# generation: 35
+# score: 0.7917
+# mean: 0.706
+
+COOKIE (30)
+  4x BS6-053    Cherry Ball Cookie               LV1 HP3
+  3x ST3-010    Aloe Cookie                      LV2 HP3
+  2x BS8-059    Mystic Flour Cookie              LV3 HP6
+  2x ST8-011    Kiwi Cookie                      LV1 HP3
+  1x BS1-056    Moon Rabbit Cookie               LV2 HP3
+  1x BS1-062    Tea Knight Cookie                LV1 HP3
+  1x BS1-066    Lillybell Cookie                 LV2 HP4
+  1x BS10-059   Yeast Spores                     LV1 HP3
+  1x BS10-069   White Lily Cookie                LV2 HP4
+  1x BS11-044   Silverbell Cookie                LV1 HP3
+  1x BS11-053   Mystic Flour Cookie              LV2 HP4
+  1x BS3-050    Matcha Cookie                    LV2 HP4
+  1x BS5-048    Bellflower Cookie                LV1 HP3
+  1x BS5-063    Hero Cookie                      LV3 HP5
+  1x BS7-046    Green Tea Mousse Cookie          LV2 HP4
+  1x BS7-050    Rockstar Cookie                  LV1 HP2
+  1x BS7-080    Peperoncino Cookie               LV2 HP4
+  1x BS8-054    Leek Cookie                      LV1 HP1
+  1x BS8-062    Shrimp Dumpling King             LV2 HP4
+  1x P-095      Tiger Lily Cookie                LV2 HP4
+  1x ST8-004    Red Panna Cotta Cookie           LV3 HP5
+  1x ST8-005    Wind Archer Cookie               LV3 HP6
+  1x ST8-008    Sugar Swan Cookie                LV2 HP4
+FLIP (12)
+  3x BS4-050    Biscuit Giraffe                  LV1 HP1
+  3x ST3-011    Onion Cookie                     LV2 HP2
+  2x ST3-007    Sparkling Cookie                 LV3 HP3
+  1x BS2-019    Cheesecake Cookie                LV2 HP2
+  1x BS6-056    Cappuccino Cookie                LV1 HP1
+  1x ST3-014    Angel Cookie                     LV1 HP1
+  1x ST8-007    Blue Slushy Cookie               LV1 HP1
+ITEM (6)
+  2x BS1-075    Wanderer's Apple Pie             
+  2x BS7-063    Grand Cookie Games Trophy        
+  1x BS11-049   Emerald of the Wind              
+  1x BS3-068    Elder Faerie's Sword             
+TRAP (10)
+  4x ST8-018    Piercing Arrow of Purity         
+  2x BS9-069    Broken Seal                      
+  2x ST3-020    Divine Light Crystal             
+  1x BS4-064    Night Raven's Arrow              
+  1x ST3-019    Supreme Whipped Cream            
+STAGE (2)
+  1x BS10-067   Mossy Silver Bridge              
+  1x ST8-020    Dark Enchantress Laboratory      
+
+legal: True  size 60  flips 12
+
+EXTRA deck
+EXTRA (6)
+  4x BS10-073   White Lily Cookie                LV3 HP1
+  2x BS8-069    Peak of Apathy                   LV2 HP4
+
+{
+ "deck": [
+  "BS10-059",
+  "BS3-050",
+  "BS11-053",
+  "BS7-050",
+  "BS8-059",
+  "BS8-059",
+  "ST3-010",
+  "BS6-053",
+  "ST3-010",
+  "BS7-046",
+  "ST8-020",
+  "BS1-066",
+  "BS10-069",
+  "BS6-056",
+  "ST8-011",
+  "BS1-056",
+  "ST3-011",
+  "ST3-007",
+  "ST3-007",
+  "ST8-005",
+  "BS8-054",
+  "ST3-011",
+  "ST3-011",
+  "BS7-063",
+  "BS4-050",
+  "BS4-050",
+  "ST8-011",
+  "BS4-064",
+  "ST8-007",
+  "ST3-014",
+  "BS6-053",
+  "BS2-019",
+  "BS11-044",
+  "BS4-050",
+  "BS5-048",
+  "BS7-063",
+  "BS10-067",
+  "BS3-068",
+  "P-095",
+  "ST3-010",
+  "BS8-062",
+  "BS1-062",
+  "BS1-075",
+  "ST8-004",
+  "BS1-075",
+  "BS9-069",
+  "BS9-069",
+  "BS11-049",
+  "BS6-053",
+  "ST3-020",
+  "ST3-020",
+  "ST8-018",
+  "ST8-018",
+  "ST8-018",
+  "ST8-018",
+  "ST3-019",
+  "BS7-080",
+  "BS5-063",
+  "BS6-053",
+  "ST8-008"
+ ],
+ "extra": [
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS10-073",
+  "BS8-069",
+  "BS8-069"
+ ],
+ "generation": 35,
+ "score": 0.7917,
+ "mean": 0.706,
+ "gauntlet": [
+  "na25_01_green_windarcher",
+  "na25_02_yellow_millennialtree",
+  "na25_03_purple_moonlight",
+  "na25_04_red_hollyberry",
+  "na25_05_red_hollyberry",
+  "na25_06_yellow_millennialtree",
+  "na25_07_red_hollyberry",
+  "na25_08_purple_moonlight",
+  "na25_09_red_hollyberry",
+  "na25_10_purple_moonlight",
+  "na25_11_yellow_millennialtree",
+  "na25_12_yellow_millennialtree",
+  "na25_13_green_windarcher",
+  "na25_14_yellow_millennialtree",
+  "na25_15_yellow_millennialtree",
+  "na25_16_purple_moonlight",
+  "na25_17_purple_moonlight",
+  "na25_18_red_hollyberry"
+ ],
+ "seeded_from": [
+  "MyGreenDeck"
+ ]
+}

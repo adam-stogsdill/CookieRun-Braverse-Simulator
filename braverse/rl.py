@@ -370,8 +370,16 @@ class Trainer:
         ``unseen_decks`` scores on freshly generated legal decks built from the
         whole playable pool — a generalisation test, since the policy encodes
         card *stats and abilities* rather than card identity.
+
+        A trainer holding a *pool* is scored across that pool rather than on
+        one pair out of it. Two decks is the fixed match-up this started as and
+        stays exactly that; more than two means the pool was the point, and a
+        number measured on `decks[0]` vs `decks[-1]` would be a report on two
+        of the eighteen decks the run actually trained against.
         """
         held_out = None
+        if not unseen_decks and len(self.decks) > 2:
+            held_out = self.decks
         if unseen_decks:
             from .deckgen import DeckEvolver, DeckGenConfig, implemented_pool
             maker = DeckEvolver(implemented_pool(self.db), [],

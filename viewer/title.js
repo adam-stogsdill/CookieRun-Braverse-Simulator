@@ -21,7 +21,16 @@ const Title = {
     Title.on = true;
     if (typeof showTab === "function") showTab("play");
     el("#title").classList.remove("hidden");
+    Title.stamp();
     Title.hideOver();
+  },
+
+  /* The build, in the top-left corner. `state.build` is whatever version the
+   * server named on the last answer it gave — the page holds no copy of its
+   * own, so a stale tab shows the version it was served, which is exactly what
+   * makes the mismatch banner readable. Empty until the first answer lands. */
+  stamp() {
+    setText(el("#title-version"), state.build ? "v" + state.build : "");
   },
 
   hide() {
@@ -30,6 +39,20 @@ const Title = {
   },
 
   hideOver() { el("#gameover").classList.add("hidden"); },
+
+  /* The brand in the header is the way home, and it is offered only when the
+   * menu could actually stay up. There is no route that abandons a match, so
+   * a title screen raised over a game in progress — or over a room, which has
+   * its own Leave button — would be pulled straight back off by the next
+   * `sync`, which reads as the click having done nothing. `ready` is that
+   * question, asked once per poll; the class is what makes it look clickable. */
+  markHome(ready) {
+    Title.homeReady = !!ready;
+    const brand = el(".brand");
+    if (!brand) return;
+    brand.classList.toggle("home", Title.homeReady);
+    brand.title = Title.homeReady ? "Back to the title screen" : "";
+  },
 
   /* Open the set-up dialog with the decisions this menu entry has already
    * taken. Deck choices are left alone: they are whatever was last picked, and
@@ -62,6 +85,8 @@ const Title = {
      * view back up with it, which is the deck builder closing the instant it
      * is opened. */
     const elsewhere = typeof onPlayTab === "function" && !onPlayTab();
+    if (Title.on) Title.stamp();   // the first poll is often what names it
+    Title.markHome(snap.idle || snap.over ? !waiting : false);
     if (snap.idle && !waiting && !Title.on && !elsewhere) Title.show();
     if ((waiting || (!snap.idle && !snap.over)) && Title.on) Title.hide();
     // A finished match asks its question once the last scene has played out;
@@ -109,6 +134,11 @@ const Title = {
     state.announced = false;
     poll();
   },
+};
+
+el(".brand").onclick = () => {
+  if (!Title.homeReady || Title.on) return;
+  Title.show();
 };
 
 el("#title-bot").onclick = () => Title.openSetup(["human", "heuristic"]);
