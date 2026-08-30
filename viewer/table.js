@@ -130,7 +130,7 @@ const byId = (list, id) => list.find((x) => x.id === id) || list[0];
 /* ----------------------------------------------------------- persistence */
 function loadKit() {
   try {
-    const saved = JSON.parse(localStorage.getItem(KIT_KEY) || "null");
+    const saved = JSON.parse(Prefs.get(KIT_KEY) || "null");
     // Spread over the defaults so a kit saved by an older build, or one naming
     // a design that has since been renamed, still opens on something valid.
     return saved ? { ...DEFAULT_KIT, ...saved } : { ...DEFAULT_KIT };
@@ -140,9 +140,7 @@ function loadKit() {
 }
 
 function saveKit() {
-  try {
-    localStorage.setItem(KIT_KEY, JSON.stringify(kit));
-  } catch (err) { /* private browsing: the kit just will not survive a refresh */ }
+  Prefs.set(KIT_KEY, JSON.stringify(kit));
 }
 
 const kit = loadKit();
@@ -238,6 +236,15 @@ function renderTableKit() {
   renderSeatKit("me");
   renderSeatKit("opp");
 }
+
+/* Somebody else signed in: their sleeves and mats, on the board and on the
+ * racks. `loadKit` rather than the saved object itself, so a kit written by an
+ * older build still lands on something valid. */
+Prefs.watch(() => {
+  Object.assign(kit, loadKit());
+  applyKit();
+  renderTableKit();
+});
 
 el("#kit-reset").onclick = () => {
   Object.assign(kit, DEFAULT_KIT);

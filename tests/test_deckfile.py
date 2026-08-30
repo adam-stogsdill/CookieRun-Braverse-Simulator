@@ -117,6 +117,27 @@ def test_a_pool_is_every_list_in_one_folder_in_a_fixed_order(db, tmp_path):
     assert all(extra == [] for _, _, extra in pool)
 
 
+def test_a_recursive_pool_is_the_whole_tree_read_once(db, tmp_path):
+    """`--deck-pool decks --deck-pool-subfolders`: every list under a folder.
+
+    Two things are pinned. A list in a subfolder is named by its path, because
+    two evolution runs both ending in `_best.txt` are two different decks and a
+    pool that calls them the same thing cannot say which one it trained on. And
+    the same 60 cards saved twice are read once — a folder collected over time
+    is full of copies, and left in, each one is another share of the training
+    games spent on one deck.
+    """
+    st9, st8 = starter_deck(db, "ST9"), starter_deck(db, "ST8")
+    (tmp_path / "run").mkdir()
+    write_deck(tmp_path / "loose.txt", st9, db)
+    write_deck(tmp_path / "run" / "gen000.txt", st8, db)
+    write_deck(tmp_path / "run" / "gen001.txt", st8, db)     # unchanged copy
+
+    assert [name for name, _, _ in read_pool(tmp_path)] == ["loose"]
+    names = [name for name, _, _ in read_pool(tmp_path, recursive=True)]
+    assert names == ["loose", "run/gen000"]
+
+
 def test_the_tournament_pool_on_disk_is_legal_and_reachable(db):
     """The lists imported from topdeck.gg, checked as decks rather than files.
 

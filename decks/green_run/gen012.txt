@@ -1,45 +1,42 @@
 # generation: 12
-# score: 0.75
-# mean: 0.5698
+# score: 0.8
+# mean: 0.6542
 
-COOKIE (24)
-  4x ST8-011    Kiwi Cookie                      LV1 HP3
+COOKIE (26)
+  3x ST3-010    Aloe Cookie                      LV2 HP3
+  3x ST8-011    Kiwi Cookie                      LV1 HP3
+  2x BS2-018    Candlelight Cookie               LV1 HP3
+  2x BS3-061    Silverbell Cookie                LV1 HP2
+  2x BS4-048    Mint Choco Cookie                LV1 HP3
   2x BS5-056    Longan Dragon Cookie             LV3 HP5
   2x BS5-063    Hero Cookie                      LV3 HP5
-  2x BS7-058    Schwarzwälder                    LV2 HP4
+  2x BS7-052    Vampire Cookie                   LV3 HP6
+  2x BS7-080    Peperoncino Cookie               LV2 HP4
   2x BS8-059    Mystic Flour Cookie              LV3 HP6
-  2x ST3-010    Aloe Cookie                      LV2 HP3
   2x ST8-010    Cookiemals                       LV1 HP2
-  1x BS1-061    Peach Cookie                     LV2 HP4
-  1x BS10-057   Churro Cookie                    LV3 HP3
-  1x BS3-055    White Lily Cookie                LV3 HP5
-  1x BS4-059    Cookiemals                       LV1 HP1
-  1x BS5-058    Ginseng Cookie                   LV1 HP2
-  1x BS6-059    Apple Cookie                     LV2 HP3
-  1x ST3-001    Muscle Cookie                    LV2 HP2
-  1x ST8-005    Wind Archer Cookie               LV3 HP6
-FLIP (16)
-  4x BS4-050    Biscuit Giraffe                  LV1 HP1
-  4x ST3-011    Onion Cookie                     LV2 HP2
-  3x ST8-007    Blue Slushy Cookie               LV1 HP1
+  1x BS10-051   Nougat Cookie                    LV2 HP5
+  1x BS3-065    Herb Cookie                      LV1 HP2
+FLIP (8)
+  2x BS4-050    Biscuit Giraffe                  LV1 HP1
   2x ST3-007    Sparkling Cookie                 LV3 HP3
-  1x P-067      Sour Belt Cookie                 LV1 HP3
-  1x P-113      Green Tea Mousse Cookie          LV2 HP3
-  1x ST3-008    Spinach Cookie                   LV1 HP1
-ITEM (8)
+  2x ST3-011    Onion Cookie                     LV2 HP2
+  2x ST8-007    Blue Slushy Cookie               LV1 HP1
+ITEM (14)
   4x BS1-075    Wanderer's Apple Pie             
+  3x P-012      Mischievous Ladybug              
+  3x ST3-018    Parsley Tea of Invigoration      
   2x ST3-016    Ancient Healer's Gaze            
-  1x P-012      Mischievous Ladybug              
-  1x ST8-013    Windgrass                        
+  1x BS4-062    Wind Gems                        
+  1x P-084      Magic Lettering Pens             
 TRAP (11)
+  4x BS9-069    Broken Seal                      
   4x ST8-018    Piercing Arrow of Purity         
-  3x ST3-020    Divine Light Crystal             
-  2x BS9-069    Broken Seal                      
-  2x ST3-019    Supreme Whipped Cream            
+  2x ST3-020    Divine Light Crystal             
+  1x ST3-019    Supreme Whipped Cream            
 STAGE (1)
-  1x ST3-022    Guardian Tree's Blessing         
+  1x ST8-020    Dark Enchantress Laboratory      
 
-legal: True  size 60  flips 16
+legal: True  size 60  flips 8
 
 EXTRA deck
 EXTRA (6)
@@ -49,65 +46,65 @@ EXTRA (6)
 {
  "deck": [
   "BS5-063",
+  "BS4-062",
+  "BS5-056",
+  "BS5-056",
+  "BS8-059",
+  "BS8-059",
+  "ST3-010",
+  "ST3-018",
+  "ST3-010",
+  "ST3-010",
+  "ST8-010",
+  "ST8-010",
+  "ST8-011",
+  "ST8-011",
+  "ST8-011",
+  "BS3-061",
+  "BS2-018",
+  "ST3-007",
+  "ST3-007",
+  "BS3-061",
+  "ST8-020",
   "BS5-063",
-  "BS5-056",
-  "BS5-056",
-  "BS8-059",
-  "BS8-059",
-  "ST8-005",
-  "ST3-010",
-  "ST3-008",
-  "ST3-010",
-  "ST8-010",
-  "ST8-010",
-  "ST8-011",
-  "ST8-011",
-  "ST8-011",
-  "ST8-011",
-  "ST3-011",
-  "ST3-007",
-  "ST3-001",
-  "ST3-007",
-  "ST3-011",
-  "BS1-061",
   "ST3-011",
   "ST3-011",
+  "BS3-065",
   "BS4-050",
   "BS4-050",
-  "BS4-050",
-  "BS4-050",
-  "P-067",
+  "BS2-018",
   "ST8-007",
+  "BS7-080",
   "ST8-007",
-  "ST8-007",
-  "BS7-058",
   "ST3-016",
-  "BS7-058",
   "ST3-016",
-  "ST3-022",
-  "BS5-058",
-  "ST8-013",
+  "BS7-080",
+  "BS7-052",
   "P-012",
-  "P-113",
+  "P-012",
+  "P-012",
+  "BS7-052",
+  "ST3-018",
+  "ST3-018",
   "BS1-075",
   "BS1-075",
   "BS1-075",
   "BS1-075",
   "BS9-069",
   "BS9-069",
+  "BS9-069",
+  "BS9-069",
   "ST3-020",
-  "BS6-059",
-  "ST3-020",
+  "P-084",
+  "BS10-051",
   "ST3-020",
   "ST8-018",
   "ST8-018",
   "ST8-018",
   "ST8-018",
   "ST3-019",
-  "ST3-019",
-  "BS4-059",
-  "BS3-055",
-  "BS10-057"
+  "BS4-048",
+  "BS4-048"
  ],
  "extra": [
   "BS10-073",
@@ -118,8 +115,8 @@ EXTRA (6)
   "BS8-069"
  ],
  "generation": 12,
- "score": 0.75,
- "mean": 0.5698,
+ "score": 0.8,
+ "mean": 0.6542,
  "gauntlet": [
   "na25_01_green_windarcher",
   "na25_02_yellow_millennialtree",

@@ -116,6 +116,52 @@ def test_the_picture_can_be_changed_and_is_checked(base):
     assert res["active"]["avatar"] == "card:ST9-001"
 
 
+def test_settings_belong_to_the_player_and_survive_the_file(base):
+    """Two players on one machine, one browser: the board follows the person.
+
+    The settings are opaque to the server on purpose — the viewer owns what
+    "braverse.sizes" means — so what is pinned here is that they are kept
+    apart, come back out of the sealed file, and reach the browser inside the
+    open profile rather than needing a route of their own.
+    """
+    call(base, "/api/profiles/new", {"name": "Ada L"})
+    _, res = call(base, "/api/profile/settings",
+                  {"settings": {"sound": "0", "braverse.sizes": '{"card": 120}'}})
+    assert res["active"]["settings"]["sound"] == "0"
+
+    call(base, "/api/profiles/new", {"name": "Bo K"})
+    _, res = call(base, "/api/profiles", None)
+    assert res["active"]["settings"] == {}, "a new player starts on their own board"
+
+    call(base, "/api/profiles/open", {"slug": "ada-l"})
+    _, res = call(base, "/api/profiles", None)
+    assert res["active"]["settings"] == {"sound": "0",
+                                         "braverse.sizes": '{"card": 120}'}
+
+
+def test_a_setting_is_merged_not_replaced(base):
+    """A browser sends the settings it knows about, which is not all of them.
+
+    An older tab — or a page loaded before a build that added a slider — would
+    otherwise wipe the setting it has never heard of every time its owner
+    moved something else.
+    """
+    call(base, "/api/profiles/new", {"name": "Ada L"})
+    call(base, "/api/profile/settings", {"settings": {"sound": "0",
+                                                      "flipOpponent": "1"}})
+    _, res = call(base, "/api/profile/settings", {"settings": {"sound": "1"}})
+    assert res["active"]["settings"] == {"sound": "1", "flipOpponent": "1"}
+
+    # And null is how one is taken back out again.
+    _, res = call(base, "/api/profile/settings", {"settings": {"flipOpponent": None}})
+    assert res["active"]["settings"] == {"sound": "1"}
+
+
+def test_settings_need_a_profile_open(base):
+    code, res = call(base, "/api/profile/settings", {"settings": {"sound": "0"}})
+    assert code == 409 and "no profile" in res["error"]
+
+
 def test_the_pane_needs_a_profile_open(base):
     code, res = call(base, "/api/profile/games/keep", {"id": "x", "kept": True})
     assert code == 409 and "no profile" in res["error"]

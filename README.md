@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.66
+Current Version: 0.2.71
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -88,6 +88,7 @@ viewer/               its browser front end (no build step, no dependencies, no 
                         app.js/style.css the table, builder.* the deck builder,
                         table.* the sleeve and playmat tab,
                         sizing.js how big the board is drawn,
+                        prefs.js where a setting is kept (browser, or profile),
                         replays.* the replay shelf
 selfplay.py           bulk self-play harness and win-rate report
 train_rl.py           train / evaluate the RL agent
@@ -1609,6 +1610,20 @@ purpose, and leaves the win itself alone — deleting a log is not a way to
 un-play a game. Every game on the list plays back through the same **Watch** the
 replay shelf uses.
 
+**Your settings come with you.** The board sizes, the sleeves and playmats, the
+sound, the confirm level and its hold length, the flipped opponent and the name
+you play online under are sealed into the profile along with the record. Sign in
+and the board becomes yours immediately — the sliders, the mats and the sound
+change under you rather than after a refresh — which is the point on a machine a
+household shares. A profile that has never saved any settings adopts whatever is
+set up in front of it, so a first sign-in never wipes the board you just built,
+and with nobody signed in the settings stay in the browser exactly as they
+always did. `viewer/prefs.js` is the whole of it on the browser side: it is the
+only file that knows both `localStorage` and the profile exist, and the modules
+that own each setting go through it. What a setting *means* stays the viewer's
+business — the server stores opaque strings, bounded in `clean_settings` because
+they come out of a browser and go back into one.
+
 The picture is either a card's art — any card in `card_images/` — or an image of
 your own, shrunk to 128 px in the browser before it is stored, so a profile stays
 a few kilobytes rather than carrying a photo around inside it.
@@ -2482,6 +2497,20 @@ decks, because a number from `decks[0]` vs `decks[-1]` would be a report on two
 of the eighteen. `evolve_deck.py --gauntlet` takes the same folder, so a deck
 can be evolved against the field people actually brought instead of against two
 starter lists.
+
+`--deck-pool-subfolders` reads the folder's subfolders too, so `--deck-pool
+decks --deck-pool-subfolders` trains on everything under `decks/` — the
+tournament lists, the evolution runs, the hand-built decks — rather than only
+the loose files at the top. A list in a subfolder is named by its path
+(`green_run/gen012`), because two runs both ending in a `_best.txt` are two
+different decks, and identical lists are read once: a folder collected over
+time holds the same 60 cards under several names, and left in, each copy is
+another share of the training games spent on one deck. Be deliberate about it
+rather than reaching for it by default — an evolution run contributes a hundred
+near-identical generations of one archetype, so "every list on disk" is a pool
+weighted towards whatever was evolved most recently, not a wider field. A
+folder of distinct lists is the better pool; the flag is there for when the
+tree is one.
 
 #### Trying to beat them, and not managing it
 

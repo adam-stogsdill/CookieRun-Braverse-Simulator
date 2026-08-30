@@ -53,6 +53,10 @@ const Profile = {
   },
 
   draw() {
+    // Every path that changes who is signed in ends here, so this is the one
+    // place settings have to be handed over — `Prefs.owner` does nothing while
+    // the same player stays signed in.
+    Prefs.owner(Profile.me);
     Profile.drawChip();
     if (el("#profile").open) Profile.drawPane();
     if (el("#profiles").open) Profile.drawChooser();

@@ -7,7 +7,7 @@ from braverse import (STARTER_DECKS, STARTER_SET_IDS, Game, HeuristicAgent,
                       default_db, starter_deck, validate)
 from braverse import actions as A
 from braverse.cost import Cost, plan_payment
-from braverse.enums import CardType, Color, Marker
+from braverse.enums import CardType, Color, Keyword, Marker
 from braverse.engine import BankedUntap
 from braverse.state import CardInstance
 
@@ -2051,3 +2051,24 @@ def test_log_names_cards_with_their_id(db):
                             line[match.end():]), line
             named += 1
     assert named > 20, "the game logged almost nothing; the test proves little"
+
+
+def test_the_powerpuff_promos_keep_their_arena_subtype(db):
+    """P-103/P-104/P-105 print the 【Arena】 badge; the dump's column is blank.
+
+    Read off the scans in `card_images/` — the badge sits in the footer beside
+    the card number. It is a filter other cards select on, so losing it is not
+    cosmetic: nothing that plays an 【Arena】 Cookie out of the support area
+    could ever pick Buttercup, which is the only way its own skill fires.
+    """
+    from braverse.cards import _MISSING_ARENA
+
+    assert _MISSING_ARENA == {"P-103", "P-104", "P-105"}
+    for base_id in _MISSING_ARENA:
+        assert Keyword.ARENA in db[base_id].keywords, base_id
+    # Blossom's attack asks for "your *other* 【Arena】 Cookies", which only
+    # reads as printed if Blossom is one itself.
+    assert "other 【Arena】" in db["P-103"].attack_text
+    # The two promos dealt beside them carry no badge and must stay untyped.
+    assert Keyword.ARENA not in db["P-101"].keywords
+    assert Keyword.ARENA not in db["P-102"].keywords

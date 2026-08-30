@@ -2839,6 +2839,17 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 session.profile.avatar = picked
                 session.save()
+            elif path == "/api/profile/settings":
+                # The viewer's preferences, kept with the player rather than
+                # with the browser. Merged, never replaced — see
+                # `Profile.remember` — and handed straight back inside the
+                # active profile, so nothing has to re-fetch.
+                session = PROFILES.active()
+                if session is None:
+                    self._json({"error": "no profile is open"}, 409)
+                    return
+                session.profile.remember(body.get("settings"))
+                session.save()
             elif path == "/api/profile/games/keep":
                 session = PROFILES.active()
                 if session is None:
@@ -2898,7 +2909,7 @@ class Handler(BaseHTTPRequestHandler):
                       "/tutorial.js", "/tutorial.css",
                       "/replays.js", "/replays.css",
                       "/title.js", "/title.css",
-                      "/profile.js", "/profile.css",
+                      "/profile.js", "/profile.css", "/prefs.js",
                       "/netplay.js"):
             self._file(VIEWER / path.lstrip("/"))
         elif path == "/icon.ico":

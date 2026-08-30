@@ -11,7 +11,7 @@
 const Sfx = (() => {
   let ctx = null;
   let master = null;
-  let enabled = localStorage.getItem("sound") !== "0";
+  let enabled = Prefs.get("sound") !== "0";
   let noiseBuffer = null;
 
   function context() {
@@ -181,8 +181,10 @@ const Sfx = (() => {
     get enabled() { return enabled; },
     set enabled(value) {
       enabled = !!value;
-      localStorage.setItem("sound", enabled ? "1" : "0");
+      Prefs.set("sound", enabled ? "1" : "0");
       if (enabled) unlock();
     },
+    /** Re-read the setting without writing it back — for `Prefs.watch`. */
+    reload() { enabled = Prefs.get("sound") !== "0"; },
   };
 })();

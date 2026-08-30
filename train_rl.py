@@ -30,7 +30,7 @@ def deck_pool(args) -> tuple[list[list[str]], str]:
         return ([STARTER_DECKS[args.deck0], STARTER_DECKS[args.deck1]],
                 f"{args.deck0} vs {args.deck1}")
 
-    pool = read_pool(args.deck_pool)
+    pool = read_pool(args.deck_pool, recursive=args.deck_pool_subfolders)
     if not pool:
         raise SystemExit(f"no decklists in {args.deck_pool}")
     # The trainer plays one 60-card pile per seat; a list with an EXTRA deck
@@ -38,9 +38,15 @@ def deck_pool(args) -> tuple[list[list[str]], str]:
     # quietly dropping the second pile.
     with_extra = [name for name, _, extra in pool if extra]
     if with_extra:
+        # A whole folder read at once can put ninety names in this line, which
+        # is a wall nobody reads; the count is the part that matters.
+        shown = ", ".join(with_extra[:8])
+        if len(with_extra) > 8:
+            shown += f", and {len(with_extra) - 8} more"
         print(f"warning: EXTRA decks are not played in training — "
-              f"{', '.join(with_extra)} will train without theirs")
-    return [deck for _, deck, _ in pool], f"{len(pool)} decks from {args.deck_pool}"
+              f"{len(with_extra)} list(s) will train without theirs ({shown})")
+    where = args.deck_pool + ("/**" if args.deck_pool_subfolders else "")
+    return [deck for _, deck, _ in pool], f"{len(pool)} decks from {where}"
 
 
 def main() -> None:
@@ -56,6 +62,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--random-decks", type=float, default=0.0,
                         help="fraction of training games on freshly generated\n                              legal decks drawn from the whole playable pool")
+    parser.add_argument("--deck-pool-subfolders", action="store_true",
+                        help="read the pool folder's subfolders too, so\n                              --deck-pool decks trains on every list in\n                              decks/ rather than only the loose ones")
     parser.add_argument("--deck0", choices=STARTER_DECKS, default="st9_sea_fairy")
     parser.add_argument("--deck1", choices=STARTER_DECKS, default="st8_wind_archer")
     parser.add_argument("--deck-pool", nargs="?", const=META_DIR, metavar="DIR",

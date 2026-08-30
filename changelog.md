@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.2.71
+
+- **RL training can read your whole decks folder.** `train_rl.py --deck-pool
+  decks --deck-pool-subfolders` now trains on every decklist under `decks/`,
+  subfolders included, instead of only the loose files in one folder. Lists in
+  subfolders are named by their path (`green_run/gen012`), and the same 60
+  cards saved under two names are read once, so a folder full of copies does
+  not quietly spend twice the training games on one deck.
+
+## 0.2.70
+
+- **Your settings follow your profile.** The board sizes, the sleeves and
+  playmats, the sound, the confirm level and how long a held move takes, the
+  flipped opponent and the name you play online under are now kept in the
+  profile you are signed in as, not in the browser. Sign in on a machine
+  somebody else has been playing on and the board becomes *yours* straight
+  away — no refresh, no setting anything up again. Signing in on a profile that
+  has never saved any settings keeps whatever is set up in front of you, so a
+  first sign-in never resets your board. Nobody signed in works exactly as it
+  always did: the settings stay in this browser.
+
+## 0.2.69
+
+- **The board can lean.** Settings → Sizes has a new *board tilt* slider,
+  measured in degrees rather than percent. Turn it up and the two playmats bend
+  into one plane receding away from you, the way a table does when you are
+  sitting at it; the near edge of your own mat is the widest thing on screen
+  and the opponent's far edge the narrowest. It is off at 0°, which is exactly
+  the flat board the game has always drawn, and it goes as far as 24°. Your
+  hand, the seat bars and every popup stay flat and face-on — only the mats
+  lean — and the setting is remembered in your browser with the rest of the
+  sizes. Reset sizes puts it back to 0°.
+
+## 0.2.68
+
+- **The card you hovered stays in the panel.** The big card in the right-hand
+  panel used to vanish the instant the pointer left the card on the table —
+  including when you moved towards the panel to read the rules text. It now
+  stays put until you hover a different card, and the move list under it stops
+  jumping every time the pointer crosses the board. The floating preview in the
+  deck builder and the trash/break browser is unchanged: it sits over what you
+  are looking at, so it still disappears when you move away.
+
+## 0.2.67
+
+- **The three Powerpuff Girls promos are 【Arena】 Cookies again.** Blossom,
+  Buttercup and Bubbles (P-103/P-104/P-105) print the 【Arena】 badge in their
+  footer, but the card dump left the field blank, so nothing that asks for an
+  【Arena】 card could see them. Buttercup's skill was the casualty: it only
+  ever fires when she is played *from the support area*, and every card that
+  does that picks an 【Arena】 Cookie — so her ability had never once
+  triggered. Blossom's attack discount and Bubbles' discard cost now find them
+  too.
+
 ## 0.2.66
 
 - **Deck evolution can be told to build a tidy list.** `evolve_deck.py` now

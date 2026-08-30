@@ -330,6 +330,19 @@ function hidePreview() {
   preview.classList.add("hidden");
   previewDock.classList.add("empty");
 }
+
+/* Leaving a card is not the same as being finished with it. The dock is a
+ * fixed panel with nothing behind it, so a card left standing there costs
+ * nothing and is what you want while you read it — move the mouse to the text
+ * and the text is still on screen. Only the *next* card replaces it. A
+ * floating preview is the opposite: it sits over the board and follows the
+ * cursor, so it has to go the moment you leave. Hence one function for
+ * "pointer left", and `hidePreview` kept for the times the preview really is
+ * done — a drag starting, or the whole thing being rehomed for another view. */
+function leavePreview() {
+  delete preview.dataset.follow;
+  if (!previewDocked()) hidePreview();
+}
 window.addEventListener("mousemove", (e) => { if (preview.dataset.follow) movePreview(e); });
 
 /** Park the preview in the panel: no cursor tracking, nothing over the board. */
@@ -388,7 +401,7 @@ function cardNode(card, opts = {}) {
   if (card.uid !== undefined) node.dataset.uid = card.uid;
   animateTurn(node, card, opts);
   node.addEventListener("mouseenter", (e) => { preview.dataset.follow = "1"; showPreview(card, e); });
-  node.addEventListener("mouseleave", () => { delete preview.dataset.follow; hidePreview(); });
+  node.addEventListener("mouseleave", () => { leavePreview(); });
   if (opts.uid !== undefined && opts.uid !== null) {
     if (opts.seat === state.mySeat) makeDraggable(node, opts.uid, opts.seat);
     // The same click on either side of the table. Your own cards are also
@@ -512,8 +525,7 @@ function stack(label, count, opts = {}) {
         showPreview(opts.top, event);
       });
       art.addEventListener("mouseleave", () => {
-        delete preview.dataset.follow;
-        hidePreview();
+        leavePreview();
       });
     }
   } else {
@@ -833,7 +845,7 @@ function renderTray(snap) {
     const btn = h("button", "tray-btn" + (end ? " end" : ""),
                   opt.kind === "EndTurn" ? "End turn" : opt.label);
     btn.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
-    btn.onmouseleave = () => { highlight(null); hidePreview(); };
+    btn.onmouseleave = () => { highlight(null); leavePreview(); };
     // End turn and Pass are the two moves in the tray that cannot be walked
     // back, so they are the two that ask to be held. `Confirm` decides.
     Confirm.wire(btn, opt, () => answer(opt.index));
@@ -2142,7 +2154,7 @@ function openCardMenu(uid, node) {
     // the move is about lands in the panel. For an attack that is the Cookie
     // you are about to hit, which is the one you want to read before swinging.
     row.onmouseenter = () => { highlight(opt); showPreview(optionCard(opt)); };
-    row.onmouseleave = () => { highlight(null); hidePreview(); };
+    row.onmouseleave = () => { highlight(null); leavePreview(); };
     Confirm.wire(row, opt, () => { closeCardMenu(); answer(opt.index); });
     menu.appendChild(row);
   });
@@ -2493,8 +2505,7 @@ function logLine(line) {
     });
     tag.addEventListener("mouseleave", () => {
       hoveredCard = "";
-      delete preview.dataset.follow;
-      hidePreview();
+      leavePreview();
     });
     li.appendChild(tag);
     at = match.index + match[0].length + (trailer ? trailer[0].length : 0);
@@ -2731,14 +2742,33 @@ function syncHoldBox() {
 }
 syncHoldBox();
 
-/* Purely a view preference, so it lives in the browser rather than the match. */
+/* Purely a view preference, so it belongs to the player rather than to the
+ * match — `Prefs` is what makes that "the player" and not "this browser". */
 const flipOpp = el("#flipopp");
-flipOpp.checked = localStorage.getItem("flipOpponent") !== "0";
-document.body.classList.toggle("flip-opponent", flipOpp.checked);
+function syncFlipOpp() {
+  flipOpp.checked = Prefs.get("flipOpponent") !== "0";
+  document.body.classList.toggle("flip-opponent", flipOpp.checked);
+}
+syncFlipOpp();
 flipOpp.onchange = () => {
-  localStorage.setItem("flipOpponent", flipOpp.checked ? "1" : "0");
+  Prefs.set("flipOpponent", flipOpp.checked ? "1" : "0");
   document.body.classList.toggle("flip-opponent", flipOpp.checked);
 };
+
+/* A different player signed in, so every control in Settings is showing
+ * somebody else's answer. Each module re-reads its own; this puts the boxes
+ * that live in this file back in step with them. */
+Prefs.watch(() => {
+  syncFlipOpp();
+  Sfx.reload();
+  soundBox.checked = Sfx.enabled;
+  Confirm.reload();
+  confirmBox.value = Confirm.level;
+  syncHoldBox();
+  const box = el("#online-name");
+  if (box) box.value = Prefs.get("braverse.name") || "";
+  if (state.snap) render(state.snap);     // the affordances go with the level
+});
 
 el("#btn-copy-log").onclick = () => {
   navigator.clipboard.writeText(((state.snap && state.snap.log) || []).join("\n"));
@@ -2828,10 +2858,10 @@ async function loadConfig() {
         + "--online to play someone further away."
       : "Only this machine can reach this server — restart it with --lan, or "
         + "--online to play someone anywhere.";
-  const remembered = localStorage.getItem("braverse.name");
+  const remembered = Prefs.get("braverse.name");
   if (remembered) el("#online-name").value = remembered;
   el("#online-name").onchange = (e) =>
-    localStorage.setItem("braverse.name", e.target.value);
+    Prefs.set("braverse.name", e.target.value);
 }
 
 async function describeOnlineDeck() {

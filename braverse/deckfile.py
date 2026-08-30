@@ -78,7 +78,8 @@ def read_any(path: str | Path, db: CardDB | None = None
 META_DIR = "decks/meta"       # tournament lists, one folder, read as a set
 
 
-def read_pool(directory: str | Path = META_DIR) -> list[tuple[str, list[str], list[str]]]:
+def read_pool(directory: str | Path = META_DIR,
+              recursive: bool = False) -> list[tuple[str, list[str], list[str]]]:
     """Every decklist in one folder, as ``(name, deck, extra)``, name-sorted.
 
     A folder of lists is a different thing from a folder of decks you might
@@ -87,18 +88,40 @@ def read_pool(directory: str | Path = META_DIR) -> list[tuple[str, list[str], li
     by name, because a training run seeded the same way must see the same decks
     in the same order or it is not the run it says it is.
 
+    ``recursive`` reads the subfolders too — ``decks/`` as a whole rather than
+    one folder inside it — and names those lists by their path relative to the
+    folder (``green_run/gen012``), because two runs both ending in a
+    ``_best.txt`` are two different decks and a pool that calls them the same
+    thing cannot report which one it trained on.
+
+    Identical lists are read once. A pool is a set, and a folder collected over
+    time holds the same 60 cards under several names — an evolution run whose
+    last ten generations never changed, a deck saved again under a tidier name.
+    Left in, each copy is another share of the training games spent on one
+    deck, which is a weighting nobody chose. The first name in sorted order
+    keeps its place, so the order stays a function of the filenames alone.
+
     Files that are not ours are skipped rather than raising, the way
     ``play_server.available_decklists`` skips them: a folder people drop lists
     into will eventually have a README or a half-written file in it.
     """
+    root = Path(directory)
+    paths = sorted(root.rglob("*.txt") if recursive else root.glob("*.txt"))
     pool: list[tuple[str, list[str], list[str]]] = []
-    for path in sorted(Path(directory).glob("*.txt")):
+    seen: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
+    for path in paths:
         try:
             deck, extra = read_decklist(path)
         except Exception:
             continue
-        if len(deck) >= 10:
-            pool.append((path.stem, deck, extra))
+        if len(deck) < 10:
+            continue
+        key = (tuple(sorted(deck)), tuple(sorted(extra)))
+        if key in seen:
+            continue
+        seen.add(key)
+        name = path.relative_to(root).with_suffix("").as_posix() if recursive else path.stem
+        pool.append((name, deck, extra))
     return pool
 
 

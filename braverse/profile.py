@@ -25,6 +25,11 @@ Scoring, in one place because these are the numbers people argue about:
   3. `progress` is the whole curve; nothing else should be doing this
   arithmetic.
 
+Settings — the sizes, the sleeves, the sound, the confirm level — are sealed
+in here too, so they belong to the *player* rather than to the browser they
+were last set in. The viewer owns what each one means; this owns the fact that
+signing in somewhere brings them along (`Profile.remember`, `clean_settings`).
+
 The history is the last `HISTORY_LIMIT` games, plus every game the player
 marked *kept*, which are never dropped and do not count against the limit. Each
 entry names the replay file it was recorded to, so a game in the list can be
@@ -55,6 +60,11 @@ XP_PER_WIN = 3
 HISTORY_LIMIT = 30
 
 MAX_NAME = 24
+# The settings map: what the viewer keeps for this player. Bounded because it
+# comes from the browser and goes back to it — see `clean_settings`.
+MAX_SETTINGS = 64
+MAX_SETTING_KEY = 64
+MAX_SETTING_VALUE = 4096
 MAX_AVATAR = 192 * 1024        # a 96px PNG data URL is a few KB; this is slack
 AVATAR_DATA = re.compile(r"data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+\Z")
 AVATAR_CARD = re.compile(r"card:[A-Za-z0-9][A-Za-z0-9._-]{0,39}\Z")
@@ -177,6 +187,10 @@ class Profile:
     draws: int = 0
     decks: dict[str, DeckRecord] = field(default_factory=dict)
     history: list[GameRecord] = field(default_factory=list)
+    # Preferences, sealed with the rest: sizes, sleeves, sound, the confirm
+    # level. Opaque strings — the browser owns their meaning, this owns the
+    # fact that they belong to a player rather than to a browser.
+    settings: dict[str, str] = field(default_factory=dict)
 
     # -- reading ---------------------------------------------------------
     @property
@@ -203,6 +217,7 @@ class Profile:
             "history": [g.to_json() for g in
                         sorted(self.history, key=lambda g: -g.when)],
             "limit": HISTORY_LIMIT,
+            "settings": dict(self.settings),
         }
 
     # -- writing ---------------------------------------------------------
@@ -243,6 +258,24 @@ class Profile:
         rec.xp += gained
         rec.last = when
         return entry
+
+    def remember(self, changes: Any) -> dict[str, str]:
+        """Merge settings the browser sent, and return what is now stored.
+
+        Merge rather than replace, and `None` removes: a browser sends the
+        settings it knows about, and one that has not loaded a newer build's
+        file must not wipe the setting that file owns.
+        """
+        if not isinstance(changes, dict):
+            raise ProfileError("settings must be an object")
+        merged = dict(self.settings)
+        for key, value in changes.items():
+            if value is None:
+                merged.pop(str(key), None)
+            else:
+                merged[str(key)] = value
+        self.settings = clean_settings(merged)
+        return dict(self.settings)
 
     def keep(self, game_id: str, kept: bool) -> Optional[GameRecord]:
         """Mark a game to be kept past the window, or let it fall out again."""
@@ -287,6 +320,7 @@ class Profile:
             "losses": self.losses, "draws": self.draws,
             "decks": {name: rec.to_json() for name, rec in self.decks.items()},
             "history": [g.to_json() for g in self.history],
+            "settings": dict(self.settings),
         }
 
     @classmethod
@@ -314,7 +348,8 @@ class Profile:
             wins=max(0, int(blob.get("wins") or 0)),
             losses=max(0, int(blob.get("losses") or 0)),
             draws=max(0, int(blob.get("draws") or 0)),
-            decks=decks, history=history)
+            decks=decks, history=history,
+            settings=clean_settings(blob.get("settings")))
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +375,35 @@ def clean_avatar(raw: Any) -> str:
     if AVATAR_CARD.fullmatch(value) or AVATAR_DATA.fullmatch(value):
         return value
     return ""
+
+
+def clean_settings(raw: Any) -> dict[str, str]:
+    """The settings map, bounded. Anything that will not fit is dropped.
+
+    Values are strings and nothing else. What a setting *means* is the
+    viewer's business — this stores it — but a profile file is read back and
+    handed to a browser, so the shape of what goes in it is not negotiable,
+    and an oversized or nested value is refused rather than repaired.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        name = str(key)[:MAX_SETTING_KEY]
+        if not name or not name.isprintable():
+            continue
+        if isinstance(value, bool) or isinstance(value, (int, float)):
+            text = json.dumps(value)
+        elif isinstance(value, str):
+            text = value
+        else:
+            continue                      # lists and objects: not a setting
+        if len(text) > MAX_SETTING_VALUE or not text.isprintable():
+            continue
+        out[name] = text
+        if len(out) >= MAX_SETTINGS:
+            break
+    return out
 
 
 def slugify(name: str) -> str:

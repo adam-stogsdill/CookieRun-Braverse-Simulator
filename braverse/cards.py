@@ -62,6 +62,21 @@ _ON_PLAY_MISPRINTS = frozenset({
 })
 
 
+# The three Powerpuff Girls crossover promos print the 【Arena】 subtype badge
+# in their footer, beside the card number, and the dump's `keyword` column is
+# empty for all three. Read off the scans in `card_images/`: P-103, P-104 and
+# P-105 carry the badge; P-101 and P-102, dealt in the same wave, do not — so
+# this is three rows losing a field, not the whole batch being untyped.
+#
+# It is not cosmetic, because 【Arena】 is a *filter* other cards select on.
+# Every "play up to 1 【Arena】 Cookie from your support area" enabler skipped
+# Buttercup, which is the only way its "when this Cookie is played from the
+# support area" skill can ever fire — the card's whole ability was dead. The
+# same goes for Blossom's own attack, which asks for "your **other** 【Arena】
+# Cookies" and so states plainly that Blossom is one.
+_MISSING_ARENA = frozenset({"P-103", "P-104", "P-105"})
+
+
 # Two rows carry a different card's text altogether — not a marker slip but the
 # wrong card. Both are 【EXTRA】 【Awaken】 cards, and the dump gives them the
 # rules text and attack line of the ordinary Cookie they awaken, which reads as
@@ -401,6 +416,8 @@ def _row_to_def(row: dict[str, str]) -> CardDef | None:
             keywords.add(Keyword[word])
 
     base_id = row.get("base_id") or row["id"].split("@")[0]
+    if base_id in _MISSING_ARENA:
+        keywords.add(Keyword.ARENA)
     if base_id in _TEXT_OVERRIDES:
         description, attack_text = _TEXT_OVERRIDES[base_id]
         all_text = description + "\n" + attack_text

@@ -357,3 +357,50 @@ def test_a_profile_read_back_from_junk_does_not_explode():
     profile = PR.Profile.from_json({"name": "Ada", "history": [{"id": "x"}]})
     assert profile.history[0].result == "draw"
     assert profile.xp == 0
+
+
+def test_settings_are_stored_as_the_browser_left_them(tmp_path):
+    """Opaque to this module, and sealed with the rest of the record."""
+    store = PR.ProfileStore(tmp_path)
+    session = store.create("Ada")
+    session.profile.remember({"sound": "0", "braverse.sizes": '{"card": 120}'})
+    session.save()
+
+    assert PR.Profile.from_json(session.profile.to_json()).settings["sound"] == "0"
+    reopened = store.open("ada")
+    assert reopened.profile.settings["braverse.sizes"] == '{"card": 120}'
+    # Sealed, not sitting in the cleartext header beside the name.
+    assert b"braverse.sizes" not in store.path("ada").read_bytes().split(b"\n")[0]
+
+
+def test_a_setting_that_will_not_fit_is_dropped_rather_than_repaired():
+    """The map goes into a file this program reads back and hands to a browser.
+
+    So the shape of a value is not negotiable: numbers and booleans are written
+    as themselves, anything nested is not a setting, and nothing oversized gets
+    in. Dropped one key at a time — one silly value must not lose the rest.
+    """
+    kept = PR.clean_settings({
+        "sound": "0",
+        "scale": 120,
+        "flip": True,
+        "kit": {"sleeve": "cocoa"},                 # nested: not a setting
+        "huge": "x" * (PR.MAX_SETTING_VALUE + 1),
+        "line\nbreak": "x",
+        "": "nameless",
+    })
+    assert kept == {"sound": "0", "scale": "120", "flip": "true"}
+    assert PR.clean_settings("not a map") == {}
+    assert len(PR.clean_settings({str(n): "1" for n in range(500)})) \
+        == PR.MAX_SETTINGS
+
+
+def test_settings_are_merged_and_a_null_removes_one():
+    profile = PR.Profile(name="Ada")
+    profile.remember({"sound": "0", "flipOpponent": "1"})
+    profile.remember({"sound": "1"})
+    assert profile.settings == {"sound": "1", "flipOpponent": "1"}
+    profile.remember({"flipOpponent": None})
+    assert profile.settings == {"sound": "1"}
+    with pytest.raises(PR.ProfileError):
+        profile.remember(["sound", "0"])

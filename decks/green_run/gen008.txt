@@ -1,47 +1,44 @@
 # generation: 8
-# score: 0.6389
-# mean: 0.441
+# score: 0.75
+# mean: 0.5667
 
 COOKIE (23)
-  4x ST8-011    Kiwi Cookie                      LV1 HP3
+  3x BS8-059    Mystic Flour Cookie              LV3 HP6
   3x ST3-010    Aloe Cookie                      LV2 HP3
   2x BS5-056    Longan Dragon Cookie             LV3 HP5
-  2x BS8-059    Mystic Flour Cookie              LV3 HP6
+  2x BS5-063    Hero Cookie                      LV3 HP5
   2x ST8-010    Cookiemals                       LV1 HP2
-  1x BS1-007    Melon Bun Cookie                 LV1 HP4
-  1x BS10-061   Carameleon Cookie                LV2 HP3
-  1x BS11-044   Silverbell Cookie                LV1 HP3
-  1x BS5-050    Fig Cookie                       LV2 HP3
-  1x BS6-049    Banana Cookie                    LV1 HP3
-  1x BS7-051    Mint Choco Cookie                LV1 HP3
-  1x BS8-062    Shrimp Dumpling King             LV2 HP4
-  1x P-115      Truffle Cookie                   LV1 HP3
-  1x ST8-003    Leek Cookie                      LV2 HP4
-  1x ST8-005    Wind Archer Cookie               LV3 HP6
-FLIP (16)
+  2x ST8-011    Kiwi Cookie                      LV1 HP3
+  1x BS1-021    Whipped Cream Cookie             LV2 HP4
+  1x BS1-068    Cauliflower Cookie               LV2 HP4
+  1x BS4-054    Avocado Cookie                   LV3 HP5
+  1x BS5-048    Bellflower Cookie                LV1 HP3
+  1x BS6-045    Lime Cookie                      LV1 HP2
+  1x BS7-052    Vampire Cookie                   LV3 HP6
+  1x BS8-056    Spicy Dumpling King              LV1 HP3
+  1x BS8-065    Spinach Cookie                   LV1 HP2
+  1x P-083      Dumpling Cake Hound              LV1 HP1
+FLIP (14)
   4x BS4-050    Biscuit Giraffe                  LV1 HP1
-  3x ST3-007    Sparkling Cookie                 LV3 HP3
+  4x ST3-007    Sparkling Cookie                 LV3 HP3
   3x ST3-011    Onion Cookie                     LV2 HP2
-  2x ST8-007    Blue Slushy Cookie               LV1 HP1
-  1x BS6-056    Cappuccino Cookie                LV1 HP1
-  1x BS8-063    Hydrangea Cookie                 LV2 HP2
-  1x P-113      Green Tea Mousse Cookie          LV2 HP3
-  1x P-159      Candy Apple Cookie               LV1 HP1
-ITEM (12)
-  4x BS1-075    Wanderer's Apple Pie             
-  4x P-012      Mischievous Ladybug              
-  1x BS4-063    Swan Feather Dreamcatcher        
-  1x BS8-071    Peach Baos                       
-  1x BS9-066    Meat Jelly                       
-  1x ST3-016    Ancient Healer's Gaze            
-TRAP (9)
-  3x BS9-069    Broken Seal                      
+  3x ST8-007    Blue Slushy Cookie               LV1 HP1
+ITEM (8)
+  3x ST3-016    Ancient Healer's Gaze            
+  2x P-012      Mischievous Ladybug              
+  2x ST3-018    Parsley Tea of Invigoration      
+  1x BS1-075    Wanderer's Apple Pie             
+TRAP (14)
+  4x BS9-069    Broken Seal                      
+  3x ST3-020    Divine Light Crystal             
+  3x ST8-018    Piercing Arrow of Purity         
   2x ST3-019    Supreme Whipped Cream            
-  2x ST8-018    Piercing Arrow of Purity         
-  1x ST3-020    Divine Light Crystal             
-  1x ST3-021    Breath of the Flute              
+  1x BS2-021    Carrot Farm Scarecrow            
+  1x BS4-064    Night Raven's Arrow              
+STAGE (1)
+  1x ST8-020    Dark Enchantress Laboratory      
 
-legal: True  size 60  flips 16
+legal: True  size 60  flips 14
 
 EXTRA deck
 EXTRA (6)
@@ -50,27 +47,28 @@ EXTRA (6)
 
 {
  "deck": [
-  "BS4-063",
-  "P-159",
+  "BS5-063",
+  "BS5-063",
   "BS5-056",
   "BS5-056",
   "BS8-059",
   "BS8-059",
-  "ST8-005",
   "ST3-010",
   "ST3-010",
   "ST3-010",
+  "BS4-054",
   "ST8-010",
   "ST8-010",
+  "BS2-021",
   "ST8-011",
   "ST8-011",
-  "ST8-011",
-  "ST8-011",
+  "BS5-048",
+  "ST3-007",
+  "ST3-007",
+  "ST3-007",
+  "ST3-007",
+  "ST8-020",
   "ST3-011",
-  "ST3-007",
-  "ST3-007",
-  "ST3-007",
-  "ST3-021",
   "ST3-011",
   "ST3-011",
   "BS4-050",
@@ -78,38 +76,37 @@ EXTRA (6)
   "BS4-050",
   "BS4-050",
   "ST8-007",
-  "BS10-061",
-  "BS11-044",
+  "BS8-056",
   "ST8-007",
-  "BS9-069",
+  "ST8-007",
   "ST3-016",
-  "BS8-063",
-  "BS6-049",
+  "ST3-016",
+  "BS4-064",
+  "ST3-016",
   "P-012",
   "P-012",
-  "P-012",
-  "BS6-056",
-  "P-012",
-  "BS8-062",
-  "P-113",
+  "BS7-052",
+  "BS6-045",
+  "ST3-018",
+  "ST3-018",
   "BS1-075",
-  "BS1-075",
-  "BS1-075",
-  "BS1-075",
+  "P-083",
+  "BS8-065",
+  "ST3-019",
   "BS9-069",
-  "BS8-071",
+  "BS9-069",
+  "BS9-069",
   "BS9-069",
   "ST3-020",
-  "BS5-050",
-  "ST8-003",
+  "ST3-020",
+  "ST3-020",
   "ST8-018",
   "ST8-018",
-  "BS7-051",
+  "BS8-059",
+  "ST8-018",
   "ST3-019",
-  "ST3-019",
-  "P-115",
-  "BS1-007",
-  "BS9-066"
+  "BS1-068",
+  "BS1-021"
  ],
  "extra": [
   "BS10-073",
@@ -120,8 +117,8 @@ EXTRA (6)
   "BS8-069"
  ],
  "generation": 8,
- "score": 0.6389,
- "mean": 0.441,
+ "score": 0.75,
+ "mean": 0.5667,
  "gauntlet": [
   "na25_01_green_windarcher",
   "na25_02_yellow_millennialtree",

@@ -66,16 +66,12 @@ const Confirm = (function () {
   let live = null;        // the hold in progress, if any
 
   function read() {
-    try {
-      const saved = localStorage.getItem(KEY);
-      return LEVELS.includes(saved) ? saved : "key";
-    } catch (err) { return "key"; }        // private mode
+    const saved = Prefs.get(KEY);
+    return LEVELS.includes(saved) ? saved : "key";
   }
 
   function readHold() {
-    try {
-      return clampHold(Number(localStorage.getItem(HOLD_KEY)));
-    } catch (err) { return HOLD_DEFAULT; }   // private mode
+    return clampHold(Number(Prefs.get(HOLD_KEY)));
   }
 
   /** Anything unusable — absent, not a number, silly — is the default. */
@@ -87,14 +83,14 @@ const Confirm = (function () {
   function setHoldMs(ms) {
     holdMs = clampHold(Number(ms));
     cancel(true);   // a hold in flight was timed against the old length
-    try { localStorage.setItem(HOLD_KEY, String(holdMs)); } catch (err) { /* as above */ }
+    Prefs.set(HOLD_KEY, String(holdMs));
   }
 
   function setLevel(next) {
     if (!LEVELS.includes(next)) return;
     level = next;
     cancel();
-    try { localStorage.setItem(KEY, next); } catch (err) { /* as above */ }
+    Prefs.set(KEY, next);
   }
 
   /* ------------------------------------------------------- the settle guard */
@@ -300,6 +296,9 @@ const Confirm = (function () {
     set level(next) { setLevel(next); },
     get holdMs() { return holdMs; },
     set holdMs(ms) { setHoldMs(ms); },
+    /** Re-read both settings without writing them back — for `Prefs.watch`,
+     *  which has just swapped one player's preferences for another's. */
+    reload() { level = read(); holdMs = readHold(); cancel(true); },
     LEVELS, HOLD_DEFAULT, HOLD_MIN, HOLD_MAX,
     question, settled, needsHold, name, wire, press, tap, consumed, cancel, hint,
   };

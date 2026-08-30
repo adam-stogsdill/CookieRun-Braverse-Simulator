@@ -46,6 +46,18 @@ const SIZES = [
     min: 40, max: 400,
   },
   {
+    id: "tilt", prop: "board-tilt", name: "board tilt",
+    hint: "how far the two playmats lean away from you",
+    // The odd one out, and marked as such: every other row here is a
+    // percentage multiplying a printed measurement, this one is an angle in
+    // degrees written onto the board as-is. `raw` is what says so — it keeps
+    // the number off the /100 in `applySizes`, puts a ° on the readout, and
+    // lets the range start at 0, which for a tilt is simply "off" rather than
+    // the vanished board the scales' floor exists to prevent.
+    raw: true, unit: "\u00b0", step: 1,
+    min: 0, max: 24, def: 0,
+  },
+  {
     id: "panel", prop: "panel-scale", name: "side panel",
     hint: "the card viewer, the moves and the log",
     // Narrower than the rest: the panel takes its width out of the table's,
@@ -73,15 +85,24 @@ const STEP = 5;
  * reach zero, which is the only size there is genuinely no way back from. */
 const FLOOR = 10;
 
-const lowest = (spec) => Math.max(FLOOR, spec.min || MIN);
+/* `raw` rows are exempt from the floor: it guards against a *scale* of zero,
+ * and a tilt of zero is the flat board rather than a board that is not there. */
+const lowest = (spec) => spec.raw ? (spec.min || 0)
+                                  : Math.max(FLOOR, spec.min || MIN);
 const highest = (spec) => Math.max(lowest(spec), spec.max || MAX);
+const stepOf = (spec) => spec.step || STEP;
+const unitOf = (spec) => spec.unit || "%";
+const defaultOf = (spec) => (spec.def === undefined ? 100 : spec.def);
 
-const DEFAULT_SIZES = { battle: 100, card: 100, mat: 100, builder: 100,
-                        panel: 100 };
+/* Built from the specs rather than written out again, so a row added above
+ * cannot be left out of what Reset puts back. */
+const DEFAULT_SIZES = Object.fromEntries(
+  SIZES.map((spec) => [spec.id, defaultOf(spec)]));
+
 
 function loadSizes() {
   try {
-    const saved = JSON.parse(localStorage.getItem(SIZE_KEY) || "null");
+    const saved = JSON.parse(Prefs.get(SIZE_KEY) || "null");
     // Spread over the defaults so a set saved by an older build — one that had
     // fewer sliders, or one written before a slider was renamed — still opens.
     return saved ? { ...DEFAULT_SIZES, ...saved } : { ...DEFAULT_SIZES };
@@ -91,9 +112,7 @@ function loadSizes() {
 }
 
 function saveSizes() {
-  try {
-    localStorage.setItem(SIZE_KEY, JSON.stringify(sizes));
-  } catch (err) { /* private browsing: the sizes just will not survive a refresh */ }
+  Prefs.set(SIZE_KEY, JSON.stringify(sizes));
 }
 
 /* A number from anywhere — an older build, a hand-edited localStorage — is
@@ -101,7 +120,7 @@ function saveSizes() {
  * nothing in the interface could undo it. */
 function clamp(spec, value) {
   const n = Number(value);
-  if (!isFinite(n)) return 100;
+  if (!isFinite(n)) return defaultOf(spec);
   return Math.min(highest(spec), Math.max(lowest(spec), Math.round(n)));
 }
 
@@ -115,7 +134,10 @@ function applySizes() {
     // the rest — are declared on `:root`, and a custom property is substituted
     // where it is *declared*. Set one seat lower and `:root` would go on
     // reading the 1 it declares itself, so the cards never move.
-    document.documentElement.style.setProperty("--" + s.prop, String(sizes[s.id] / 100));
+    // Percentages are written as the multiplier the stylesheet multiplies by;
+    // a `raw` row is written as itself, and the stylesheet supplies the unit.
+    const value = s.raw ? sizes[s.id] : sizes[s.id] / 100;
+    document.documentElement.style.setProperty("--" + s.prop, String(value));
   });
 }
 
@@ -129,16 +151,16 @@ function sizeRow(spec) {
   input.type = "range";
   input.min = String(lowest(spec));
   input.max = String(highest(spec));
-  input.step = String(STEP);
+  input.step = String(stepOf(spec));
   input.value = String(sizes[spec.id]);
   input.id = "size-" + spec.id;
   input.title = spec.hint;
   label.htmlFor = input.id;
-  const read = h("span", "size-read", sizes[spec.id] + "%");
+  const read = h("span", "size-read", sizes[spec.id] + unitOf(spec));
 
   input.oninput = () => {
     sizes[spec.id] = clamp(spec, input.value);
-    read.textContent = sizes[spec.id] + "%";
+    read.textContent = sizes[spec.id] + unitOf(spec);
     applySizes();
   };
   // Saved on release rather than on every step: a drag is one decision, and
@@ -232,6 +254,7 @@ function wireElsewhere() {
     if (!host) return;                 // that part of the page is not built
     host.innerHTML = "";
 
+    const step = stepOf(spec);
     const nudge = (by) => {
       const before = sizes[spec.id];
       sizes[spec.id] = clamp(spec, before + by);
@@ -243,15 +266,15 @@ function wireElsewhere() {
     const out = h("button", "zoom", "−");
     out.type = "button";
     out.title = "Zoom out — hold to keep going";
-    holdToRepeat(out, (by) => nudge(-by));
+    holdToRepeat(out, (by) => nudge(-by * step / STEP));
 
-    const read = h("span", "zoom-read", sizes[spec.id] + "%");
+    const read = h("span", "zoom-read", sizes[spec.id] + unitOf(spec));
     read.id = spec.at.slice(1) + "-read";
 
     const into = h("button", "zoom", "+");
     into.type = "button";
     into.title = "Zoom in — hold to keep going";
-    holdToRepeat(into, (by) => nudge(by));
+    holdToRepeat(into, (by) => nudge(by * step / STEP));
 
     host.appendChild(h("span", "zoom-label", "size"));
     host.appendChild(out);
@@ -269,7 +292,7 @@ function syncSizeControls() {
   renderSizes();
   SIZES.filter((spec) => spec.at).forEach((spec) => {
     const read = el(spec.at + "-read");
-    if (read) read.textContent = sizes[spec.id] + "%";
+    if (read) read.textContent = sizes[spec.id] + unitOf(spec);
     const input = el(spec.at);
     if (input && input.tagName === "INPUT") input.value = String(sizes[spec.id]);
   });
@@ -277,6 +300,14 @@ function syncSizeControls() {
 
 renderSizes();
 wireElsewhere();
+
+/* Somebody else signed in: their sizes, on the board and on the sliders. */
+Prefs.watch(() => {
+  const saved = loadSizes();
+  SIZES.forEach((spec) => { sizes[spec.id] = clamp(spec, saved[spec.id]); });
+  applySizes();
+  syncSizeControls();
+});
 
 el("#size-reset").onclick = () => {
   Object.assign(sizes, DEFAULT_SIZES);

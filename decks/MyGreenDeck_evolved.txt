@@ -1,6 +1,5 @@
-# generation: 9
-# score: 0.85
-# mean: 0.6125
+# validation_score: 0.6
+# holdout: 0.535
 
 COOKIE (30)
   4x ST3-010    Aloe Cookie                      LV2 HP3
@@ -117,30 +116,124 @@ EXTRA (6)
   "BS8-069",
   "BS8-069"
  ],
- "generation": 9,
- "score": 0.85,
- "mean": 0.6125,
- "gauntlet": [
-  "na25_01_green_windarcher",
-  "na25_02_yellow_millennialtree",
-  "na25_03_purple_moonlight",
-  "na25_04_red_hollyberry",
-  "na25_05_red_hollyberry",
-  "na25_06_yellow_millennialtree",
-  "na25_07_red_hollyberry",
-  "na25_08_purple_moonlight",
-  "na25_09_red_hollyberry",
-  "na25_10_purple_moonlight",
-  "na25_11_yellow_millennialtree",
-  "na25_12_yellow_millennialtree",
-  "na25_13_green_windarcher",
-  "na25_14_yellow_millennialtree",
-  "na25_15_yellow_millennialtree",
-  "na25_16_purple_moonlight",
-  "na25_17_purple_moonlight",
-  "na25_18_red_hollyberry"
- ],
+ "validation_score": 0.6,
+ "holdout": 0.535,
+ "baselines": {
+  "st9_sea_fairy": 0.65,
+  "st8_wind_archer": 0.55
+ },
  "seeded_from": [
   "MyGreenDeck"
+ ],
+ "history": [
+  {
+   "generation": 0,
+   "best": 0.7,
+   "mean": 0.37916666666666665,
+   "objective": 0.695,
+   "thin": 0.1
+  },
+  {
+   "generation": 1,
+   "best": 0.75,
+   "mean": 0.32916666666666666,
+   "objective": 0.7458333333333333,
+   "thin": 0.08333333333333333
+  },
+  {
+   "generation": 2,
+   "best": 0.65,
+   "mean": 0.4291666666666667,
+   "objective": 0.6475000000000001,
+   "thin": 0.05
+  },
+  {
+   "generation": 3,
+   "best": 0.65,
+   "mean": 0.49999999999999994,
+   "objective": 0.6491666666666667,
+   "thin": 0.016666666666666666
+  },
+  {
+   "generation": 4,
+   "best": 0.7,
+   "mean": 0.4708333333333334,
+   "objective": 0.6908333333333333,
+   "thin": 0.18333333333333332
+  },
+  {
+   "generation": 5,
+   "best": 0.8,
+   "mean": 0.5875,
+   "objective": 0.795,
+   "thin": 0.1
+  },
+  {
+   "generation": 6,
+   "best": 0.8,
+   "mean": 0.6291666666666668,
+   "objective": 0.7983333333333333,
+   "thin": 0.03333333333333333
+  },
+  {
+   "generation": 7,
+   "best": 0.7,
+   "mean": 0.5833333333333334,
+   "objective": 0.6983333333333333,
+   "thin": 0.03333333333333333
+  },
+  {
+   "generation": 8,
+   "best": 0.75,
+   "mean": 0.5666666666666667,
+   "objective": 0.7391666666666666,
+   "thin": 0.21666666666666667
+  },
+  {
+   "generation": 9,
+   "best": 0.85,
+   "mean": 0.6125000000000003,
+   "objective": 0.8408333333333333,
+   "thin": 0.18333333333333332
+  },
+  {
+   "generation": 10,
+   "best": 0.7,
+   "mean": 0.5416666666666666,
+   "objective": 0.69,
+   "thin": 0.2
+  },
+  {
+   "generation": 11,
+   "best": 0.75,
+   "mean": 0.6333333333333334,
+   "objective": 0.7458333333333333,
+   "thin": 0.08333333333333333
+  },
+  {
+   "generation": 12,
+   "best": 0.8,
+   "mean": 0.6541666666666669,
+   "objective": 0.795,
+   "thin": 0.1
+  },
+  {
+   "generation": 13,
+   "best": 0.75,
+   "mean": 0.5895833333333336,
+   "objective": 0.7408333333333333,
+   "thin": 0.18333333333333332
+  },
+  {
+   "generation": 14,
+   "best": 0.8,
+   "mean": 0.6229166666666669,
+   "objective": 0.7933333333333333,
+   "thin": 0.13333333333333333
+  },
+  {
+   "validation_best": 0.6,
+   "validated": 8
+  }
  ]
 }

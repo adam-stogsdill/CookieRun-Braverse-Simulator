@@ -1003,3 +1003,97 @@ def test_a_batched_question_is_never_also_answerable_on_the_board():
 
     sets = src[src.index("function actionSets"):src.index("function markActionable")]
     assert "pending.upTo" in sets and "pending.pick" in sets
+
+
+def test_a_docked_preview_outlives_the_pointer_leaving_the_card():
+    """Hovering away from a card must not clear the panel it filled.
+
+    The dock is a fixed slot in the right-hand panel with nothing behind it, so
+    a card left standing there hides nothing — and clearing it on `mouseleave`
+    meant the card vanished the moment you moved towards the text you were
+    trying to read, and made the move list below it jump every time the pointer
+    crossed the board. Only the next card replaces it.
+
+    The floating preview is the opposite case and must still go: it is drawn
+    over the board and follows the cursor. So every `mouseleave` goes through
+    `leavePreview`, which hides only when the preview is undocked, and the
+    outright `hidePreview` is left to the places the preview really is done —
+    a drag starting, or the whole thing being rehomed for another view.
+    """
+    src = (VIEWER / "app.js").read_text()
+    assert "function leavePreview" in src
+
+    leave = src[src.index("function leavePreview"):]
+    leave = leave[:leave.index("\n}")]
+    assert "previewDocked()" in leave, (
+        "leavePreview must ask whether the preview is docked before hiding it")
+
+    # Every hover handler releases the card through leavePreview, never by
+    # hiding it outright — one of these left as `hidePreview` is the bug back.
+    for line in src.splitlines():
+        if "mouseleave" in line or "onmouseleave" in line:
+            assert "hidePreview" not in line, line.strip()
+    for handler in re.findall(r"mouseleave\", \(\) => \{(.*?)\}\)", src, re.S):
+        assert "hidePreview" not in handler, handler.strip()
+
+
+def test_the_board_tilt_is_seen_through_a_perspective_on_the_mats_parent():
+    """`perspective` applies to an element's *direct* children only.
+
+    The tilt is a `rotateX` on `.mat`, and `.mat` is a child of `.side`. Put
+    the perspective one level up on `#table` — the obvious place, since that is
+    what looks like "the board" — and the rotation still applies, still moves
+    when the slider moves, and has no depth in it whatsoever: the mat is merely
+    squashed vertically. It looks like a slider that half works, which is the
+    hardest kind to notice is broken.
+    """
+    css = (VIEWER / "style.css").read_text(encoding="utf-8")
+
+    side = re.search(r"^\.side \{(.*?)\n\}", css, re.S | re.M)
+    assert side, "no `.side` rule in style.css"
+    assert "perspective:" in side.group(1), \
+        "the perspective must sit on `.mat`'s own parent, `.side`"
+
+    mat = re.search(r"^\.mat \{(.*?)\n\}", css, re.S | re.M)
+    assert mat and "rotateX(calc(var(--board-tilt)" in mat.group(1), \
+        "`.mat` must be what the tilt rotates"
+
+
+def test_every_setting_the_viewer_keeps_goes_through_prefs():
+    """A preference written straight to `localStorage` belongs to the browser.
+
+    Which is the bug `prefs.js` exists to fix: settings follow the player who
+    signed in, so a machine two people share stops handing the second one the
+    first one's board. Two ways to lose that, and both leave a control that
+    works perfectly right up until somebody else signs in — a module still
+    calling `localStorage` itself, and a key going through `Prefs` that is
+    missing from the `KEYS` list, which is what gets sent to the profile.
+    """
+    prefs = (VIEWER / "prefs.js").read_text(encoding="utf-8")
+    listed = set(re.findall(r'^\s*"([^"]+)",', prefs, re.M))
+    assert listed, "no keys found in prefs.js"
+
+    # The seat token is not a setting: it is which chair this tab is sitting
+    # in, which belongs to the tab and to nobody else. The tutorial's mark is
+    # progress rather than a preference and is left alone deliberately.
+    # Written as the argument reads up to its first bracket, which is as far
+    # as the pattern below looks.
+    allowed = {"app.js": {"Seat.key(room"}, "tutorial.js": {"KEY"}}
+    used, stray = set(), []
+    for js in sorted(VIEWER.glob("*.js")):
+        source = js.read_text(encoding="utf-8")
+        if js.name != "prefs.js":
+            for call in re.findall(r'localStorage\.(?:get|set|remove)Item\(\s*([^,)]+)',
+                                   source):
+                if call.strip() not in allowed.get(js.name, set()):
+                    stray.append(f"{js.name}: {call.strip()}")
+        used |= set(re.findall(r'Prefs\.(?:get|set)\(\s*"([^"]+)"', source))
+        # The keys named through a constant, which is how the bigger ones are
+        # written: `Prefs.get(SIZE_KEY)` says nothing on its own.
+        for const in re.findall(r'Prefs\.(?:get|set)\(\s*([A-Z_]+)\b', source):
+            match = re.search(rf'{const}\s*=\s*"([^"]+)"', source)
+            if match:
+                used.add(match.group(1))
+
+    assert not stray, f"settings kept outside Prefs: {stray}"
+    assert not used - listed, f"used through Prefs but not in KEYS: {sorted(used - listed)}"
