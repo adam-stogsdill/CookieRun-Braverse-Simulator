@@ -146,22 +146,42 @@ def test_priced_blockers_are_in_the_deckbuilder_pool(db):
     from braverse.deckgen import implemented_pool
     from braverse.enums import Marker
 
+    from braverse.cards import strip_blocker_text
+
     pool = {c.id for c in implemented_pool(db)}
     priced = [c for c in db.cards.values()
               if c.is_cookie and blocker_price(c) is not None]
     assert len(priced) >= 20
-    assert not [c.id for c in priced if c.id not in pool]
+    # A priced Blocker belongs in the pool once the line is the *whole* card.
+    # BS12-089 and BS12-093 price their block readably and then print a second
+    # ability that is not coded yet, so they stay out on that second ability —
+    # which is the pool doing its job, not the Blocker reader failing.
+    def only_blocks(card):
+        text = " ".join([card.description, card.flip_text,
+                         card.attack.text if card.attack else ""])
+        return not strip_blocker_text(card, text).strip()
+
+    vanilla_blockers = [c for c in priced if only_blocks(c)]
+    assert len(vanilla_blockers) >= 15
+    assert not [c.id for c in vanilla_blockers if c.id not in pool]
     assert "ST8-011" in pool          # Kiwi Cookie, 【Blocker】 <{G}>
     assert "BS4-047" in pool          # Blue Lily Cookie, <Rest this card.>
 
-    # An *item* that merely mentions 【Blocker】 carries the marker without
-    # being a Blocker — only a Cookie can block, which is why `priced` above
-    # filters on that. The pool tracks whether its text is coded, and
-    # BS3-018's now is: the marker survives normalisation as the filter it is
-    # in that sentence.
-    assert db["BS3-018"].has(Marker.BLOCKER)
+    # A card that merely *mentions* 【Blocker】 does not have one. BS3-018 says
+    # the opponent cannot activate 【Blocker】; reading that as the keyword gave
+    # the card a free redirect of its own, which is the wrong way round twice
+    # over. Only a line-leading marker counts, so this one carries none — and
+    # it is in the pool on the strength of its coded text, not its marker.
+    assert not db["BS3-018"].has(Marker.BLOCKER)
     assert not db["BS3-018"].is_cookie
     assert "BS3-018" in pool
+
+    # The same sentence on a *Cookie* is what made this matter: an unpriced
+    # 【Blocker】 is a free one, so every Cookie that said nobody may block was
+    # the best blocker in the game.
+    assert blocker_price(db["BS2-028"]) is None      # "cannot activate 【Blocker】"
+    assert blocker_price(db["BS7-003"]) is None      # same line, BS7
+    assert blocker_price(db["BS12-092"]) is None     # "Cookies that have 【Blocker】"
 
 
 def test_an_unreadable_blocker_price_keeps_the_card_out_of_the_pool(db):

@@ -39,27 +39,40 @@ USER_AGENT = "braverse-sim-images/1.0 (personal tabletop project)"
 DEFAULT_CSV = Path(__file__).resolve().parent / "braverse_cards.csv"
 
 
-def card_ids(csv_path: Path, sets: set[str] | None, alt_art: bool) -> list[str]:
-    ids = []
+def card_ids(csv_path: Path, sets: set[str] | None,
+             alt_art: bool) -> list[tuple[str, str]]:
+    """(card id, image url) pairs, in id order.
+
+    The CSV carries the official feed's own `imageUrl`, which is the only
+    place newer sets can be fetched from -- the CDN behind `IMAGE_URL` is a
+    third-party mirror and 404s on anything it has not indexed yet. That
+    pattern stays as the fallback so a CSV written before the column existed
+    still works.
+    """
+    found: dict[str, str] = {}
     with open(csv_path, newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
             if not alt_art and row.get("is_alt_art") == "1":
                 continue
             if sets and row.get("setId") not in sets:
                 continue
-            if row.get("id"):
-                ids.append(row["id"])
-    return sorted(dict.fromkeys(ids))
+            card_id = row.get("id")
+            if not card_id:
+                continue
+            found.setdefault(card_id, (row.get("imageUrl") or "").strip()
+                             or IMAGE_URL.format(
+                                 card_id=urllib.parse.quote(card_id, safe="")))
+    return sorted(found.items())
 
 
-def download(card_id: str, out_dir: Path, retries: int = 3) -> tuple[str, str]:
+def download(card_id: str, url: str, out_dir: Path,
+             retries: int = 3) -> tuple[str, str]:
     """Returns (card_id, status) where status is ok / skip / missing / error."""
     # `@` is legal in a filename but awkward in shells and TTS tooling.
     target = out_dir / f"{card_id.replace('@', '_alt')}.webp"
     if target.exists() and target.stat().st_size > 0:
         return card_id, "skip"
 
-    url = IMAGE_URL.format(card_id=urllib.parse.quote(card_id, safe=""))
     for attempt in range(retries):
         try:
             request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -118,10 +131,10 @@ def main() -> None:
         print("card back:", fetch_card_back(args.card_back, args.out))
         return
 
-    ids = card_ids(args.csv, set(args.sets) if args.sets else None,
-                   alt_art=not args.no_alt_art)
+    targets = card_ids(args.csv, set(args.sets) if args.sets else None,
+                       alt_art=not args.no_alt_art)
     args.out.mkdir(parents=True, exist_ok=True)
-    print(f"{len(ids)} cards -> {args.out}/")
+    print(f"{len(targets)} cards -> {args.out}/")
 
     counts: dict[str, int] = {}
     missing: list[str] = []
@@ -129,14 +142,14 @@ def main() -> None:
 
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         for done, (card_id, status) in enumerate(
-                pool.map(lambda c: download(c, args.out), ids), 1):
+                pool.map(lambda t: download(t[0], t[1], args.out), targets), 1):
             key = status.split()[0]
             counts[key] = counts.get(key, 0) + 1
             if key in ("missing", "error"):
                 missing.append(f"{card_id} ({status})")
-            if done % 100 == 0 or done == len(ids):
+            if done % 100 == 0 or done == len(targets):
                 rate = done / max(time.time() - started, 1e-9)
-                print(f"  {done}/{len(ids)}  {rate:.0f}/s  "
+                print(f"  {done}/{len(targets)}  {rate:.0f}/s  "
                       + "  ".join(f"{k}={v}" for k, v in sorted(counts.items())),
                       flush=True)
 

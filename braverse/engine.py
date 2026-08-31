@@ -23,8 +23,10 @@ from . import actions as A
 from . import config as cfg
 from .cards import CardDB, CardDef, blocker_price, default_db
 from .cost import Cost, plan_payment
-from .effects import (Ctx, Trigger, ask_many, cannot_attack,
-                      continuous_damage_reduction, effect_is_live,
+from .effects import (ATTACK_DAMAGE_AURAS, Ctx, Trigger, ask_many,
+                      cannot_attack,
+                      continuous_damage_cap, continuous_damage_reduction,
+                      effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
                       may_play, modified_attack_cost,
                       refresh_break_cost, special_play_of)
@@ -53,6 +55,7 @@ TRIGGER_KINDS = {
     Trigger.PLAYED_FROM_TRASH: "\u3010On Play\u3011",
     Trigger.PLAYED_FROM_SUPPORT: "\u3010On Play\u3011",
     Trigger.PLAYED_FROM_BREAK: "\u3010On Play\u3011",
+    Trigger.ALLY_FAINTED: "faint effect",
 }
 
 # Trigger.ITEM is the shared body of an ITEM and a TRAP, and those two are the
@@ -337,6 +340,7 @@ class Game:
         player.support_trashed_this_turn = 0
         player.special_plays_this_turn = 0
         player.cookies_to_deck_bottom_this_turn = 0
+        player.arena_cookies_to_deck_bottom_this_turn = 0
         player.cookies_to_deck_this_turn = 0
         player.hp_gain_locked = False
         state.opponent.blockers_disabled = False
@@ -611,7 +615,8 @@ class Game:
             if play.is_awaken:
                 out.extend(A.PlayExtra(card.uid, onto=host.uid)
                            for host in play.hosts(ctx))
-            elif len(player.battle) < self.rules.max_battle_cookies:
+            elif (len(player.battle) - play.frees
+                  < self.rules.max_battle_cookies):
                 out.append(A.PlayExtra(card.uid))
         return out
 
@@ -720,18 +725,32 @@ class Game:
                 if player.blockers_disabled:
                     break
                 price = self._blocker_cost(cookie)
-                if price is None or plan_payment(price[0], colors) is None:
+                if price is None or plan_payment(price.energy, colors) is None:
                     continue
                 # Being rested only stops the five Cookies whose price *is*
                 # resting themselves. The rules ask for the activation cost and
                 # nothing else, so a rested Cookie with an energy price is
                 # still allowed to step in front of the swing.
-                if price[1] and cookie.rested:
+                if price.rests and cookie.rested:
+                    continue
+                # A hand that cannot cover the discard cannot make the block:
+                # the whole of BS12's purple Blocker line is priced this way.
+                if not self._can_pay_blocker_discard(player, price.discard):
                     continue
                 out.append(A.Block(cookie.uid))
         return out
 
-    def _blocker_cost(self, cookie: Cookie) -> tuple[Cost, bool] | None:
+    def _blocker_discard_pool(self, player: PlayerState,
+                              discard) -> list[CardInstance]:
+        return [c for c in player.hand
+                if discard.matches(self.db[c.card_id])]
+
+    def _can_pay_blocker_discard(self, player: PlayerState, discard) -> bool:
+        if discard is None:
+            return True
+        return len(self._blocker_discard_pool(player, discard)) >= discard.count
+
+    def _blocker_cost(self, cookie: Cookie):
         """What redirecting an attack to this Cookie costs, as printed.
 
         Returns (energy, rests itself), or None if the Cookie has no
@@ -1003,6 +1022,15 @@ class Game:
         self._end_of_battle = []
         # Static 【Your Turn】 buffs read the board as the attack is declared.
         self._run_cookie_effect(attacker, Trigger.ATTACK_START, player)
+        # So do the auras another Cookie grants this one. Applied here rather
+        # than folded into `Cookie.attack_damage` so the buff is visible to
+        # everything that reads that number, and unwound at the end of the
+        # battle so it cannot accumulate across two swings in a turn.
+        aura = sum(bonus(self.db, player, attacker)
+                   for bonus in ATTACK_DAMAGE_AURAS)
+        if aura:
+            attacker.attack_bonus += aura
+            self._attack_aura = (attacker, aura)
         # A stage can watch its controller's Cookies swing ("When your [Shadow
         # Milk Cookie] attacks, ..."), so it is asked at the same moment, with
         # the attacking Cookie as the source it is talking about.
@@ -1040,10 +1068,18 @@ class Game:
 
         swing = attacker.attack_damage(self.db)
         damage = max(0, swing - target.incoming_damage_reduction)
-        if target.damage_cap is not None:
-            # "attack damage of N or more ... is reduced to N-1" is a ceiling,
-            # not a subtraction.
-            damage = min(damage, target.damage_cap)
+        # "attack damage of N or more ... is reduced to N-1" is a ceiling, not
+        # a subtraction. Two kinds of ceiling meet here — the one an effect
+        # granted for a turn, and the one a Cookie has printed on it — and the
+        # lower of them wins. `deal_damage` applies the printed kind again, for
+        # damage that never came from an attack; folding it in here as well is
+        # what lets the swing be *announced* at the number it will land for.
+        cap = target.damage_cap
+        printed = continuous_damage_cap(self.db, self.state, target)
+        if printed is not None:
+            cap = printed if cap is None else min(cap, printed)
+        if cap is not None:
+            damage = min(damage, cap)
         if damage != swing:
             # The swing was announced at its printed number a moment ago. If a
             # trap or a defensive skill has shaved it since, say so — otherwise
@@ -1066,7 +1102,40 @@ class Game:
         if not state.over:
             self._run_cookie_effect(attacker, Trigger.ATTACK, player)
         self._check_battle_area(defender)
+        self._end_attack_auras()
         self._resolve_end_of_battle()
+
+    def for_this_battle(self, obj, attr: str, value) -> None:
+        """Set a flag that lasts until the current battle ends.
+
+        "During this battle" is a narrower window than the "during this turn"
+        most flags use, and a turn can hold several battles — so a flag left to
+        the turn-start reset would go on shading every later swing. The old
+        value is kept rather than assumed, so two effects setting the same flag
+        unwind in the order they were applied.
+        """
+        scoped = getattr(self, "_battle_scoped", None)
+        if scoped is None:
+            scoped = self._battle_scoped = []
+        scoped.append((obj, attr, getattr(obj, attr)))
+        setattr(obj, attr, value)
+
+    def _end_attack_auras(self) -> None:
+        """Take back what was applied for the duration of this battle.
+
+        A "+1 attack damage" granted by another Cookie is a property of the
+        board, not a buff the attacker keeps: leaving it on `attack_bonus`
+        would make a second swing in the same turn hit for one more than the
+        first, and would survive the granting Cookie leaving the field. The
+        same goes for a "during this battle" flag.
+        """
+        applied, self._attack_aura = getattr(self, "_attack_aura", None), None
+        if applied is not None:
+            cookie, amount = applied
+            cookie.attack_bonus -= amount
+        scoped, self._battle_scoped = getattr(self, "_battle_scoped", []), []
+        for obj, attr, old in reversed(scoped):
+            setattr(obj, attr, old)
 
     def _waits_for_the_battle(self, card: CardInstance) -> bool:
         """Whether this card's effect asks about the battle it was played into.
@@ -1156,17 +1225,33 @@ class Game:
                     price = self._blocker_cost(blocker) if blocker else None
                     if blocker is None or price is None:
                         break
-                    cost, rest_self = price
-                    if not self.pay_cost(defender, cost):
+                    if not self._can_pay_blocker_discard(defender, price.discard):
                         break
-                    if rest_self:
+                    if not self.pay_cost(defender, price.energy):
+                        break
+                    discarded = []
+                    if price.discard is not None:
+                        pool = self._blocker_discard_pool(defender, price.discard)
+                        discarded = ask_many(
+                            self.controller(defender.index), self.state,
+                            "Discard to block", pool, price.discard.count)
+                        if len(discarded) < price.discard.count:
+                            break
+                        for card in discarded:
+                            defender.hand.remove(card)
+                            defender.trash.append(card)
+                    if price.rests:
                         blocker.rested = True
                     target = blocker
                     blocked = True
                     self._pending_attack = (attacker, target)
                     self._responded = "block"
-                    self.state.record(f"{blocker.label(self.db)} blocks"
-                                      + (" and rests" if rest_self else ""))
+                    paid = " and rests" if price.rests else ""
+                    if discarded:
+                        paid += (" (discarding "
+                                 + ", ".join(card_label(self.db[c.card_id])
+                                             for c in discarded) + ")")
+                    self.state.record(f"{blocker.label(self.db)} blocks{paid}")
                 else:
                     break
         finally:
@@ -1209,6 +1294,15 @@ class Game:
             return
         amount -= cookie.all_damage_reduction
         amount -= continuous_damage_reduction(self.db, self.state, cookie)
+        # The ceiling goes on after the subtractions, so a Cookie printing one
+        # never takes more than it says however the hit was assembled. It is
+        # not restricted to attacks: "any damage received by this Cookie" also
+        # means an Item, a trap and a FLIP.
+        cap = continuous_damage_cap(self.db, self.state, cookie)
+        if cap is not None and amount > cap:
+            self.state.record(f"{name} takes {cap} {kind} damage{by} "
+                              f"instead of {amount} (reduced)")
+            amount = cap
         if amount <= 0:
             self.state.record(f"{name} takes no {kind} damage{by} (reduced)")
             return
@@ -1442,6 +1536,8 @@ class Game:
         if bottom:
             self._to_private_zone(owner, cookie.card, owner.deck.append)
             owner.cookies_to_deck_bottom_this_turn += 1
+            if Keyword.ARENA in self.db[cookie.card.card_id].keywords:
+                owner.arena_cookies_to_deck_bottom_this_turn += 1
         else:
             self._to_private_zone(owner, cookie.card,
                                   lambda c: owner.deck.insert(0, c))
@@ -1470,6 +1566,14 @@ class Game:
         owner.trash.append(cookie.card)
         owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{card_label(self.db[cookie.card.card_id])} is trashed")
+        # The other seat watches this happen: "when a Cookie in your opponent's
+        # battle area is placed in the trash by effect". `trash_cookie` is the
+        # only route a Cookie takes to the trash without fainting, so it is
+        # exactly the "by effect" the stage cards mean. Fired before the
+        # battle-area check, because it reacts to the event and that check is a
+        # state-based clean-up of what the event left behind.
+        self._run_stage_effects(self.state.opponent_of(owner.index),
+                                Trigger.OPPONENT_TRASHED, cookie)
         self._check_battle_area(owner)
 
     def _faint(self, cookie: Cookie) -> None:
@@ -1497,6 +1601,15 @@ class Game:
         self._count_break_addition(owner, cookie.card)
         owner.trash.extend(cookie.spent_cards)
         self.state.record(f"{card_label(self.db[cookie.card.card_id])} faints")
+        # The Cookies that are still standing watch it happen: "when one of
+        # your Cookies faints, ...". Fired here, after the board reflects the
+        # faint and over the survivors, so a watcher reads the battle area the
+        # loss actually left behind — and so the Cookie that just left does not
+        # answer for an ability it no longer has on the field.
+        for survivor in list(owner.battle):
+            if self.state.over:
+                break
+            self._run_cookie_effect(survivor, Trigger.ALLY_FAINTED, owner)
         self._check_win()
         if not self.state.over:
             self._check_battle_area(owner)

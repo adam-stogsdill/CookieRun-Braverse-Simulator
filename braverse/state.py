@@ -192,6 +192,13 @@ class PlayerState:
     # BS9-088's 【Awaken】 gate is the only card that asks, and it asks because
     # the two BS9 Cookies that bury themselves are what set it up.
     cookies_to_deck_bottom_this_turn: int = 0
+    # The same, but only the 【Arena】 ones. BS12-074's gate asks for the
+    # keyword, and it can only be read off the Cookie as it leaves — once the
+    # card is in the deck it is one of sixty and the battle area has no memory
+    # of it. Kept beside the plain count for the same reason
+    # `arena_break_additions_this_turn` is kept beside
+    # `break_additions_this_turn`.
+    arena_cookies_to_deck_bottom_this_turn: int = 0
     # The same, counting the top of the deck as well. BS9-083 asks "top or
     # bottom" and BS9-088 asks only about the bottom, so the two are counted
     # separately rather than one being derived from the other.

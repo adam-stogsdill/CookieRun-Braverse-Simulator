@@ -1593,7 +1593,8 @@ def test_a_blocker_priced_in_rest_actually_rests():
     game, defender = _attack_setup(db)
     blocker = defender.battle[1]
     assert db[blocker.card.card_id].name == "Blue Lily Cookie"
-    assert game._blocker_cost(blocker) == (Cost(), True)
+    from braverse.cards import BlockerPrice
+    assert game._blocker_cost(blocker) == BlockerPrice(Cost(), rests=True)
 
     attacker = game.state.players[0].battle[0]
     game._pending_attack = (attacker, defender.battle[0])
@@ -1620,7 +1621,8 @@ def test_a_blocker_priced_in_energy_pays_from_support():
     game._deploy_cookie(defender, CardInstance.make("ST8-011", 1),
                         run_on_play=False)                 # Kiwi Cookie, <{G}>
     blocker = defender.battle[1]
-    assert game._blocker_cost(blocker) == (Cost(colored=((Color.GREEN, 1),)), False)
+    from braverse.cards import BlockerPrice
+    assert game._blocker_cost(blocker) == BlockerPrice(Cost(colored=((Color.GREEN, 1),)))
     defender.hand = []                                     # no trap to distract it
 
     attacker = game.state.players[0].battle[0]
@@ -2072,3 +2074,168 @@ def test_the_powerpuff_promos_keep_their_arena_subtype(db):
     # The two promos dealt beside them carry no badge and must stay untyped.
     assert Keyword.ARENA not in db["P-101"].keywords
     assert Keyword.ARENA not in db["P-102"].keywords
+
+
+# --- ST5-022 Windswept Valley ----------------------------------------------
+def _valley_game(db):
+    """P0 watching from behind a Windswept Valley, P1 with a Cookie to lose."""
+    game = Game([STARTER_DECKS["st8_wind_archer"], STARTER_DECKS["st9_sea_fairy"]],
+                [_PicksFirst(), _PicksFirst()], db=db, seed=3)
+    game.setup()
+    _plain_pile(game, db)
+    watcher = game.state.players[0]
+    watcher.stage = [CardInstance.make("ST5-022", 0)]
+    return game, watcher
+
+
+def test_windswept_valley_draws_when_an_enemy_cookie_is_trashed():
+    """The stage watches the *other* battle area: a Cookie trashed by effect
+    rests the Valley and pays its controller a card."""
+    db = default_db()
+    game, watcher = _valley_game(db)
+    hand_before = len(watcher.hand)
+
+    game.trash_cookie(game.state.players[1].battle[0])
+
+    assert watcher.stage[0].rested, "the printed cost is resting this card"
+    assert len(watcher.hand) == hand_before + 1
+
+
+def test_windswept_valley_is_not_paid_twice_in_one_turn():
+    """The cost is the card itself, so a second trash finds it already rested
+    and nothing more is drawn until the Active Phase sets it back."""
+    db = default_db()
+    game, watcher = _valley_game(db)
+    loser = game.state.players[1]
+    game._deploy_cookie(loser, CardInstance.make("ST9-001", 1), run_on_play=False)
+    assert len(loser.battle) >= 2, "two Cookies to lose, one after the other"
+
+    game.trash_cookie(loser.battle[0])
+    deck_after_first = len(watcher.deck)
+    assert watcher.stage[0].rested
+
+    game.trash_cookie(loser.battle[0])
+
+    assert len(watcher.deck) == deck_after_first, "the Valley is already rested"
+
+
+def test_windswept_valley_ignores_its_own_sides_losses():
+    """"a Cookie in your opponent's battle area" — the Valley's controller
+    trashing their own Cookie is somebody else's trigger, not this one."""
+    db = default_db()
+    game, watcher = _valley_game(db)
+
+    game.trash_cookie(watcher.battle[0])
+
+    # Resting is the gate on the draw, so an active Valley is the whole
+    # assertion — the deck cannot be counted here, since losing the last Cookie
+    # sends a replacement in and that fills an HP pile off the top.
+    assert not watcher.stage[0].rested
+
+
+def test_windswept_valley_does_not_fire_on_a_faint():
+    """Fainting is not "placed in the trash by effect" — it is the break area,
+    and the card that says so is priced against removal, not against damage."""
+    db = default_db()
+    game, watcher = _valley_game(db)
+    deck_before = len(watcher.deck)
+
+    game._faint(game.state.players[1].battle[0])
+
+    assert not watcher.stage[0].rested
+    assert len(watcher.deck) == deck_before
+
+
+# --- BS3-017 Hollyberry Cookie ----------------------------------------------
+def _hollyberry_board(db, seed=17):
+    """P0 fielding Hollyberry alone, P1 with one Cookie to swing with."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=seed)
+    game.setup()
+    _plain_pile(game, db)
+    me, opp = game.state.players
+    me.battle.clear()
+    holly = game._deploy_cookie(me, CardInstance.make("BS3-017", 0),
+                                run_on_play=False)
+    _plain_pile(game, db)
+    return game, me, opp, holly
+
+
+def test_hollyberry_shield_caps_effect_damage_at_two():
+    """"Any damage of 3 or more received by this Cookie is reduced to 2."
+
+    "Any" is the word that matters: the ceiling is not an attack-only one, so
+    an Item, a trap or a FLIP is capped the same way a swing is.
+    """
+    db = default_db()
+    game, me, opp, holly = _hollyberry_board(db)
+    before = holly.remaining_hp
+
+    game.deal_damage(holly, 5, source_player=1)
+
+    assert holly.remaining_hp == before - 2, "5 damage must land as 2"
+
+
+def test_hollyberry_shield_leaves_small_hits_alone():
+    """A ceiling of 2 *is* the printed "of 3 or more" — 1 and 2 pass through
+    unchanged, so the card must not be read as a flat reduction."""
+    db = default_db()
+    game, me, opp, holly = _hollyberry_board(db)
+    before = holly.remaining_hp
+
+    game.deal_damage(holly, 2, source_player=1)
+
+    assert holly.remaining_hp == before - 2
+
+
+def test_hollyberry_shield_is_not_wiped_by_the_active_phase():
+    """It is printed on the card, not granted for a turn: `Cookie.damage_cap`
+    is cleared every Active Phase and this must survive that."""
+    db = default_db()
+    game, me, opp, holly = _hollyberry_board(db)
+    game._begin_turn()
+    before = holly.remaining_hp
+
+    game.deal_damage(holly, 4, source_player=1)
+
+    assert holly.remaining_hp == before - 2
+
+
+def test_hollyberry_shield_shaves_an_attack_and_says_so():
+    """Folded into the swing calculation too, so the announced number is the
+    number that lands rather than the attack quietly underperforming."""
+    db = default_db()
+    game, me, opp, holly = _hollyberry_board(db)
+    opp.battle.clear()
+    attacker = game._deploy_cookie(opp, CardInstance.make("BS9-097", 1),
+                                   run_on_play=False)
+    attacker.summoned_this_turn = False
+    game.state.turn_player = 1
+    opp.support = [CardInstance.make("ST5-001", 1) for _ in range(6)]
+    for card in opp.support:
+        card.rested = False
+    swing = attacker.attack_damage(db)
+    assert swing >= 3, f"the test needs a swing the shield actually caps: {swing}"
+    before = holly.remaining_hp
+
+    game._do_attack(A.Attack(attacker.uid, holly.uid))
+
+    assert holly.remaining_hp == before - 2
+    assert any("attack is reduced to 2" in line for line in game.state.log), \
+        game.state.log[-5:]
+
+
+def test_hollyberry_shield_travels_with_the_cookie_not_the_board():
+    """The registry is read off the Cookie being hit, so the shield protects
+    Hollyberry and nobody standing next to her."""
+    db = default_db()
+    game, me, opp, holly = _hollyberry_board(db)
+    neighbour = game._deploy_cookie(me, CardInstance.make("BS9-097", 0),
+                                    run_on_play=False)
+    _plain_pile(game, db)
+    before = neighbour.remaining_hp
+
+    game.deal_damage(neighbour, 3, source_player=1)
+
+    assert neighbour.remaining_hp == before - 3

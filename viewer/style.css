@@ -127,9 +127,18 @@ body {
 }
 .brand { font-weight: 700; letter-spacing: .2px; }
 .brand span { color: var(--accent); font-weight: 500; }
-/* Only a way home when `Title.markHome` says the menu could stay up. */
+/* Only a way home when `Title.markHome` says there is somewhere to go. */
 .brand.home { cursor: pointer; }
 .brand.home:hover { color: var(--accent); }
+/* Leaving a match is held, and `needhold` says so with a dashed *border* —
+   a box drawn around the title in the header is louder than anything else in
+   the bar, and appearing when a game starts it shoves the tabs sideways. An
+   underline is the same promise at the size the header is. */
+.brand.needhold {
+  border: 0 !important;
+  border-bottom: 1px dashed var(--dim) !important;
+}
+.brand.needhold.holding { border-bottom-color: var(--accent) !important; }
 .turnline { color: var(--dim); flex: 1; }
 .turnline b { color: var(--ink); }
 .controls { display: flex; align-items: center; gap: 8px; }

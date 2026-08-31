@@ -3,8 +3,8 @@
   "encoder": "wide",
   "dim": 142,
   "out": "agents/rl_wide.pt",
-  "vs_heuristic": 0.79,
-  "vs_unseen": 0.79,
-  "minutes": 946.0279835979144
+  "vs_heuristic": 0.675,
+  "vs_unseen": 0.71,
+  "minutes": 1446.3907733678818
  }
 ]

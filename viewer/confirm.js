@@ -57,6 +57,13 @@ const Confirm = (function () {
   // pointing at a card, one click, no menu in between. It is the cheapest
   // click on the table and the one that hurts most when it goes astray.
   const PICK_KINDS = new Set(["cookie", "card"]);
+  /* Moves that hold at every level, `off` included. Leaving a match is not a
+   * move inside the game — it throws the whole game away — and it is reached
+   * by clicking the title in the corner of the header, which is where a mouse
+   * rests between turns. `off` promises the old one-click viewer back, and
+   * that viewer had no way out of a match at all, so there is nothing here to
+   * keep identical. */
+  const ALWAYS_HOLD = new Set(["Quit"]);
 
   let level = read();
   let holdMs = readHold();
@@ -110,7 +117,9 @@ const Confirm = (function () {
   /* ------------------------------------------------------ what needs a hold */
   /** `opt` is a pending option, or the string "decline" for a null answer. */
   function needsHold(opt) {
-    if (level === "off" || !opt) return false;
+    if (!opt) return false;
+    if (opt.kind && ALWAYS_HOLD.has(opt.kind)) return true;
+    if (level === "off") return false;
     if (level === "all") return true;
     if (opt === "decline") return true;
     return KEY_KINDS.has(opt.kind) || PICK_KINDS.has(opt.kind);

@@ -23,6 +23,13 @@ const Title = {
     el("#title").classList.remove("hidden");
     Title.stamp();
     Title.hideOver();
+    /* Nothing on the board is answerable from here, and a question left over
+     * by an abandoned game is drawn *above* the menu — the table's prompts sit
+     * at the z-index they need to clear the board, not the one they would need
+     * to sit under an overlay. So the question comes down with the match. */
+    el("#centre").classList.add("hidden");
+    el("#picker").classList.add("hidden");
+    if (typeof Confirm !== "undefined") Confirm.cancel(true);
   },
 
   /* The build, in the top-left corner. `state.build` is whatever version the
@@ -40,18 +47,65 @@ const Title = {
 
   hideOver() { el("#gameover").classList.add("hidden"); },
 
-  /* The brand in the header is the way home, and it is offered only when the
-   * menu could actually stay up. There is no route that abandons a match, so
-   * a title screen raised over a game in progress — or over a room, which has
-   * its own Leave button — would be pulled straight back off by the next
-   * `sync`, which reads as the click having done nothing. `ready` is that
-   * question, asked once per poll; the class is what makes it look clickable. */
-  markHome(ready) {
+  /* The brand in the header is the way home, and it is the way out of a game.
+   *
+   * It used to be only the first, and only when the menu could actually stay
+   * up: a title screen raised over a match in progress would be pulled
+   * straight back off by the next `sync`, so the brand was left dead during
+   * the one state people click it in — which reads as a broken control rather
+   * than as a game that cannot be left. So a solo match now *ends* first
+   * (`/api/quit`), and then the menu has somewhere to stand.
+   *
+   * A room and a peer game are still refused: someone else is sitting at
+   * those tables, and both already have a Leave that says so to them before
+   * it closes. `sync` asks both questions once per poll; the class is what
+   * makes it look clickable, and `mode` is the whole of what it does. */
+  markHome(ready, leaves) {
     Title.homeReady = !!ready;
+    Title.homeLeaves = !!leaves;
+    const mode = leaves ? "leave" : (Title.homeReady ? "home" : "");
     const brand = el(".brand");
-    if (!brand) return;
-    brand.classList.toggle("home", Title.homeReady);
-    brand.title = Title.homeReady ? "Back to the title screen" : "";
+    if (!brand || brand.dataset.mode === mode) return;
+    Title.wireBrand(mode);
+  },
+
+  /* Wiring replaces the node rather than reassigning its handlers: leaving is
+   * held rather than clicked, and `Confirm.wire` *adds* pointer and key
+   * listeners, so wiring the same element a second time would leave the first
+   * mode armed underneath the second. */
+  wireBrand(mode) {
+    const old = el(".brand");
+    const brand = old.cloneNode(true);
+    old.replaceWith(brand);
+    // The clone carries the last mode's tooltip and hold marks with it.
+    brand.title = "";
+    brand.classList.remove("needhold", "holding");
+    delete brand.dataset.hold;
+    brand.dataset.mode = mode;
+    brand.classList.toggle("home", !!mode);
+    if (mode === "home") {
+      brand.title = "Back to the title screen";
+      brand.onclick = () => { if (!Title.on) Title.show(); };
+    } else if (mode === "leave") {
+      // `Confirm.wire` writes the title itself — "Hold to leave the match".
+      Confirm.wire(brand, { kind: "Quit", hold: "leave the match" },
+                   () => Title.quit());
+    }
+  },
+
+  /* End the match this browser is playing and come back to the menu. The
+   * board underneath is left as it was, exactly as it is when a finished game
+   * is dismissed with "Title screen"; the next match draws over it. */
+  async quit() {
+    const res = await api("/api/quit", {});
+    if (res && res.error) { alert(res.error); return; }
+    if (typeof Tut !== "undefined" && Tut.on) Tut.finish(true);
+    state.version = -1;
+    state.pendingId = null;
+    state.eventId = 0;
+    state.announced = false;
+    Title.show();
+    poll();
   },
 
   /* Open the set-up dialog with the decisions this menu entry has already
@@ -86,7 +140,12 @@ const Title = {
      * is opened. */
     const elsewhere = typeof onPlayTab === "function" && !onPlayTab();
     if (Title.on) Title.stamp();   // the first poll is often what names it
-    Title.markHome(snap.idle || snap.over ? !waiting : false);
+    /* A match with nobody else in it can be walked out of; a room or a peer
+     * game cannot. `elsewhere` is left out of both: the brand is in the header
+     * of every tab, and on the deck builder it is still the way back. */
+    const alone = !state.room && !state.peer && !waiting;
+    Title.markHome(snap.idle || snap.over ? !waiting : false,
+                   alone && !snap.idle && !snap.over);
     if (snap.idle && !waiting && !Title.on && !elsewhere) Title.show();
     if ((waiting || (!snap.idle && !snap.over)) && Title.on) Title.hide();
     // A finished match asks its question once the last scene has played out;
@@ -134,11 +193,6 @@ const Title = {
     state.announced = false;
     poll();
   },
-};
-
-el(".brand").onclick = () => {
-  if (!Title.homeReady || Title.on) return;
-  Title.show();
 };
 
 el("#title-bot").onclick = () => Title.openSetup(["human", "heuristic"]);

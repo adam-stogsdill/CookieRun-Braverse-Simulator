@@ -534,10 +534,9 @@ def test_incoming_damage_reduction_applies_to_the_attack(db):
 # yet: each needs grammar the compiler does not have (mandatory-HP-trash costs,
 # attack redirection, "for every N in your break area" scaling, support-count
 # history). They are listed rather than tolerated in bulk so that a *new* hole
-# in a completed set still fails these tests.
-KNOWN_UNCODED = {
-    "ST5-022",
-}
+# in a completed set still fails these tests. Empty at the moment — every card
+# that was on it has since been written by hand.
+KNOWN_UNCODED: set[str] = set()
 
 
 def test_bs1_and_bs2_are_fully_implemented(db):

@@ -37,6 +37,11 @@ agent trains on the metagame those runs actually produced::
 
     python train_wide.py --games 40000 --decks decks/v5_*.txt
 
+A folder is a pool, and `--deck-pool-subfolders` makes it the whole tree::
+
+    python train_wide.py --games 40000 --decks decks/meta
+    python train_wide.py --games 40000 --decks decks --deck-pool-subfolders
+
 Reading the output
 ------------------
 `vs heuristic` is win rate against the scripted agent on the training decks;
@@ -64,7 +69,7 @@ from pathlib import Path
 
 from braverse import STARTER_SET_IDS, default_db, starter_deck
 from braverse.agentfile import AGENT_DIR, find_checkpoint
-from braverse.deckfile import read_deck
+from braverse.deckfile import read_deck, read_extra, read_pool
 from braverse.features import Encoder
 from braverse.features_wide import WideEncoder
 from braverse.rl import TrainConfig, Trainer
@@ -73,21 +78,58 @@ from braverse.console import utf8_output
 ENCODERS = {"wide": WideEncoder, "stock": Encoder}
 
 
-def load_decks(patterns: list[str], db) -> tuple[list[list[str]], str]:
-    """Decks to train on: files if given, otherwise the ten starter decks."""
+def load_decks(patterns: list[str], db,
+               subfolders: bool = False) -> tuple[list[list[str]], str]:
+    """Decks to train on: files or folders if given, else the ten starter decks.
+
+    A folder among the entries expands to every list in it, the way it does for
+    `compare_decks.py --decks` and `evolve_deck.py --gauntlet` — that is how
+    `decks/meta` is passed as one word — and `subfolders` makes that expansion
+    read the folder's subfolders too. It goes through `read_pool`, so a folder
+    contributes its lists name-sorted and de-duplicated; a file named
+    explicitly is taken as given, because naming it is the choice.
+    """
     if not patterns:
         return [starter_deck(db, s) for s in STARTER_SET_IDS], "10 starter decks"
 
-    paths = sorted({p for pattern in patterns for p in glob.glob(pattern)})
-    decks = []
-    for path in paths:
-        try:
-            decks.append(read_deck(path))
-        except Exception as exc:            # a half-written file from a live run
-            print(f"  skipping {path}: {exc}")
+    decks: list[list[str]] = []
+    with_extra: list[str] = []
+    sources: list[str] = []
+    files = 0
+    for entry in patterns:
+        if Path(entry).is_dir():
+            pool = read_pool(entry, recursive=subfolders)
+            if not pool:
+                raise SystemExit(f"no decklists in {entry}")
+            sources.append(entry.rstrip("/") + ("/**" if subfolders else ""))
+            decks.extend(deck for _, deck, _ in pool)
+            with_extra.extend(name for name, _, extra in pool if extra)
+            continue
+        for path in sorted(glob.glob(entry)):
+            try:
+                deck = read_deck(path)
+            except Exception as exc:        # a half-written file from a live run
+                print(f"  skipping {path}: {exc}")
+                continue
+            files += 1
+            decks.append(deck)
+            if read_extra(path):
+                with_extra.append(Path(path).stem)
     if not decks:
         raise SystemExit(f"no readable decklists matched {patterns}")
-    return decks, f"{len(decks)} decks from {len(paths)} file(s)"
+    if with_extra:
+        # One pile per seat here, as in `train_rl.py`: say that a second pile
+        # is being dropped rather than training a deck nobody registered. The
+        # names are capped because a whole folder tree can put ninety on the
+        # line, and the count is the part that matters.
+        shown = ", ".join(with_extra[:8])
+        if len(with_extra) > 8:
+            shown += f", and {len(with_extra) - 8} more"
+        print(f"warning: EXTRA decks are not played in training — "
+              f"{len(with_extra)} list(s) will train without theirs ({shown})")
+    if files:
+        sources.append(f"{files} file(s)")
+    return decks, f"{len(decks)} decks from {', '.join(sources)}"
 
 
 def train_one(name: str, decks, db, args) -> dict:
@@ -136,8 +178,15 @@ def main() -> None:
     parser.add_argument("--eval-games", type=int, default=200,
                         help="games per evaluation (default: 200)")
     parser.add_argument("--decks", nargs="*", default=[],
-                        help="decklist files or globs; default is the ten "
-                             "starter decks, e.g. --decks decks/v5_*.txt")
+                        help="decklist files, globs or folders; a folder "
+                             "expands to every list in it. Default is the ten "
+                             "starter decks, e.g. --decks decks/v5_*.txt or "
+                             "--decks decks/meta")
+    parser.add_argument("--deck-pool-subfolders", action="store_true",
+                        help="expand a folder in --decks recursively, so "
+                             "--decks decks --deck-pool-subfolders trains on "
+                             "every list under decks/ rather than only the "
+                             "loose ones")
     parser.add_argument("--encoder", choices=list(ENCODERS), default="wide")
     parser.add_argument("--compare", action="store_true",
                         help="train both encoders on the same budget and decks")
@@ -155,7 +204,8 @@ def main() -> None:
     args = parser.parse_args()
 
     db = default_db()
-    decks, described = load_decks(args.decks, db)
+    decks, described = load_decks(args.decks, db,
+                                  subfolders=args.deck_pool_subfolders)
     print(f"training decks: {described}")
 
     if args.eval_only:

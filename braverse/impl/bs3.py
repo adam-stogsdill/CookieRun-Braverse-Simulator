@@ -7,8 +7,9 @@ few once-per-game and damage-capping abilities with no equivalent elsewhere.
 from __future__ import annotations
 
 from braverse.cost import Cost
-from braverse.effects import (SELECTION_PROTECTORS, STATIC_ABILITY_CARDS,
-                              TRASH_PROTECTORS, Ctx, Trigger, effect)
+from braverse.effects import (DAMAGE_CAPS, SELECTION_PROTECTORS,
+                              STATIC_ABILITY_CARDS, TRASH_PROTECTORS, Ctx,
+                              Trigger, effect)
 from braverse.enums import Color, Keyword, Marker
 
 
@@ -84,6 +85,25 @@ def schwarzwalder_red_static(ctx: Ctx) -> None:
     everyone = list(ctx.me.battle) + list(ctx.opp.battle)
     if any(c.defn(ctx.db).has(Marker.BLOCKER) for c in everyone):
         ctx.modify_attack(cookie, 1)
+
+
+# --- BS3-017 Hollyberry Cookie ----------------------------------------------
+def _hollyberry_shield(db, state, cookie) -> int | None:
+    """"Hollyberry Shield: any damage of 3 or more received by this Cookie is
+    reduced to 2."
+
+    Printed on the card, so it is always on — unlike `Cookie.damage_cap`, which
+    an effect grants for a turn and the Active Phase clears. It is also "any"
+    damage, not attack damage: an Item, a trap and a FLIP are all capped too.
+    A ceiling of 2 is the whole of the printed sentence, since a 1 or a 2
+    already passes through `min` unchanged.
+    """
+    if cookie.defn(db).base_id != "BS3-017":
+        return None
+    return 2
+
+
+DAMAGE_CAPS.append(_hollyberry_shield)
 
 
 # --- BS3-025 Golden Cheese Cookie -------------------------------------------

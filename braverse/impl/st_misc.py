@@ -145,6 +145,26 @@ def yoga_activate(ctx: Ctx) -> None:
     _trash_cookie_or_stage(ctx, max_level=1)
 
 
+# --- ST5-022 Windswept Valley -----------------------------------------------
+@effect("ST5-022", Trigger.OPPONENT_TRASHED)
+def windswept_valley(ctx: Ctx) -> None:
+    """When a Cookie in your opponent's battle area is placed in the trash by
+    effect, <rest this card.> Draw up to 1 card from your deck.
+
+    The cost is the stage card itself, so it can be paid once per turn no
+    matter how many Cookies are trashed — the Active Phase is what sets it
+    active again. A rested Valley is asked nothing, since a cost that cannot be
+    paid is not a decision.
+    """
+    card = ctx.source_card
+    if card is None or card.rested:
+        return
+    if not ctx.wants_to_pay("rest this card"):
+        return
+    card.rested = True
+    ctx.draw(1)
+
+
 # --- ST6-016 Dragon's Breath ------------------------------------------------
 @effect("ST6-016", Trigger.ITEM)
 def dragons_breath(ctx: Ctx) -> None:

@@ -2546,6 +2546,22 @@ class Server:
         match.start()
         return match
 
+    def end_match(self) -> bool:
+        """Abandon the machine's own match, if it has one.
+
+        The way back to the title screen from a game in progress. Only the
+        solo table: a room and a peer game each have another person sitting at
+        them and their own Leave, which says so to the other seat before it
+        closes. Replacing a match already went through `Match.stop`, so this is
+        that half of `new_match` with no new game after it.
+        """
+        with self.lock:
+            match, self.match = self.match, None
+        if match is None:
+            return False
+        match.stop()
+        return True
+
     # -- rooms -----------------------------------------------------------
     # -- peer-to-peer ------------------------------------------------------
     def new_peer(self, seat: int, deck: str, name: str) -> PeerLobby:
@@ -3211,6 +3227,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": f"{type(exc).__name__}: {exc}"}, 400)
                 return
             self._json({"ok": True, "seed": match.seed})
+        elif path == "/api/quit":
+            # Leaving a game in progress. Not in PUBLIC_ROUTES, so a joiner
+            # cannot end the host's game from the other side of a tunnel; a
+            # room is left through /api/room/leave and a peer game through
+            # /api/peer/close, both of which have someone to tell.
+            self._json({"ok": True, "ended": self.app.end_match()})
         elif path == "/api/deck/validate":
             cards = clean_card_list(body.get("cards"))
             self._json(deck_payload(self.app.db, cards,

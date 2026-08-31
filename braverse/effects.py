@@ -55,6 +55,20 @@ class Trigger(str, Enum):
     PLAYED_FROM_SUPPORT = "played_from_support"
     # "When this Cookie is played from the break area, ..."
     PLAYED_FROM_BREAK = "played_from_break"
+    # "When a Cookie in your opponent's battle area is placed in the trash by
+    # effect" — fired on the *watching* player's stage cards, not on the Cookie
+    # that left. TRASHED is the same event seen from the other side, and the
+    # two are separate triggers because they run for different players: the
+    # Cookie's owner reacts with TRASHED, their opponent with this.
+    OPPONENT_TRASHED = "opponent_trashed"
+    # "When one of your Cookies faints, ..." — fired on the fainting player's
+    # *other* Cookies, the way OPPONENT_TRASHED is fired on the watcher rather
+    # than on the card that left. FAINT is the same event seen from the inside
+    # and stays separate: a Cookie reacting to its own death and a Cookie
+    # reacting to a neighbour's are different abilities, printed differently.
+    # The Cookie that fainted does not watch its own faint — it is no longer in
+    # the battle area, and a continuous ability needs a card on the field.
+    ALLY_FAINTED = "ally_fainted"
 
 
 # Cards whose mere presence on the field forbids the *opponent's* effects from
@@ -116,6 +130,10 @@ class ExtraPlay:
     gate: object                     # (ctx) -> bool
     hosts: object = None             # (ctx) -> list[Cookie], 【Awaken】 only
     pay: object = None               # (ctx) -> bool, the <...> cost
+    # Battle slots the `pay` cost empties on the way in. 3-5-6-1-1 again:
+    # BS12-092 trashes a Cookie of yours to arrive, so a full battle area is
+    # not in its way any more than it is in Dark Enchantress's.
+    frees: int = 0
 
     @property
     def is_awaken(self) -> bool:
@@ -221,6 +239,18 @@ def forced_attack_target(db, defender):
 # leaking into the engine.
 EFFECT_DAMAGE_BONUSES: list = []
 
+# Continuous "+N attack damage" auras a Cookie grants to *others* — "Other {K}
+# 【Arena】 Cookies in your battle area gain +1 attack damage". A card that
+# buffs only itself does not belong here: it registers Trigger.ATTACK_START and
+# reads `ctx.source_cookie`, because that trigger fires for the attacker alone.
+# Each entry takes (db, player, attacker) and returns the bonus it grants.
+#
+# The engine applies these as the attack is declared and takes them off again
+# when the battle ends, so the number is right in the log, in the viewer and to
+# a search agent — and a Cookie that swings twice in one turn is not buffed
+# twice for the second swing.
+ATTACK_DAMAGE_AURAS: list = []
+
 # Continuous attack-cost rewrites, e.g. "each cost required for this Cookie's
 # attack becomes {N}". Each entry takes (db, player, cookie, cost) and returns
 # a replacement Cost, or None to leave it alone.
@@ -252,6 +282,27 @@ DAMAGE_REDUCERS: list = []
 
 def continuous_damage_reduction(db, state, cookie) -> int:
     return sum(rule(db, state, cookie) for rule in DAMAGE_REDUCERS)
+
+
+# Continuous "any damage of N or more received by this Cookie is reduced to
+# N-1" abilities. Each entry takes (db, state, cookie) and returns the ceiling
+# it puts on one instance of damage, or None when it does not apply.
+#
+# A ceiling is not a subtraction, which is why these cannot ride on
+# DAMAGE_REDUCERS: a 5-damage hit under "reduced to 2" lands for 2, not for 3,
+# and the printed conditional ("of 3 or more") needs no separate test —
+# `min(amount, 2)` already leaves 1 and 2 alone. `Cookie.damage_cap` is the
+# same idea with a duration and a narrower scope (one turn, attack damage
+# only); this registry is for the ones printed on the card and always on.
+DAMAGE_CAPS: list = []
+
+
+def continuous_damage_cap(db, state, cookie) -> int | None:
+    """The lowest ceiling any continuous ability puts on one hit, or None."""
+    caps = [cap for cap in (rule(db, state, cookie) for rule in DAMAGE_CAPS)
+            if cap is not None]
+    return min(caps) if caps else None
+
 
 def modified_attack_cost(db, player, cookie, cost):
     for modifier in ATTACK_COST_MODIFIERS:

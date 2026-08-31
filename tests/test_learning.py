@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from braverse import STARTER_DECKS, default_db, validate
+from braverse import STARTER_DECKS, default_db, starter_deck, validate
 from braverse import actions as A
 from braverse.deckgen import (DeckEvolver, DeckGenConfig, implemented_pool,
                               set_pool)
@@ -336,7 +336,15 @@ def test_holdout_uses_a_block_the_search_never_touches(db):
 def test_evolution_beats_unevolved_decks_on_held_out_shuffles(db):
     """Generation-to-generation means are noisy by design now — each one is a
     fresh sample. The claim worth testing is that the search output beats
-    unevolved decks on shuffles neither of them was selected on."""
+    unevolved decks on shuffles neither of them was selected on.
+
+    The baseline is six random decks rather than three, and both sides get
+    200 games rather than 40/120, because the variance here is mostly
+    *between decks* — a single lucky random list scores as well as an evolved
+    one over 40 games. With the old sample sizes this held only for the pool
+    ordering the card CSV happened to have, and reordering the CSV (a card
+    feed serving its rows oldest-first rather than newest-first) turned it
+    into a tie without anything about the search changing."""
     pool = set_pool(db, ("ST8", "ST9"))
     evolver = DeckEvolver(pool, [STARTER_DECKS["st8_wind_archer"]],
                           DeckGenConfig(population=10, generations=6, elite=2,
@@ -346,9 +354,9 @@ def test_evolution_beats_unevolved_decks_on_held_out_shuffles(db):
     assert validate(deck, db).ok
     assert history[-1]["validation_best"] == score
 
-    baseline = sum(evolver.holdout(evolver.random_deck(), games=40)
-                   for _ in range(3)) / 3
-    assert evolver.holdout(deck, games=120) > baseline
+    baseline = sum(evolver.holdout(evolver.random_deck(), games=200)
+                   for _ in range(6)) / 6
+    assert evolver.holdout(deck, games=200) > baseline
 
 
 def test_reported_score_is_validated_not_the_best_training_score(db):
@@ -377,10 +385,19 @@ def test_implemented_pool_only_holds_cards_the_engine_fully_plays(db):
     assert "ST9-001" in pool          # vanilla body, nothing to code
 
     def has_text(card):
-        import re
+        """Text the engine would have to *code* to play the card in full.
+
+        The 【Blocker】 line is not that: the engine reads it natively. This
+        asks `strip_blocker_text` rather than keeping a second copy of the
+        pattern, because the local copy drifted once already — it required the
+        parenthesised reminder, so BS12's Blockers, which print the price with
+        no reminder, read as uncoded text on a card that is in fact played in
+        full."""
+        from braverse.cards import strip_blocker_text
+
         text = " ".join([card.description, card.flip_text,
                          card.attack.text if card.attack else ""])
-        return bool(re.sub(r"【Blocker】\s*(?:<[^>]*>)?\s*\([^)]*\)", "", text).strip())
+        return bool(strip_blocker_text(card, text).strip())
 
     unimplemented = [c for c in db.cards.values()
                      if has_text(c) and not is_implemented(c.id)]
@@ -620,3 +637,36 @@ def test_a_pool_is_evaluated_across_the_pool(db, monkeypatch):
     pair_trainer.evaluate(4)
     assert seen == [None] * 4
     assert original is not None
+
+
+def test_train_wide_takes_a_folder_as_a_pool(db, tmp_path, capsys):
+    """`train_wide.py --decks <folder>` is the same pool `train_rl.py` trains on.
+
+    The two trainers are the same run under two encoders, so a pool that can be
+    named for one and not the other means the encoder comparison is quietly
+    also a deck comparison. A folder expands, `--deck-pool-subfolders` reaches
+    its subfolders, and an explicitly named file is still taken as given.
+    """
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+    from braverse.deckfile import write_deck
+    from train_wide import load_decks
+
+    st9, st8 = starter_deck(db, "ST9"), starter_deck(db, "ST8")
+    (tmp_path / "run").mkdir()
+    write_deck(tmp_path / "loose.txt", st9, db)
+    write_deck(tmp_path / "run" / "gen000.txt", st8, db)
+
+    decks, described = load_decks([], db)
+    assert described == "10 starter decks"
+
+    decks, described = load_decks([str(tmp_path)], db)
+    assert [len(d) for d in decks] == [60] and len(decks) == 1
+    assert described.startswith("1 decks from")
+
+    decks, _ = load_decks([str(tmp_path)], db, subfolders=True)
+    assert len(decks) == 2
+
+    decks, described = load_decks([str(tmp_path / "run" / "gen000.txt")], db)
+    assert len(decks) == 1 and "file(s)" in described

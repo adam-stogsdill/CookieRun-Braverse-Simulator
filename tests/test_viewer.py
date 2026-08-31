@@ -10,7 +10,7 @@ import pytest
 
 from braverse import default_db
 from play_server import (MAX_SCENE_PAUSE, VIEWER, Handler, Match,
-                         MatchConfig, available_decks, available_pilots,
+                         MatchConfig, Server, available_decks, available_pilots,
                          scene_seconds)
 
 
@@ -1097,3 +1097,81 @@ def test_every_setting_the_viewer_keeps_goes_through_prefs():
 
     assert not stray, f"settings kept outside Prefs: {stray}"
     assert not used - listed, f"used through Prefs but not in KEYS: {sorted(used - listed)}"
+
+
+def test_leaving_a_match_is_held_rather_than_clicked():
+    """The brand quits a game, and a stray click must never be that.
+
+    It sits in the corner of the header, above the tab strip, which is where a
+    mouse rests between turns — so the one control that throws a whole game
+    away is also the easiest one to brush. `confirm.js` is where that decision
+    lives for every other irreversible move; this pins that the brand goes
+    through it, and that it does so at *every* level, `off` included. `off`
+    promises the old one-click viewer back, and that viewer had no way out of
+    a match at all, so there is nothing here to keep identical.
+    """
+    title = (VIEWER / "title.js").read_text(encoding="utf-8")
+    wire = title[title.index("wireBrand(mode)"):title.index("async quit()")]
+    assert "Confirm.wire" in wire and '"Quit"' in wire, (
+        "the brand leaves a match without going through confirm.js")
+
+    confirm = (VIEWER / "confirm.js").read_text(encoding="utf-8")
+    needs = confirm[confirm.index("function needsHold"):confirm.index("A short name")]
+    always = needs.index("ALWAYS_HOLD")
+    assert always < needs.index('level === "off"'), (
+        "a Quit is decided after the `off` short-circuit, so the confirm "
+        "setting's lowest level abandons a game on one click")
+    assert "Quit" in confirm[confirm.index("const ALWAYS_HOLD"):
+                             confirm.index("function needsHold")]
+
+
+def test_a_question_left_by_an_abandoned_match_comes_down_with_it():
+    """`Title.show` clears the board's prompts as well as raising the menu.
+
+    The table's own prompts (`.centre`, `.picker`) sit at the z-index they need
+    to clear the board, which is *above* the title screen's. Quitting mid
+    question would otherwise leave "Rock, paper, scissors?" floating over the
+    main menu, answering a match that no longer exists.
+    """
+    src = (VIEWER / "title.js").read_text(encoding="utf-8")
+    show = src[src.index("  show() {"):src.index("  stamp() {")]
+    for box in ("#centre", "#picker"):
+        assert box in show, f"Title.show leaves {box} on screen"
+
+
+def test_leaving_a_match_is_not_offered_over_the_internet():
+    """`/api/quit` ends the host's game, so a joiner must not reach it.
+
+    A room is left through `/api/room/leave` and a peer game through
+    `/api/peer/close`, both of which have another seat to tell. This one is the
+    solo table and belongs to the machine it runs on, the same as `/api/new`.
+    """
+    import play_server
+
+    assert "/api/quit" not in play_server.PUBLIC_ROUTES
+    assert "/api/quit" in inspect.getsource(Handler.do_POST)
+
+
+def test_a_match_can_be_abandoned_and_another_started_after_it():
+    """`Server.end_match` is the half of `new_match` with no new game after it.
+
+    The engine runs the match on its own thread and `Match.stop` is how that
+    thread is told to unwind — the same call `new_match` already makes when it
+    replaces a game. What this pins is that the server is *idle* afterwards, so
+    `/api/state` answers `idle` and the title screen has somewhere to stand,
+    and that the table is not left poisoned for the next match.
+    """
+    app = Server(default_db())
+    config = MatchConfig(decks=list(available_decks())[:1] * 2,
+                         pilots=["heuristic", "heuristic"], delay=0.0)
+    match = app.new_match(config)
+    assert wait_for(lambda: match.view()["version"] > 0)
+
+    assert app.end_match() is True
+    assert app.match is None
+    assert wait_for(lambda: match.stopped)
+    assert app.end_match() is False      # nothing left to leave
+
+    again = app.new_match(config)
+    assert wait_for(lambda: again.view()["version"] > 0)
+    app.end_match()

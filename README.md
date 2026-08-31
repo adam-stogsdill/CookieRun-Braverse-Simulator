@@ -1,6 +1,6 @@
 # Cookie Run: Braverse Simulator
 
-Current Version: 0.2.71
+Current Version: 0.2.77
 
 [Cookie Run: Braverse Website](https://cookierunbraverse.com/en)
 
@@ -65,7 +65,7 @@ I am a Python programmer specializing in ML, so game development is not my forte
 ## Repository layout
 
 ```
-fetch_cards.py        downloads the card database from DotGG -> braverse_cards.csv
+fetch_cards.py        downloads the card database from the official card list -> braverse_cards.csv
 braverse/             the engine (library, UI-agnostic)
   cards.py            CSV -> typed CardDef, with the dump's typos normalised
   cost.py             {B}{B}{N} cost parsing and support-area payment
@@ -189,7 +189,14 @@ It skips files it already has, so it is safe to interrupt and re-run. Without
 them the visual player still works — cards just render as name plates instead
 of art.
 
-To refresh the card database itself: `python3 fetch_cards.py`.
+To refresh the card database itself: `python3 fetch_cards.py`. It reads the
+feed behind the official site's card browser, which is the only source that is
+current on the day a set lands — the third-party mirror this used to read ran a
+whole set behind, and its image CDN still 404s on cards it never indexed. The
+rows are sorted by set and number on the way out rather than left in feed
+order: the card pool is built by iterating that file and deck generation draws
+from it with a seeded RNG, so a feed that reorders its cards would silently
+change every seeded result ever reported.
 
 ### A standalone executable
 
@@ -2411,6 +2418,72 @@ pool reached 58.5%. Widening the pool improved both numbers.
 strong player. The obvious next steps are PPO instead of REINFORCE, learning the
 mid-effect decisions too, and search at inference time.
 
+### Which decks a run trains on
+
+Four flags decide it, and they compose. What the policy learns is bounded by
+the decks it is shown, so this is the most consequential choice in a training
+command after `--games`.
+
+| flag | the pool it trains on | when |
+|---|---|---|
+| *(none)* | `--deck0` vs `--deck1`, two fixed starters | a quick sanity run, or a change you want to compare against a published number |
+| `--random-decks F` | fraction `F` of games on freshly generated legal decks from the whole 788-card pool | almost always; this is what teaches the encoder to read cards it has never met |
+| `--deck-pool DIR` | every list in one folder (bare flag: `decks/meta`, the tournament lists) | training against decks people actually built |
+| `--deck-pool-subfolders` | as above, plus the folder's subfolders | only when the tree *is* the pool — see the warning below |
+
+`--random-decks` and `--deck-pool` are not alternatives. The first is a share of
+games, the second is where the other share's decks come from, so
+`--deck-pool decks/meta --random-decks 0.5` is half tournament lists and half
+generated decks, and that is the mix the measured run above was trained on.
+
+The header line every run prints — `decks: 132 decks from decks/**`, or
+`decks: st9_sea_fairy vs st8_wind_archer` — is the authoritative statement of
+what was actually loaded. Read it before letting a long run go.
+
+**`--deck-pool-subfolders` is opt-in on purpose.** `decks/` holds 151 `.txt`
+files but only 132 distinct lists, and about 90 of those are the successive
+generations of two evolution runs — near-identical green decks. So "everything
+on disk" is a pool weighted roughly 2:1 towards whatever archetype was evolved
+most recently, which is narrower training than the 26 distinct lists at the top
+level or the 18 in `decks/meta`. Reach for it when a folder tree really is a
+field of distinct decks, not as a way of asking for "more".
+
+Two things the recursive read does so a tree can be a pool at all: a list in a
+subfolder is named by its path (`green_run/gen012`), because three folders here
+each end in a `_best.txt` and a pool that calls them the same thing cannot
+report which one it trained on; and identical lists are read once, because a
+folder collected over time holds the same 60 cards under several names, and
+left in, each copy is another share of the games spent on one deck — a
+weighting nobody chose.
+
+**Resuming does not remember any of this.** A checkpoint carries weights,
+Adam's moments, the league and the games counter — never a deck list — so the
+pool comes from the flags of the command you are running now. `--resume` on its
+own silently falls back to the default starter pairing; repeat the deck flags
+every time:
+
+```bash
+python train_rl.py --resume agents/rl_agent.pt --deck-pool decks/meta \
+    --random-decks 0.5 --games 40000 --seed 2 --out agents/rl_agent.pt
+```
+
+Pass a fresh `--seed` too, or the run replays the games it has already learned
+from. Switching pools between resumes is legal — the network is deck-agnostic,
+with no per-deck weights anywhere — but it changes what the two `training
+decks` win rates mean, so a before and after across a pool change are not
+comparable. The `unseen decks` row is the one that survives it: it always scores
+against freshly generated decks and never against the pool.
+
+`train_wide.py` — the same run under the wide state encoder — takes the same
+pool, spelled the way its own `--decks` already reads: a folder among the
+entries expands to every list in it, `--deck-pool-subfolders` makes that
+expansion recursive, and files and folders can be mixed
+(`--decks decks/meta decks/v6_RED.txt`). That matters more there than anywhere
+else, because the point of that script is to compare two encoders on an equal
+budget — if the pool could be named for one trainer and not the other, an
+encoder comparison would quietly be a deck comparison too. Its `--resume`
+forgets the pool for the same reason `train_rl.py`'s does.
+
 ## Deck generation
 
 ```bash
@@ -2498,19 +2571,10 @@ of the eighteen. `evolve_deck.py --gauntlet` takes the same folder, so a deck
 can be evolved against the field people actually brought instead of against two
 starter lists.
 
-`--deck-pool-subfolders` reads the folder's subfolders too, so `--deck-pool
-decks --deck-pool-subfolders` trains on everything under `decks/` — the
-tournament lists, the evolution runs, the hand-built decks — rather than only
-the loose files at the top. A list in a subfolder is named by its path
-(`green_run/gen012`), because two runs both ending in a `_best.txt` are two
-different decks, and identical lists are read once: a folder collected over
-time holds the same 60 cards under several names, and left in, each copy is
-another share of the training games spent on one deck. Be deliberate about it
-rather than reaching for it by default — an evolution run contributes a hundred
-near-identical generations of one archetype, so "every list on disk" is a pool
-weighted towards whatever was evolved most recently, not a wider field. A
-folder of distinct lists is the better pool; the flag is there for when the
-tree is one.
+`--deck-pool-subfolders` widens that to the folder's subfolders, so
+`--deck-pool decks --deck-pool-subfolders` reads every list under `decks/`.
+It is worth being deliberate about which folder you point at, for reasons set
+out in [Which decks a run trains on](#which-decks-a-run-trains-on) above.
 
 #### Trying to beat them, and not managing it
 

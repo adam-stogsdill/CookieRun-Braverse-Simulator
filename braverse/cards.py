@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import re
 from dataclasses import dataclass
+from typing import NamedTuple
 from functools import lru_cache
 from pathlib import Path
 
@@ -258,15 +259,47 @@ _BLOCKER_LINE = re.compile(r"【Blocker】[ \t]*(?:<([^>]*)>)?")
 _BLOCKER_REMINDER = re.compile(r"\([^)]*redirect the attack[^)]*\)", re.I)
 _BLOCKER_ENERGY = re.compile(r"(?:\{[A-Za-z]+\})*")
 _BLOCKER_REST = re.compile(r"rest this card", re.I)
+# "Discard 1 {P} 【Arena】 card from your hand." — BS12 prices its whole purple
+# Blocker line this way, so a reader that only knows energy and rest leaves six
+# Cookies unable to block at all.
+_BLOCKER_DISCARD = re.compile(
+    r"^discard (\d+) (?:\{([A-Za-z]+)\} )?(?:【([^】]+)】 )?cards?"
+    r"(?: from your hand)?\.?$", re.I)
 
 
-def blocker_price(defn: CardDef) -> tuple[Cost, bool] | None:
+class BlockerPrice(NamedTuple):
+    """What redirecting an attack to a Cookie costs, in the three currencies
+    the printed line uses: energy, resting the blocker itself, and discarding.
+
+    A NamedTuple rather than a bare tuple because the third currency arrived
+    after the first two, and `price[0]` read as "the cost" for as long as there
+    was only one kind of cost.
+    """
+
+    energy: Cost
+    rests: bool = False
+    discard: "BlockerDiscard | None" = None
+
+
+class BlockerDiscard(NamedTuple):
+    """The hand cost on a 【Blocker】 line: how many cards, and which ones."""
+
+    count: int
+    color: Color | None = None
+    keyword: Keyword | None = None
+
+    def matches(self, defn: CardDef) -> bool:
+        return ((self.color is None or defn.color is self.color)
+                and (self.keyword is None or self.keyword in defn.keywords))
+
+
+def blocker_price(defn: CardDef) -> BlockerPrice | None:
     """What redirecting an attack to this Cookie costs, as printed.
 
-    Returns ``(energy, rests itself)``, or ``None`` if the card has no
-    【Blocker】 — or prices it in a currency this engine cannot charge. An
-    unread price is not a free one: a Cookie whose bracket makes no sense to
-    us is left unable to block rather than blocking for nothing.
+    ``None`` if the card has no 【Blocker】 — or prices it in a currency this
+    engine cannot charge. An unread price is not a free one: a Cookie whose
+    bracket makes no sense to us is left unable to block rather than blocking
+    for nothing.
     """
     if not defn.has(Marker.BLOCKER):
         return None
@@ -275,11 +308,27 @@ def blocker_price(defn: CardDef) -> tuple[Cost, bool] | None:
         return None
     token = match.group(1)
     if token is None:
-        return Cost(), False
+        return BlockerPrice(Cost())
     if _BLOCKER_ENERGY.fullmatch(token):
-        return Cost.parse(token), False
+        return BlockerPrice(Cost.parse(token))
     if _BLOCKER_REST.search(token):
-        return Cost(), True
+        return BlockerPrice(Cost(), rests=True)
+    discard = _BLOCKER_DISCARD.match(token.strip())
+    if discard:
+        from .enums import SYMBOL_TO_COLOR
+
+        count, symbol, keyword = discard.groups()
+        # The colour is printed as its energy *symbol* — "{P} card", not
+        # "PURPLE card" — so it is read the way the attack costs are.
+        if symbol is not None and symbol.upper() not in SYMBOL_TO_COLOR:
+            return None
+        keyword = _norm(keyword, _KEYWORD_FIXES) if keyword else None
+        if keyword is not None and keyword not in Keyword.__members__:
+            return None
+        return BlockerPrice(Cost(), discard=BlockerDiscard(
+            int(count),
+            SYMBOL_TO_COLOR[symbol.upper()] if symbol else None,
+            Keyword[keyword] if keyword else None))
     return None
 
 
@@ -295,14 +344,23 @@ def strip_blocker_text(defn: CardDef, text: str) -> str:
     return _BLOCKER_LINE.sub(" ", _BLOCKER_REMINDER.sub(" ", text), count=1)
 
 
-# 【Special Play】 is the one marker a card can *name* without having: BS11-105
-# says "if there is a Cookie that has 【Special Play】 in your battle area", and
-# reading that as the keyword handed a LV.3 5 HP Cookie a play condition it
-# does not print — and, once Special Play became a real gate, made it
-# unplayable. The keyword itself always opens the line it is printed on, so
-# that is what is required of it. The other markers are not restricted this
-# way: 【Once Per Turn】 legitimately follows 【Activate】 mid-line on 186 cards.
-_LINE_MARKERS = {Marker.SPECIAL_PLAY}
+# Two markers a card can *name* without having. 【Special Play】 is one:
+# BS11-105 says "if there is a Cookie that has 【Special Play】 in your battle
+# area", and reading that as the keyword handed a LV.3 5 HP Cookie a play
+# condition it does not print — and, once Special Play became a real gate,
+# made it unplayable.
+#
+# 【Blocker】 is the other, and it fails the more dangerous way round, because
+# an unpriced 【Blocker】 is a *free* one: ten cards merely mention it — six
+# ask about Cookies that "have 【Blocker】" elsewhere on the board, and four,
+# including BS2-028 and BS7-003, say the opponent **cannot activate**
+# 【Blocker】 — and every one of them was being handed a free redirect of its
+# own. A card that says nobody may block was the best blocker in the game.
+#
+# The keyword itself always opens the line it is printed on, so that is what
+# is required of both. The other markers are not restricted this way:
+# 【Once Per Turn】 legitimately follows 【Activate】 mid-line on 186 cards.
+_LINE_MARKERS = {Marker.SPECIAL_PLAY, Marker.BLOCKER}
 _LINE_START_RE = re.compile(r"^\s*【([^】]*)】")
 
 

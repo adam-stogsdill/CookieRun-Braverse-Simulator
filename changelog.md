@@ -1,5 +1,88 @@
 # Changelog
 
+## 0.2.77
+
+- **Festival Arena's headline cards are playable.** The six 【EXTRA】 Cookies
+  now know their entrances — Shining Glitter pitching an 【Arena】 card off a
+  LV.4 break area, Clotted Cream counting yellow 【Arena】 Cookies in the break
+  area, Apple Faerie opening on either half of its "or", Popping Candy on a
+  Cookie you buried this turn, Black Lemonade trading a purple body (out of a
+  *full* battle area, which is the point of it), and Poison Mushroom on a
+  board with a 【Special Play】 Cookie. The four Cake Hounds and Red Velvet
+  come down the way BS11's Dough Cookies do, by trashing a {K} LV.1 Cookie —
+  trashed, not fainted, so you hand nothing to the break clock.
+- **Poison Mushroom's +1 now reaches the Cookies it is printed for.** "Other
+  {K} 【Arena】 Cookies gain +1 attack damage" is an aura over your *other*
+  Cookies, so the swing is announced and dealt at the higher number, and a
+  Cookie that attacks twice in a turn is not buffed twice for the second
+  swing.
+- **Spotlight Fan can climb onto Rockstar Cookie.** The set's one 【Equip】,
+  and the only one in the game worn by a Cookie rather than an item: it leaves
+  the battle area and rides Rockstar, and while it does, your opponent cannot
+  block the swing. Strip it or move it and the effect goes with it.
+- **Black Lemonade punishes your losses while it stands.** "When one of your
+  Cookies faints" now reaches the Cookies still on the field, rather than only
+  the one that fell.
+- **A card that says nobody may block is no longer the best blocker in the
+  game.** Ten cards merely *mention* 【Blocker】 — six ask about Cookies that
+  have one, and four, including Pond Dino Cookie and Raspberry Cookie, say the
+  opponent **cannot activate** it — and every one of them was quietly getting
+  a free redirect of its own. Only a 【Blocker】 the card actually prints
+  counts now. Cookies with a real one are unaffected.
+
+## 0.2.76
+
+- **The new set is in: BOOSTER PACK [Festival Arena] (BS12).** All 112 cards,
+  plus their alternate printings and two BS9 reprints that were missing — 148
+  new rows in all. They show up in the deck builder and the card browser like
+  any other set.
+- **Card data now comes from the official card list rather than a fan mirror.**
+  The mirror was a full set behind, and it had drifted: 71 cards had the wrong
+  card type — most of them 【Awaken】 cards filed as ordinary Cookies, showing
+  their un-awakened attack — 32 had the wrong rarity, 31 the wrong colour, and
+  19 were missing a keyword their text depends on. All of those are corrected.
+  Card art for new sets downloads again too; the mirror's image host never had
+  it.
+
+## 0.2.75
+
+- **Hollyberry Shield (BS3-017) now actually holds.** Hollyberry Cookie's
+  printed "any damage of 3 or more received by this Cookie is reduced to 2" was
+  doing nothing at all — she took big hits in full. She now caps every hit at
+  2, and "any damage" means any: swings, Items, traps and FLIPs alike. Hits of
+  1 and 2 are unchanged, the shield survives the Active Phase (it is printed on
+  her, not granted for a turn), it protects only her, and an attack it shaves is
+  announced at the number that will land instead of quietly underperforming.
+
+## 0.2.74
+
+- **The title in the top-left corner takes you back to the menu.** It was only
+  ever live when there was nothing to come back to, so the one moment people
+  clicked it — during a game — it did nothing at all. Now a game against a bot
+  can be left: hold the title for a moment and the match ends and the menu
+  comes up, the same hold every other move you cannot take back already uses. A
+  quick or stray click on it still does nothing. Games against another person
+  are unchanged — a room and a direct game each keep their own Leave, because
+  there is someone on the other side to tell.
+
+## 0.2.73
+
+- **Windswept Valley (ST5-022) now actually triggers.** The stage card sat in
+  the stage area doing nothing: when a Cookie in your opponent's battle area
+  was placed in the trash by an effect, it never offered to rest itself and
+  draw. It does now — it asks once, rests, and draws a card, and being rested
+  is what stops it paying again until your next Active Phase. It stays quiet
+  for a Cookie that faints (that is the break area, not the trash) and for your
+  own Cookies being trashed.
+
+## 0.2.72
+
+- **The wide-encoder trainer reads deck folders too.** `train_wide.py --decks`
+  now takes a folder as well as files and globs — `--decks decks/meta`, or
+  `--decks decks --deck-pool-subfolders` for everything under `decks/` — so
+  both trainers can be pointed at the same pool. It also warns when a list's
+  EXTRA deck is being left out of training, the way the other trainer does.
+
 ## 0.2.71
 
 - **RL training can read your whole decks folder.** `train_rl.py --deck-pool

@@ -318,6 +318,26 @@ legal move at all. Two optional keywords:
 is complete — a card missing from it can never be played, so the test will tell
 you.
 
+## Continuous abilities, and the two windows
+
+A buff a Cookie grants to **itself** is `Trigger.ATTACK_START` reading
+`ctx.source_cookie`. A buff it grants to **others** cannot be: that trigger
+fires for the attacker alone. Register it in `effects.ATTACK_DAMAGE_AURAS`
+instead — `(db, player, attacker) -> int` — and add the card id to
+`STATIC_ABILITY_CARDS` so `is_implemented` knows a card with no trigger is
+still finished. The engine applies the total as the swing is declared and
+takes it off when the battle ends.
+
+"During this battle" and "during this turn" are different windows, and most
+flags are cleared per *turn*. For the narrower one use
+`ctx.game.for_this_battle(obj, attr, value)`, which restores the old value
+when the battle ends — a turn can hold several battles, and a flag left to the
+turn reset goes on shading every later swing.
+
+"When one of your Cookies faints" is `Trigger.ALLY_FAINTED`, not
+`Trigger.FAINT`: the first runs on the Cookies still standing, the second on
+the one that fell.
+
 ## When `Ctx` has no verb for it
 
 Add one. Three places, in order of how far the change reaches:
