@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.2.79
+
+- **Every card in Festival Arena now plays in full** — 112 of 112, up from 63%
+  when the set landed. The last stretch is the set's continuous abilities and
+  its oddest lines:
+- **Strawberry Crepe Cookie stays down when she is alone**, and wakes up the
+  moment another 【Arena】 Cookie stands beside her — checked afresh every
+  Active Phase rather than armed once.
+- **CAKE POPs takes 1 from anything** while a Popping Candy Cookie is on your
+  board — a swing, an Item, a trap or a FLIP alike.
+- **DJ Cookie taxes the other seat's Items.** They discard a card to activate
+  one, and with an empty hand they cannot activate one at all.
+- **Werewolf Cookie shuts down a LV.3 attack rider** in any battle it is part
+  of, whether it is blocking the swing or making it. The swing still lands.
+- **Caramel Choux and Espresso pay you back for throwing them away.** Being
+  placed in your break area by an 【Arena】 card effect is now a real trigger,
+  which is the whole point of the set's discard costs.
+- **Kumiho Cookie answers a swing aimed at somebody else** — once a turn, for
+  any Cookie your opponent attacks with, not only the one pointed at her.
+- **Herb Teapot pays out only for the Herb Cookie it just played**, not for one
+  that was already standing there.
+- Also landed: Madeleine's cost paid from your hand *or* your board, Designers'
+  Yapping going free off four yellow 【Arena】 Cookies in the break area,
+  Caramel Pudding Cake Hound's FLIP feeding the Cookie it was HP for, and
+  Licorice Cookie burying a 【Special Play】 Cookie face-up on a Cookie's HP.
+- **"An 【Arena】 Cookie has been placed in your break area" now counts the
+  placements it is actually about.** Six cards ask it — three in BS7 and three
+  in BS12 — and the count only ever saw faints and refreshes, never a card
+  effect putting one there, which is the case those cards are built around.
+
+## 0.2.78
+
+- **Festival Arena's purple 【Blocker】 deck works.** All six of its Blockers
+  price the block by discarding a {P} 【Arena】 card from hand, and the engine
+  only knew how to charge energy or a rest — so not one of them could block.
+  Three were worse than unplayable: Black Sapphire, Milky Way and Caramel
+  Arrow were in the deck builder looking finished while quietly never
+  blocking. They now block, pay, and are correctly not offered when your hand
+  cannot cover the discard.
+- **"If you started the game going second" now does something.** The set's
+  compensation rider is printed across it, and it was being dropped in
+  silence — six Cookies, including five of the 【EXTRA】 ones, were simply not
+  getting the bonus half of their attack.
+- **The bottom-of-deck cards work.** "Reveal 1 card from the bottom of your
+  deck; if that card is a LV.2 【Arena】 Cookie, add it to your hand" drives
+  seven cards in this set — Cream Puff, Stardust, DJ Miya, Comeback Stage and
+  the rest — and none of them fired: the card was being asked what it revealed
+  before it revealed anything.
+- **Two more 【Equip】 Cookies.** Producer Mic rides Shining Glitter Cookie and
+  shuts off your opponent's FLIPs for the battle; Angel Lightstick rides
+  Popping Candy Cookie and draws you two cards on a small hand.
+- **Twenty-nine more Festival Arena cards play in full**, taking the set from
+  63% to 89%. Among them: Rockstar Cookie and Summer Soda Festival recycling
+  Blockers out of the trash, Madeleine and Financier scaling off 【Arena】
+  Cookies in your break area, Herb Cookie and Herb Teapot working the support
+  area as a second hand, Rainbow Headphones shuffling your trash back in, and
+  True Rock Spirit's buff now lasting the two turns it prints rather than
+  expiring at the start of the turn it is meant to cover.
+
 ## 0.2.77
 
 - **Festival Arena's headline cards are playable.** The six 【EXTRA】 Cookies

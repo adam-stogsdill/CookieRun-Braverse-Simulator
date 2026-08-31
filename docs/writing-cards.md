@@ -336,7 +336,18 @@ turn reset goes on shading every later swing.
 
 "When one of your Cookies faints" is `Trigger.ALLY_FAINTED`, not
 `Trigger.FAINT`: the first runs on the Cookies still standing, the second on
-the one that fell.
+the one that fell. "When one of your opponent's Cookies attacks" is
+`Trigger.OPPONENT_ATTACKS`, not `Trigger.WHEN_ATTACKED`: the first runs on
+every Cookie the defender has, the second only on the one being swung at.
+Both fire for every event of their kind, so a 【Once Per Turn】 on one is
+yours to enforce — `cookie.used_markers` is where.
+
+A card whose *whole* text is a standing rule has no trigger at all. Those go
+in one of the continuous registries in `effects.py` — `DAMAGE_CAPS`,
+`ACTIVE_PHASE_LOCKS`, `ITEM_SURCHARGES`, `ATTACK_EFFECT_LOCKS`,
+`ATTACK_DAMAGE_AURAS`, `MOVEMENT_LOCK_CARDS` — and **also** into
+`STATIC_ABILITY_CARDS`, or `is_implemented` will report the card as unwritten
+and the deck builder will hide it.
 
 ## When `Ctx` has no verb for it
 

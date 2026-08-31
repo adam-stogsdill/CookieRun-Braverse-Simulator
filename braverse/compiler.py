@@ -186,6 +186,22 @@ def parse_filter(phrase: str, *, exclude_self: bool = False) -> Filter:
 
 
 _CONDITION_RULES = [
+    # BS12 plays Cookies out of its support area and then asks about it: once
+    # about the board ("a Cookie has been played from your support area") and
+    # once about the Cookie speaking ("this Cookie has been played from ...").
+    (re.compile(r"^an? cookie has been played from your support area$", re.I),
+     lambda m: Condition("played_from_support")),
+    (re.compile(r"^this cookie has been played from your support area$", re.I),
+     lambda m: Condition("self_played_from_support")),
+    # "if this Cookie has been set as active by an effect" — BS12 turns its own
+    # Cookies back on as a resource, and two cards pay off on it having
+    # happened. The Active Phase does not count; only a card doing it does.
+    (re.compile(r"^this cookie has been set as active by an effect$", re.I),
+     lambda m: Condition("self_set_active_by_effect")),
+    # "if you started the game going second" — the rider almost every BS12
+    # Cookie prints, and the set's whole compensation mechanic.
+    (re.compile(r"^you (?:started the game going|went) second$", re.I),
+     lambda m: Condition("went_second")),
     (re.compile(r"there (?:are|is) (\d+) cards? or less in your hand", re.I),
      lambda m: Condition("hand_size", "<=", int(m.group(1)))),
     (re.compile(r"there (?:are|is) (\d+) cards? or more in your hand", re.I),
@@ -514,9 +530,12 @@ def parse_condition(phrase: str) -> Condition:
 
 _DISCARD_COST = re.compile(
     r"discard (\d+|a|an|one|two|three) (?:\{([A-Za-z])\} )?cards?", re.I)
-_REST_SELF_COST = re.compile(r"rest this card|^card rests\.?$", re.I)
+_REST_SELF_COST = re.compile(r"rest this (?:card|cookie)|^card rests\.?$", re.I)
 _TRASH_SELF_COST = re.compile(r"place this (?:cookie|card) in(?:to)? (?:the|your) trash", re.I)
 _REST_SUPPORT_COST = re.compile(r"rest up to (\d+) cards? in your support area", re.I)
+_SET_OWN_COOKIES_COST = re.compile(
+    r"set (\d+|a|an|one|two|three) (.*?)cookies? in your battle area as "
+    r"(rested|active)", re.I)
 _RETURN_COOKIE_COST = re.compile(
     r"return (?:up to )?(\d+|a|an|one) (.*?)from your battle area to your hand", re.I)
 
@@ -534,6 +553,30 @@ def parse_cost(token: str) -> list[Op]:
     if discard:
         color = _color(discard.group(2)) if discard.group(2) else None
         return [Discard(_number(discard.group(1)), color=color, optional=True)]
+
+    # "<Set 2 【Arena】 Cookies in your battle area as rested.>" — BS12 pays for
+    # several of its effects by tapping its own board rather than its support
+    # area, which is the set's other resource. Both directions are printed.
+    match = _SET_OWN_COOKIES_COST.search(token)
+    if match:
+        count, filter_text, how = match.group(1), match.group(2), match.group(3)
+        setter = RestCookies if how.lower() == "rested" else SetSelectedActive
+        return [
+            Select(SCOPE_OWN, count=_number(count),
+                   filter=parse_filter(filter_text), optional=False,
+                   ref="set_cost"),
+            RequireSelected("set_cost"),
+            setter(ref="set_cost"),
+        ]
+
+    # "<Place 2 Cookies that have 【Blocker】 from your trash on the bottom of
+    # your deck in any order.>" — the same sentence the verb form already
+    # understood, printed as a price. BS12 recycles its own Blockers this way.
+    match = re.search(r"place (?:up to )?(\d+) (.*?) from your trash on the "
+                      r"bottom of your deck(?: in any order)?", token, re.I)
+    if match:
+        return [MoveCards(ZONE_TRASH, ZONE_DECK_BOTTOM, int(match.group(1)),
+                          parse_card_filter(match.group(2)))]
 
     rest_support = _REST_SUPPORT_COST.search(token)
     if rest_support:
@@ -564,6 +607,15 @@ def parse_cost(token: str) -> list[Op]:
                                filter=CardFilter(name=match.group(2)))]
 
     lowered = token.lower()
+
+    # "<Reveal 1 card from the bottom of your deck.>" — bracketed, but nothing
+    # is actually spent: the reveal is in a cost slot because the sentence
+    # after it asks about what turned up ("If that card is a LV.2 【Arena】
+    # Cookie, add it to your hand"). Seven BS12 cards are built on it, and the
+    # verb form was already understood — only the cost form was not.
+    match = re.search(r"reveal (\d+) cards? from the bottom of your deck", lowered)
+    if match:
+        return [Reveal(int(match.group(1)), from_bottom=True)]
 
     # "<can be used as {B}.>" is the rider's cost: one energy, of the colour it
     # names. It was read as free, which handed 72 cards a rider that fired on
@@ -619,6 +671,14 @@ def parse_cost(token: str) -> list[Op]:
     match = re.search(r"place (\d+) cookies? from your hand into your break area", lowered)
     if match:
         return [BreakCookieFromHand(int(match.group(1)))]
+
+    # The same cost drawing on two zones. Read off the token as printed rather
+    # than the lowered copy, because the filter carries a 【marker】.
+    match = re.search(r"place (\d+) (.*?)cookies? from your hand or battle area "
+                      r"into your break area", token, re.I)
+    if match:
+        return [BreakCookieFromHandOrBattle(int(match.group(1)),
+                                            parse_card_filter(match.group(2)))]
 
     if re.search(r"return \d+ cards? from your support area to your hand", lowered):
         return [ReturnSupportToHand()]
@@ -800,7 +860,7 @@ class RequireSelected(Op):
 class SetSelfActive(Op):
     def run(self, ctx, env) -> bool:
         if ctx.source_cookie is not None:
-            ctx.source_cookie.rested = False
+            ctx.source_cookie.set_active_by_effect()
         return True
 
 
@@ -835,9 +895,55 @@ class BreakCookieFromHand(Op):
                               pool, optional=False) or pool[0]
             pool.remove(card)
             ctx.me.hand.remove(card)
-            ctx.me.break_area.append(card)
-        ctx.game._check_win()
+            ctx.game.place_in_break_by_effect(ctx.me, card, ctx)
         return not ctx.state.over
+
+
+@dataclass
+class BreakCookieFromHandOrBattle(Op):
+    """"<place 1 【Arena】 Cookie from your hand **or** battle area into your
+    break area.>" — one cost drawing on two zones.
+
+    A self-inflicted cost either way, since the break area is the opponent's
+    win condition, but the two zones are not equivalent to the player: a
+    Cookie in hand is a card, and a Cookie on the field is a body with HP on
+    it. So both are offered together and the choice is theirs, rather than the
+    engine preferring one and quietly spending the wrong resource.
+    """
+
+    amount: int = 1
+    filter: object = None
+
+    def _options(self, ctx):
+        def ok(defn):
+            return defn.is_cookie and (self.filter is None
+                                       or self.filter.matches(defn))
+        return ([("hand", c) for c in ctx.me.hand if ok(ctx.db[c.card_id])]
+                + [("battle", c) for c in ctx.me.battle if ok(c.defn(ctx.db))])
+
+    def run(self, ctx, env) -> bool:
+        pool = self._options(ctx)
+        if len(pool) < self.amount:
+            return False
+        for _ in range(self.amount):
+            zone, pick = ctx.choose(
+                "Send a Cookie to your break area",
+                pool, optional=False) or pool[0]
+            pool = [p for p in pool if p[1] is not pick]
+            if zone == "hand":
+                ctx.me.hand.remove(pick)
+                ctx.game.place_in_break_by_effect(ctx.me, pick, ctx)
+            else:
+                # A Cookie leaving the battle area sheds its HP pile; the card
+                # itself is what lands in the break area.
+                ctx.me.battle.remove(pick)
+                ctx.me.trash.extend(pick.spent_cards)
+                ctx.me.trash.extend(pick.equipment)
+                ctx.game.place_in_break_by_effect(ctx.me, pick.card, ctx)
+        return not ctx.state.over
+
+    def is_live(self, ctx, env) -> bool:
+        return len(self._options(ctx)) >= self.amount
 
 
 @dataclass
@@ -1165,8 +1271,7 @@ class SelfCardToBreak(Op):
             return False
         if card in ctx.me.trash:
             ctx.me.trash.remove(card)
-        ctx.me.break_area.append(card)
-        ctx.game._check_win()
+        ctx.game.place_in_break_by_effect(ctx.me, card, ctx)
         return not ctx.state.over
 
 
@@ -1206,7 +1311,7 @@ class SetSelectedActive(Op):
     def run(self, ctx, env) -> bool:
         from .effect_ir import _resolve
         for cookie in _resolve(self.ref, ctx, env):
-            cookie.rested = False
+            cookie.set_active_by_effect()
         return True
 
 
@@ -1944,6 +2049,29 @@ class DebuffNextTurn(Op):
 
 
 @dataclass
+class BuffUntilNextTurn(Op):
+    """"Until the end of your next turn, that Cookie gains +N attack damage."
+
+    Every turn boundary promotes the banked chain by one, for both seats, so
+    reaching the *end of your next turn* means surviving two of them: the
+    opponent's turn and then your own. Hence both banked slots — with only the
+    first, the buff expires at the start of the very turn the card says it
+    lasts through.
+    """
+
+    amount: int = 1
+    ref: str = REF_IT
+
+    def run(self, ctx, env) -> bool:
+        from .effect_ir import _resolve
+        for cookie in _resolve(self.ref, ctx, env):
+            cookie.attack_bonus += self.amount
+            cookie.attack_bonus_next_turn += self.amount
+            cookie.attack_bonus_turn_after += self.amount
+        return True
+
+
+@dataclass
 class SelectTrash(Op):
     """Bind cards from the trash for a following clause to act on."""
 
@@ -2014,11 +2142,25 @@ class PlayFromBreak(Op):
 
 @dataclass
 class RecycleTrash(Op):
+    """"Return all cards in your trash to your deck and shuffle it."
+
+    The whole pile, so there is nothing to choose and nothing to filter. The
+    shuffle goes through `state.rng` — a deck reordered from anywhere else
+    would break every existing replay.
+    """
+
     def run(self, ctx, env) -> bool:
+        if not ctx.me.trash:
+            return False
+        moved = len(ctx.me.trash)
         ctx.me.deck.extend(ctx.me.trash)
         ctx.me.trash.clear()
         ctx.state.rng.shuffle(ctx.me.deck)
+        ctx.state.record(f"returns {moved} cards from the trash to the deck")
         return True
+
+    def is_live(self, ctx, env) -> bool:
+        return bool(ctx.me.trash)
 
 
 @dataclass
@@ -2127,6 +2269,35 @@ class Reveal(Op):
         env["revealed"] = cards
         ctx.revealed = list(cards)
         return True
+
+
+@dataclass
+class TakeRevealed(Op):
+    """"add it to your hand" — the card the sentence before revealed.
+
+    Only the cards `Reveal` put in `env` move, and only the ones still in the
+    deck: the reveal itself moves nothing, so between the two halves of the
+    sentence the card is still sitting where it was turned over. Seven BS12
+    cards read the bottom of the deck this way, and every one of them makes
+    taking the card conditional on what it turned out to be — so this op is
+    reached through a `Guard` and does nothing on its own if the reveal
+    missed.
+    """
+
+    def run(self, ctx, env) -> bool:
+        taken = []
+        for card in env.get("revealed") or []:
+            if card in ctx.me.deck:
+                ctx.me.deck.remove(card)
+                ctx.me.hand.append(card)
+                taken.append(card)
+        if taken:
+            from .state import card_label
+            names = ", ".join(card_label(ctx.db[c.card_id]) for c in taken)
+            ctx.state.record(f"adds {names} to hand")
+        env["revealed"] = []
+        ctx.revealed = []
+        return bool(taken)
 
 
 @dataclass
@@ -2434,6 +2605,22 @@ def _v_buff_self(m) -> list[Op]:
 @verb(r"^set this cookie as active\.?$")
 def _v_set_self_active(m) -> list[Op]:
     return [SetSelfActive()]
+
+
+# "Draw up to 1 card from your deck, and <something else>." One sentence, two
+# instructions, joined by a comma rather than the full stop the clause splitter
+# breaks on. Registered before the bare draw rule, whose pattern is anchored
+# and would simply refuse this.
+@verb(r"^draw(?: up to)? (\d+) cards? from your deck,\s+and\s+(.+?)\.?$")
+def _v_draw_then(m) -> list[Op]:
+    return [Draw(int(m.group(1)))] + parse_verb(m.group(2).strip() + ".")
+
+
+# "Then, you can rest this Cookie." — the `RestSelf` op already reads a Cookie
+# source before a card one, so this is the cost form of the same sentence.
+@verb(r"^rest this cookie\.?$")
+def _v_rest_self(m) -> list[Op]:
+    return [RestSelf()]
 
 
 @verb(r"^draw(?: up to)? (\d+) cards? from your deck and discard (\d+) cards?\.?$")
@@ -3279,7 +3466,7 @@ def _count_source(phrase: str):
             int(groups["per"] or 1))
 
 
-@verb(r"^(?:that|those) cookies? receives? (\d+) damage (for each .*)\.?$")
+@verb(r"^(?:that|those) cookies? receives? (\d+) damage (for (?:each|every) .*)\.?$")
 def _v_damage_scaling(m) -> list[Op]:
     source = _count_source(m.group(2))
     if source is None:
@@ -3287,7 +3474,7 @@ def _v_damage_scaling(m) -> list[Op]:
     return [ScaledDamage(int(m.group(1)), *source)]
 
 
-@verb(r"^this cookie gains \+(\d+) hp (for each .*)\.?$")
+@verb(r"^this cookie gains \+(\d+) hp (for (?:each|every) .*)\.?$")
 def _v_gain_hp_scaling(m) -> list[Op]:
     source = _count_source(m.group(2))
     if source is None:
@@ -3295,7 +3482,7 @@ def _v_gain_hp_scaling(m) -> list[Op]:
     return [ScaledGainHP(int(m.group(1)), *source)]
 
 
-@verb(r"^draw(?: up to)? (\d+) cards?(?: from your deck)? (for each .*)\.?$")
+@verb(r"^draw(?: up to)? (\d+) cards?(?: from your deck)? (for (?:each|every) .*)\.?$")
 def _v_draw_scaling(m) -> list[Op]:
     source = _count_source(m.group(2))
     if source is None:
@@ -3303,7 +3490,7 @@ def _v_draw_scaling(m) -> list[Op]:
     return [ScaledDraw(int(m.group(1)), *source)]
 
 
-@verb(r"^(?:that|those) cookies? gains? \+(\d+) hp (for each .*)\.?$")
+@verb(r"^(?:that|those) cookies? gains? \+(\d+) hp (for (?:each|every) .*)\.?$")
 def _v_selected_gain_hp_scaling(m) -> list[Op]:
     source = _count_source(m.group(2))
     if source is None:
@@ -3354,6 +3541,25 @@ def _v_bounce_selected_alt(m) -> list[Op]:
     return [ReturnToHand()]
 
 
+@verb(r"^return all cards in your trash to your deck and shuffle it\.?$")
+def _v_recycle_trash(m) -> list[Op]:
+    return [RecycleTrash()]
+
+
+@verb(r"^until the end of your next turn, (?:that|those) cookies? gains? "
+      r"\+(\d+) attack damage\.?$")
+def _v_buff_until_next_turn(m) -> list[Op]:
+    return [BuffUntilNextTurn(int(m.group(1)))]
+
+
+@verb(r"^place (?:up to )?(\d+) (.*?)cookies? from your opponent's battle area "
+      r"on the bottom of (?:your |their )?opponent'?s? deck\.?$")
+def _v_deck_opponent_cookie(m) -> list[Op]:
+    return [Select(SCOPE_OPPONENT, count=int(m.group(1)),
+                   filter=parse_filter(m.group(2)), optional=True, ref="bury_opp"),
+            MoveSelectedToDeck(ref="bury_opp", bottom=True)]
+
+
 @verb(r"^place (?:that|those) cookies? on the bottom of (?:the|your|its owner's) deck\.?$")
 def _v_deck_selected(m) -> list[Op]:
     return [MoveSelectedToDeck()]
@@ -3362,6 +3568,14 @@ def _v_deck_selected(m) -> list[Op]:
 @verb(r"^select up to (\d+) cards? in your opponent's support area\.?$")
 def _v_select_opp_support_cards(m) -> list[Op]:
     return [RestSupport(int(m.group(1)), mine=False)]
+
+
+@verb(r"^set that card as rested\.?$")
+def _v_set_that_card_rested(m) -> list[Op]:
+    """BS12's spelling of "Rest those cards." — the same two-sentence shape,
+    where the sentence that names the target is the one that rests it. See
+    `_v_rest_those` for why this half is a `Done`."""
+    return [Done()]
 
 
 @verb(r"^rest those cards\.?$")
@@ -3493,6 +3707,19 @@ def _v_self_card_to_zone(m) -> list[Op]:
       r"cannot be activated\.?$")
 def _v_disable_flips(m) -> list[Op]:
     return [DisableFlips()]
+
+
+# "add it to your hand, and <something else>" is one sentence carrying two
+# instructions, so the tail is compiled here rather than left to the sentence
+# splitter — which splits on full stops, and this is a comma. Registered ahead
+# of any bare rule that could swallow the tail.
+@verb(r"^add it to your hand(?:[,]?\s+and\s+(.+?))?\.?$")
+def _v_take_revealed(m) -> list[Op]:
+    ops: list[Op] = [TakeRevealed()]
+    tail = (m.group(1) or "").strip()
+    if tail:
+        ops.extend(parse_verb(tail + "."))
+    return ops
 
 
 @verb(r"^reveal (?:up to )?(\d+) cards? from the bottom of your deck\.?$")
@@ -3732,12 +3959,16 @@ def _v_mill_support_active_in(m) -> list[Op]:
     return [MillToSupport(int(m.group(1)), rested=False)]
 
 
-@verb(r"^place (?:up to )?(\d+) (.*?)cards? from your trash into your support area "
-      r"as (active|rested)\.?$")
+# "in your support area" and "into your support area" are both printed, and the
+# noun is "card" on some cards and "Cookie" on others — the noun is part of the
+# filter, so it is handed to `parse_card_filter` rather than discarded, or
+# "place 1 Cookie from your trash" would place any card at all.
+@verb(r"^place (?:up to )?(\d+) (.*?)(cards?|cookies?) from your trash in(?:to)? "
+      r"your support area as (active|rested)\.?$")
 def _v_trash_to_support(m) -> list[Op]:
     return [MoveCards(ZONE_TRASH, ZONE_SUPPORT, int(m.group(1)),
-                      parse_card_filter(m.group(2)),
-                      rested=m.group(3).lower() == "rested")]
+                      parse_card_filter(m.group(2) + m.group(3)),
+                      rested=m.group(4).lower() == "rested")]
 
 
 @verb(r"^place this cookie in(?:to)? the break area\.?$")
@@ -4088,8 +4319,24 @@ def _generic_move(phrase: str) -> list[Op] | None:
                       from_opponent=src_opp, rested=rested)]
 
 
+# "For every 3 【Arena】 Cookies in your break area, this Cookie gains +1 HP."
+# The same sentence every other card prints the other way round. Rewritten to
+# the tail form rather than given its own copy of each scaling verb — there are
+# six of those, and a seventh spelling would need six more.
+_LEADING_FOR_EACH = re.compile(
+    r"^(for (?:each|every) .*?),\s*(.+?)(\.?)$", re.I)
+
+
+def _tail_first(phrase: str) -> str:
+    match = _LEADING_FOR_EACH.match(phrase.strip())
+    if not match:
+        return phrase
+    scale, effect, stop = match.groups()
+    return f"{effect} {scale}{stop}"
+
+
 def parse_verb(phrase: str) -> list[Op]:
-    phrase = phrase.strip()
+    phrase = _tail_first(phrase.strip())
     for pattern, build in _VERB_RULES:
         match = pattern.match(phrase)
         if match:
@@ -4161,6 +4408,17 @@ _TRIGGER_PREFIXES = [
 ]
 
 
+def _asks_about_the_reveal(conditions) -> bool:
+    """Whether any of these conditions reads what a `Reveal` put in `env`."""
+    for condition in conditions:
+        if isinstance(condition, Condition) and condition.kind == "revealed_is":
+            return True
+        inner = getattr(condition, "conditions", None)     # AnyOf
+        if inner and _asks_about_the_reveal(inner):
+            return True
+    return False
+
+
 def compile_clause(text: str) -> Clause:
     ops: list[Op] = []
     body = _LEADING_CONNECTIVE.sub("", text.strip())
@@ -4195,7 +4453,18 @@ def compile_clause(text: str) -> Clause:
                 conditions.append(parse_condition(piece))
         body = _LEADING_CONNECTIVE.sub("", rest.strip())
     if conditions:
-        ops.insert(0, Guard(tuple(conditions)))
+        # A guard normally goes first: it decides whether the clause happens at
+        # all, costs included. The exception is a guard that asks about a
+        # reveal — "<Reveal 1 card from the bottom of your deck.> If that card
+        # is a LV.2 【Arena】 Cookie, ..." — where the question is *about* the
+        # thing the bracket just did. Asked first, it reads an empty `revealed`
+        # and the card silently never fires.
+        at = 0
+        if _asks_about_the_reveal(conditions):
+            reveals = [i for i, op in enumerate(ops) if isinstance(op, Reveal)]
+            if reveals:
+                at = reveals[-1] + 1
+        ops.insert(at, Guard(tuple(conditions)))
 
     # Multiple verbs can share a sentence, joined by "Then,". Protect "LV.2"
     # so the level notation is not mistaken for a sentence end.

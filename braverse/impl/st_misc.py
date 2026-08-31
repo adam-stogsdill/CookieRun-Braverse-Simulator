@@ -77,7 +77,7 @@ def lobster_activate(ctx: Ctx) -> None:
     if not ctx.discard(3, optional=True):
         return
     if ctx.source_cookie:
-        ctx.source_cookie.rested = False
+        ctx.source_cookie.set_active_by_effect()
     ctx.set_support_active(1)
 
 

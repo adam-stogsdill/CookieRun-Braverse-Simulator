@@ -69,6 +69,18 @@ class Trigger(str, Enum):
     # The Cookie that fainted does not watch its own faint — it is no longer in
     # the battle area, and a continuous ability needs a card on the field.
     ALLY_FAINTED = "ally_fainted"
+    # "When this Cookie is placed in your break area by an 【Arena】 card
+    # effect, ..." — the *placed* card's own trigger, not the placer's. The
+    # 【Arena】 qualifier is in the name because it is enforced at dispatch:
+    # both cards that print this line demand it, and a card registered here
+    # without it would fire on placements it does not cover. Fainting is not
+    # this — a Cookie that ran out of HP was not placed by anybody's effect.
+    ARENA_BREAK_BY_EFFECT = "arena_break_by_effect"
+    # "When one of your opponent's Cookies attacks, ..." — fired on every
+    # Cookie the defender has, not only the one being swung at. WHEN_ATTACKED
+    # is the narrower event and stays separate: a Cookie answering for itself
+    # and a Cookie answering for the table are different abilities.
+    OPPONENT_ATTACKS = "opponent_attacks"
 
 
 # Cards whose mere presence on the field forbids the *opponent's* effects from
@@ -295,6 +307,39 @@ def continuous_damage_reduction(db, state, cookie) -> int:
 # same idea with a duration and a narrower scope (one turn, attack damage
 # only); this registry is for the ones printed on the card and always on.
 DAMAGE_CAPS: list = []
+
+# "During the Active Phase, if <condition>, this Cookie is not set as active."
+# A continuous ability, and a *conditional* one — unlike `skip_next_active`,
+# which an effect arms once and the phase disarms. Each entry takes
+# (db, state, cookie) and returns True to keep that Cookie rested.
+ACTIVE_PHASE_LOCKS: list = []
+
+
+def stays_rested(db, state, cookie) -> bool:
+    return any(lock(db, state, cookie) for lock in ACTIVE_PHASE_LOCKS)
+
+
+# "your opponent cannot activate Items unless they discard 1 card" — a tax on
+# the *other* seat's Items, so it is charged where an Item is played rather
+# than written on the card that imposes it. Each entry takes (db, state,
+# player) and returns how many cards that player must discard.
+ITEM_SURCHARGES: list = []
+
+
+def item_surcharge(db, state, player) -> int:
+    return sum(tax(db, state, player) for tax in ITEM_SURCHARGES)
+
+
+# "your opponent cannot activate attack effects of LV.3 Cookies during this
+# battle" — the rider on an attack line, suppressed for one battle by
+# something on the defending side. Each entry takes (db, state, attacker,
+# target) and returns True to silence the attacker's rider.
+ATTACK_EFFECT_LOCKS: list = []
+
+
+def attack_effect_silenced(db, state, attacker, target) -> bool:
+    return any(lock(db, state, attacker, target)
+               for lock in ATTACK_EFFECT_LOCKS)
 
 
 def continuous_damage_cap(db, state, cookie) -> int | None:

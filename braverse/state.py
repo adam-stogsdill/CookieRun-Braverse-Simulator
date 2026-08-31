@@ -87,6 +87,11 @@ class Cookie:
     # by any effect that takes cards off the pile, cleared with the rest of the
     # per-turn Cookie flags.
     hp_reduced_this_turn: bool = False
+    # "if this Cookie has been set as active by an effect" — BS12-005 and
+    # BS12-016 pay off on it, and the set has several ways to do it. Only an
+    # *effect* counts: the Active Phase setting the whole board active is the
+    # ordinary turn happening, not something a card did.
+    set_active_by_effect_this_turn: bool = False
     effect_damage_reduction: int = 0    # "-N damage from effects"
     equipment: list = field(default_factory=list)  # 【Equip】 attachments
     # 【Awaken】: the cards this Cookie was stacked on top of, oldest first.
@@ -96,6 +101,11 @@ class Cookie:
     flip_disabled: bool = False         # its HP FLIPs cannot activate
     attack_bonus: int = 0                                     # cleared each turn
     attack_bonus_next_turn: int = 0   # applied at the owner's next Active Phase
+    # One slot further out. Every turn boundary promotes the chain by one, for
+    # both seats, so a single banked slot lasts exactly one boundary — enough
+    # for "during your opponent's next turn", one short for "until the end of
+    # your next turn", which has to cross the opponent's turn *and* your own.
+    attack_bonus_turn_after: int = 0
     incoming_damage_reduction: int = 0   # "receives -N attack damage", per battle
     # "receives -N from all damage" — attack and effect alike, and unlike
     # `incoming_damage_reduction` it lasts until the owner's next Active Phase
@@ -142,6 +152,16 @@ class Cookie:
         base = attack.damage if attack else 0
         return max(0, base + self.attack_bonus)
 
+    def set_active_by_effect(self) -> None:
+        """Set this Cookie active the way a card effect does.
+
+        One method rather than an assignment at each site, because the flag and
+        the un-resting have to travel together — a site that sets `rested` on
+        its own is a card effect this Cookie will not remember.
+        """
+        self.rested = False
+        self.set_active_by_effect_this_turn = True
+
     def has_marker(self, db: CardDB, marker: Marker) -> bool:
         return self.defn(db).has(marker)
 
@@ -183,6 +203,10 @@ class PlayerState:
     # 【Awaken】 gates ask which Cookie was replayed out of a graveyard zone
     # this turn, so the trash case is tracked the same way as the break one.
     played_from_trash_this_turn: set = field(default_factory=set)
+    # And the support area, which BS12 turns into a second hand: BS12-046 asks
+    # whether *any* Cookie came that way this turn and BS12-055 whether *this*
+    # one did, so the uids are kept rather than a count.
+    played_from_support_this_turn: set = field(default_factory=set)
     support_trashed_this_turn: int = 0
     # Cookies you played via 【Special Play】 this turn. BS11-108 is the card
     # that asks; it is counted where the play happens rather than inferred

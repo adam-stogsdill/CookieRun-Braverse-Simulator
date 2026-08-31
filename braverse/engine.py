@@ -24,7 +24,8 @@ from . import config as cfg
 from .cards import CardDB, CardDef, blocker_price, default_db
 from .cost import Cost, plan_payment
 from .effects import (ATTACK_DAMAGE_AURAS, Ctx, Trigger, ask_many,
-                      cannot_attack,
+                      cannot_attack, item_surcharge,
+                      attack_effect_silenced, stays_rested,
                       continuous_damage_cap, continuous_damage_reduction,
                       effect_is_live,
                       extra_play_of, forced_attack_target, get_effect,
@@ -56,6 +57,8 @@ TRIGGER_KINDS = {
     Trigger.PLAYED_FROM_SUPPORT: "\u3010On Play\u3011",
     Trigger.PLAYED_FROM_BREAK: "\u3010On Play\u3011",
     Trigger.ALLY_FAINTED: "faint effect",
+    Trigger.ARENA_BREAK_BY_EFFECT: "break area effect",
+    Trigger.OPPONENT_ATTACKS: "when attacked",
 }
 
 # Trigger.ITEM is the shared body of an ITEM and a TRAP, and those two are the
@@ -314,7 +317,11 @@ class Game:
             cookie.activate_locked = False
             cookie.effect_damage_reduction = 0
             cookie.all_damage_reduction = 0
-            if cookie.skip_next_active:
+            if stays_rested(self.db, self.state, cookie):
+                # A printed, conditional lock — re-read every Active Phase,
+                # because the board it asks about changes between them.
+                pass
+            elif cookie.skip_next_active:
                 # "That Cookie is not set as active during your opponent's next
                 # Active Phase" — it stays rested for exactly one phase.
                 cookie.skip_next_active = False
@@ -324,8 +331,10 @@ class Game:
             # A debuff written "during your opponent's next turn" is banked
             # here and only takes effect when that turn actually begins.
             cookie.attack_bonus = cookie.attack_bonus_next_turn
-            cookie.attack_bonus_next_turn = 0
+            cookie.attack_bonus_next_turn = cookie.attack_bonus_turn_after
+            cookie.attack_bonus_turn_after = 0
             cookie.hp_reduced_this_turn = False
+            cookie.set_active_by_effect_this_turn = False
             cookie.attack_cost_all_generic = False
             cookie.used_markers.clear()
         player.supported_this_turn = False
@@ -337,6 +346,7 @@ class Game:
         player.hp_gained_this_turn = False
         player.played_from_break_this_turn.clear()
         player.played_from_trash_this_turn.clear()
+        player.played_from_support_this_turn.clear()
         player.support_trashed_this_turn = 0
         player.special_plays_this_turn = 0
         player.cookies_to_deck_bottom_this_turn = 0
@@ -358,7 +368,8 @@ class Game:
                 cookie.hp_reduced_this_turn = False
         for opp_cookie in state.opponent.battle:
             opp_cookie.attack_bonus = opp_cookie.attack_bonus_next_turn
-            opp_cookie.attack_bonus_next_turn = 0
+            opp_cookie.attack_bonus_next_turn = opp_cookie.attack_bonus_turn_after
+            opp_cookie.attack_bonus_turn_after = 0
 
         # Draw phase.
         state.phase = Phase.DRAW
@@ -552,6 +563,12 @@ class Game:
                 # A stage is worth placing for its own sake; its 【Activate】 is
                 # a separate move, gated separately below. An item is only its
                 # effect, so an item that would fizzle is not a move at all.
+                # A surcharge another card imposes on your Items is part of
+                # the price: a hand that cannot cover it cannot make the move.
+                if (defn.type is CardType.ITEM
+                        and len(player.hand) - 1
+                        < item_surcharge(self.db, self.state, player)):
+                    continue
                 if (defn.type is CardType.STAGE
                         or self._would_do_something(player, Trigger.ITEM, card=card)):
                     out.append(A.PlaySupportCard(card.uid))
@@ -912,6 +929,7 @@ class Game:
             player.played_from_trash_this_turn.add(cookie.uid)
             self._run_cookie_effect(cookie, Trigger.PLAYED_FROM_TRASH, player)
         elif from_zone == "support":
+            player.played_from_support_this_turn.add(cookie.uid)
             self._run_cookie_effect(cookie, Trigger.PLAYED_FROM_SUPPORT, player)
         elif from_zone == "break":
             player.played_from_break_this_turn.add(cookie.uid)
@@ -942,6 +960,12 @@ class Game:
             player.stage.append(card)
             self.state.record(f"places stage {card_label(defn)}")
         else:
+            surcharge = item_surcharge(self.db, self.state, player)
+            if surcharge and not self.discard(player, surcharge,
+                                              self._ctx(player)):
+                # Unpayable: the card is spent either way, the effect is not.
+                player.trash.append(card)
+                return
             player.items_played_this_turn += 1
             self.state.record(f"activates {card_label(defn)}")
             self._run_effect(card, Trigger.ITEM, player)
@@ -1062,6 +1086,14 @@ class Game:
 
         target.incoming_damage_reduction = 0
         self._attacking_cookie = attacker
+        # The defender's whole board watches the swing, then the Cookie being
+        # swung at answers for itself.
+        for watcher in list(defender.battle):
+            if self.state.over:
+                break
+            self._run_cookie_effect(watcher, Trigger.OPPONENT_ATTACKS, defender)
+        if self.state.over or target not in defender.battle:
+            return
         self._run_cookie_effect(target, Trigger.WHEN_ATTACKED, defender)
         if self.state.over or target not in defender.battle:
             return
@@ -1099,7 +1131,8 @@ class Game:
             self._run_cookie_effect(target, Trigger.SURVIVED_DAMAGE, defender)
         self._attack_target = target
         self._attack_killed = len(defender.break_area) > before
-        if not state.over:
+        if not state.over and not attack_effect_silenced(
+                self.db, self.state, attacker, target):
             self._run_cookie_effect(attacker, Trigger.ATTACK, player)
         self._check_battle_area(defender)
         self._end_attack_auras()
@@ -1521,6 +1554,28 @@ class Game:
         owner.break_additions_this_turn += 1
         if Keyword.ARENA in self.db[card.card_id].keywords:
             owner.arena_break_additions_this_turn += 1
+
+    def place_in_break_by_effect(self, owner: PlayerState, card: CardInstance,
+                                 ctx) -> None:
+        """A card put into a break area by a card effect, rather than by
+        fainting or by a refresh.
+
+        One method because the placed card gets a trigger of its own here and
+        a second copy of the move would be a trigger that silently stops
+        firing. Whether the *placer* was an 【Arena】 card is read off the
+        effect that is resolving, which is what "by an 【Arena】 card effect"
+        means — the card being placed is not the one the qualifier is about.
+        """
+        owner.break_area.append(card)
+        self._count_break_addition(owner, card)
+        source = getattr(ctx, "source_card", None)
+        cookie = getattr(ctx, "source_cookie", None)
+        source_id = (source.card_id if source is not None
+                     else cookie.card.card_id if cookie is not None else None)
+        if (source_id is not None
+                and Keyword.ARENA in self.db[source_id].keywords):
+            self._run_effect(card, Trigger.ARENA_BREAK_BY_EFFECT, owner)
+        self._check_win()
 
     def cookie_to_deck(self, cookie: Cookie, *, bottom: bool = True) -> None:
         """A Cookie leaving the battle area for its owner's deck.

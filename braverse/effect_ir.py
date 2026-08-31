@@ -245,6 +245,21 @@ class Condition:
             # fewer", 1 means strictly fewer, N means behind by N or more.
             behind = len(ctx.opp.support) - len(ctx.me.support)
             return behind >= self.value
+        if self.kind == "played_from_support":
+            return len(player.played_from_support_this_turn) >= max(self.value, 1)
+        if self.kind == "self_played_from_support":
+            cookie = ctx.source_cookie
+            return (cookie is not None
+                    and cookie.uid in player.played_from_support_this_turn)
+        if self.kind == "self_set_active_by_effect":
+            cookie = ctx.source_cookie
+            return cookie is not None and cookie.set_active_by_effect_this_turn
+        if self.kind == "went_second":
+            # BS12's compensation mechanic: most of the set carries a rider
+            # that only fires for the player who did not open. `first_player`
+            # is the seat that took turn one, and it never changes, so this is
+            # a fact about the game rather than about the turn.
+            return ctx.game.first_player != player.index
         if self.kind == "refreshed":
             return player.refreshed
         if self.kind == "opponent_has_level":
@@ -830,10 +845,12 @@ class MoveCards(Op):
         elif self.destination == ZONE_SUPPORT:
             card.rested = self.rested
             owner.support.append(card)
+        elif self.destination == ZONE_BREAK:
+            # The break area is the one destination with a trigger on arrival,
+            # so it goes through the engine rather than straight onto the pile.
+            ctx.game.place_in_break_by_effect(owner, card, ctx)
         else:
             self._pile_of(owner, self.destination).append(card)
-        if self.destination == ZONE_BREAK:
-            ctx.game._check_win()
 
 
 @dataclass
