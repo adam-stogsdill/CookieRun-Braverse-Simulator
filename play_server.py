@@ -2926,7 +2926,7 @@ class Handler(BaseHTTPRequestHandler):
                       "/replays.js", "/replays.css",
                       "/title.js", "/title.css",
                       "/profile.js", "/profile.css", "/prefs.js",
-                      "/netplay.js"):
+                      "/netplay.js", "/brick.svg"):
             self._file(VIEWER / path.lstrip("/"))
         elif path == "/icon.ico":
             # The game's face: the browser tab, and the window a Chromium

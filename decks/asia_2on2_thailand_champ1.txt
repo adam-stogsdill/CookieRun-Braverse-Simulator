@@ -1,0 +1,114 @@
+# source: https://cookierunbraverse.com/asia/decks/7364
+# event: 2-ON-2 Event CHAMPION1 (Thailand)
+# event_date: 23 May, 2026
+# team: Kaeokao & Kunanon Team
+# player: Kaeokao
+
+COOKIE (25)
+  4x BS10-095   Lime Cookie                      LV1 HP2
+  4x BS10-096   Grapefruit Cookie                LV1 HP2
+  4x BS8-076    Icicle Yeti Cookie               LV1 HP3
+  4x ST9-006    Sea Fairy Cookie                 LV3 HP6
+  3x BS2-045    Parfait Cookie                   LV1 HP2
+  2x BS5-069    Pond Dino Cookie                 LV1 HP2
+  2x BS6-074    String Gummy Cookie              LV3 HP5
+  2x ST4-007    Sour Belt Cookie                 LV1 HP3
+FLIP (16)
+  4x BS10-077   Sorbet Shark Cookie              LV2 HP3
+  4x BS3-085    Custard Cookie                   LV2 HP2
+  4x BS9-084    Capsaicin Cookie                 LV1 HP1
+  4x ST9-010    Parfait Cookie                   LV1 HP1
+ITEM (5)
+  3x ST4-017    Emergency Lifebuoy               
+  2x ST9-016    Bubble Wave Shell                
+TRAP (10)
+  4x ST9-018    Tower of Frozen Waves            
+  3x BS6-085    Destruction of a Pastless Future 
+  3x ST4-021    Fallen Ice Statue                
+STAGE (4)
+  4x BS6-086    Messy TBD Director's Office      
+
+legal: True  size 60  flips 16
+
+EXTRA deck
+EXTRA (6)
+  3x BS10-098   Jagae Cookie                     LV3 HP6
+  3x BS8-090    Will of Nature                   LV3 HP5
+
+{
+ "deck": [
+  "BS6-074",
+  "BS6-074",
+  "ST9-006",
+  "ST9-006",
+  "ST9-006",
+  "ST9-006",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS3-085",
+  "BS3-085",
+  "BS3-085",
+  "BS3-085",
+  "BS10-095",
+  "BS10-095",
+  "BS10-095",
+  "BS10-095",
+  "BS10-096",
+  "BS10-096",
+  "BS10-096",
+  "BS10-096",
+  "BS9-084",
+  "BS9-084",
+  "BS9-084",
+  "BS9-084",
+  "BS8-076",
+  "BS8-076",
+  "BS8-076",
+  "BS8-076",
+  "BS5-069",
+  "BS5-069",
+  "BS2-045",
+  "BS2-045",
+  "BS2-045",
+  "ST4-007",
+  "ST4-007",
+  "ST9-010",
+  "ST9-010",
+  "ST9-010",
+  "ST9-010",
+  "BS6-086",
+  "BS6-086",
+  "BS6-086",
+  "BS6-086",
+  "BS6-085",
+  "BS6-085",
+  "BS6-085",
+  "ST4-017",
+  "ST4-017",
+  "ST4-017",
+  "ST4-021",
+  "ST4-021",
+  "ST4-021",
+  "ST9-016",
+  "ST9-016",
+  "ST9-018",
+  "ST9-018",
+  "ST9-018",
+  "ST9-018"
+ ],
+ "extra": [
+  "BS10-098",
+  "BS10-098",
+  "BS10-098",
+  "BS8-090",
+  "BS8-090",
+  "BS8-090"
+ ],
+ "source": "https://cookierunbraverse.com/asia/decks/7364",
+ "event": "2-ON-2 Event CHAMPION1 (Thailand)",
+ "event_date": "23 May, 2026",
+ "team": "Kaeokao & Kunanon Team",
+ "player": "Kaeokao"
+}

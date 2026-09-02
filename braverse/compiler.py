@@ -473,7 +473,7 @@ _ZONE_WORDS = {
 # express it, so it read the word as noise and the card came out meaning the
 # exact opposite of what it prints.
 _ZONE_HAS = re.compile(
-    r"there (?:is|are) (?P<none>no )?(?:an?|another|\d+)?\s*(?P<what>.*?)\s*"
+    r"there (?:is|are) (?P<none>no )?(?P<n>an?|another|\d+)?\s*(?P<what>.*?)\s*"
     r"(?:cards?|cookies?)?\s+"
     r"in (?P<who>your opponent's|your|their|both players'?)\s*"
     r"(?P<zone>battle area|break area|support area|trash|hand|deck)$", re.I)
@@ -481,6 +481,14 @@ _ZONE_HAS = re.compile(
 _ZONE_COUNT = re.compile(
     r"there (?:is|are) (?P<n>\d+) (?P<what>.*?)\s*(?:cards?|cookies?)?\s*"
     r"or (?P<dir>more|less|fewer) in (?P<who>your opponent's|your|their)\s*"
+    r"(?P<zone>battle area|break area|support area|trash|hand|deck)$", re.I)
+# "there are 3 or more Cookies in your break area" — the same condition with
+# the bound in front of the filter instead of behind it. Ten cards print it
+# this way, and matched by `_ZONE_HAS` instead the number is swallowed and the
+# card asks for *one*, which is a condition that is true almost always.
+_ZONE_COUNT_FIRST = re.compile(
+    r"there (?:is|are) (?P<n>\d+) or (?P<dir>more|less|fewer) (?P<what>.*?)\s*"
+    r"(?:cards?|cookies?)?\s+in (?P<who>your opponent's|your|their)\s*"
     r"(?P<zone>battle area|break area|support area|trash|hand|deck)$", re.I)
 # "your trash contains 5 {P} cards or more"
 _ZONE_CONTAINS = re.compile(
@@ -491,7 +499,8 @@ _ZONE_CONTAINS = re.compile(
 
 def _zone_condition(phrase: str) -> Condition | None:
     """One rule shape for "<filter> in <zone>" and its counted variants."""
-    match = _ZONE_COUNT.search(phrase) or _ZONE_CONTAINS.search(phrase)
+    match = (_ZONE_COUNT.search(phrase) or _ZONE_COUNT_FIRST.search(phrase)
+             or _ZONE_CONTAINS.search(phrase))
     if match:
         groups = match.groupdict()
         who = SCOPE_OPPONENT if "opponent" in (groups.get("who") or "") else SCOPE_OWN
@@ -506,7 +515,20 @@ def _zone_condition(phrase: str) -> Condition | None:
         if "both" in (groups["who"] or "").lower():
             return None
         who = SCOPE_OPPONENT if "opponent" in groups["who"] else SCOPE_OWN
+        # "if there are 2 Cookies in your battle area" — the numeral was being
+        # swallowed by the pattern and every one of these asked for *one*
+        # card, which is a condition that answers yes to nearly any board.
+        # Read as "at least N": the battle area holds two, so there the two
+        # readings are the same sentence, and the support-area ones (BS6-053
+        # and its two siblings, "if there are 5 cards in your support area")
+        # are late-game bonuses whose every printed sibling says "5 cards or
+        # more" — a support area that grows by one a turn makes an exactly-5
+        # rider live for a single turn and dead after, which is not a card
+        # anybody printed.
+        count = (groups.get("n") or "").strip()
         op, value = ("==", 0) if groups.get("none") else (">=", 1)
+        if count.isdigit():
+            value = int(count)
         return Condition("zone_has", op, value, who=who,
                          card_filter=parse_card_filter(groups["what"]),
                          zone=_ZONE_WORDS[groups["zone"].lower()])
@@ -2139,6 +2161,22 @@ class PlayFromBreak(Op):
         ctx.game._deploy_cookie(ctx.me, card, from_zone="break")
         return True
 
+    def is_live(self, ctx, env) -> bool:
+        """A full battle area and an empty break area are both "nothing to do".
+
+        Millennial Tree Cookie (BS4-038) is the case that shows why it has to
+        be said out loud: its 【On Play】 costs {Y}, and the Cookie it plays
+        needs the slot the Cookie itself has just taken — so on a board with
+        two Cookies the clause charges the energy and then finds there is
+        nowhere to put anything.
+        """
+        if len(ctx.me.battle) >= ctx.game.rules.max_battle_cookies:
+            return False
+        return any(ctx.db[c.card_id].is_cookie
+                   and (self.filter is None
+                        or self.filter.matches(ctx.db[c.card_id]))
+                   for c in ctx.me.break_area)
+
 
 @dataclass
 class RecycleTrash(Op):
@@ -2648,16 +2686,33 @@ def _v_faint(m) -> list[Op]:
     return [Faint()]
 
 
-@verb(r"^place (?:up to )?(\d+) cards? from the top of (?:that|this) cookie's hp "
+# "that Cookie" is whatever the sentence before selected — or, on an attack
+# rider that selected nothing, the Cookie the swing was aimed at. "this
+# Cookie" is the one whose text this is, and reading the two the same way
+# points a Cookie's own HP cost at its victim. Two rules rather than one
+# alternation, so the register is chosen by the word that was printed.
+@verb(r"^place (?:up to )?(\d+) cards? from the top of that cookie's hp "
       r"in(?:to)? (?:the|your) trash\.?$")
 def _v_trash_hp(m) -> list[Op]:
     return [TrashHP(int(m.group(1)))]
 
 
-@verb(r"^place (?:up to )?(\d+) cards? from the top of (?:that|this) cookie's hp "
+@verb(r"^place (?:up to )?(\d+) cards? from the top of this cookie's hp "
+      r"in(?:to)? (?:the|your) trash\.?$")
+def _v_trash_hp_self(m) -> list[Op]:
+    return [TrashHP(int(m.group(1)), ref=REF_SELF)]
+
+
+@verb(r"^place (?:up to )?(\d+) cards? from the top of that cookie's hp "
       r"into your opponent's trash\.?$")
 def _v_trash_hp_opp(m) -> list[Op]:
     return [TrashHP(int(m.group(1)), to_opponent_trash=True)]
+
+
+@verb(r"^place (?:up to )?(\d+) cards? from the top of this cookie's hp "
+      r"into your opponent's trash\.?$")
+def _v_trash_hp_self_opp(m) -> list[Op]:
+    return [TrashHP(int(m.group(1)), ref=REF_SELF, to_opponent_trash=True)]
 
 
 @verb(r"^return this cookie to your hand\.?$")
@@ -3059,10 +3114,16 @@ def _v_enemy_cookie_to_support(m) -> list[Op]:
     return [SelectedCookieToSupport(rested=m.group(1).lower() == "rested")]
 
 
-@verb(r"^place (?:up to )?(\d+) of (?:that|this) cookie's top hp cards? "
+@verb(r"^place (?:up to )?(\d+) of that cookie's top hp cards? "
       r"in(?:to)? (?:the|your) trash\.?$")
 def _v_trash_top_hp(m) -> list[Op]:
     return [TrashHP(int(m.group(1)))]
+
+
+@verb(r"^place (?:up to )?(\d+) of this cookie's top hp cards? "
+      r"in(?:to)? (?:the|your) trash\.?$")
+def _v_trash_top_hp_self(m) -> list[Op]:
+    return [TrashHP(int(m.group(1)), ref=REF_SELF)]
 
 
 @verb(r"^place the top (\d+) hp cards? of each of your opponent's cookies "
@@ -4090,6 +4151,13 @@ def _v_place_stage(m) -> list[Op]:
 # compiler cannot read in full is better left unimplemented.
 _STATE_WORDS = re.compile(r"\b(active|rested|face[- ]up|face[- ]down)\b", re.I)
 
+# The same trap one clause further along: "2 Cookies **whose remaining HP is
+# 1**" is not a property of the printed card either — it is a Cookie's HP pile
+# at this moment, and a `CardFilter` reads `CardDef`s. Dropped, the filter
+# counts every Cookie on the board and BS5-020 fires whenever you have two of
+# anything.
+_BOARD_PROPERTY = re.compile(r"\bwhose\b|\bremaining hp\b", re.I)
+
 
 # "Cookies that have 【Blocker】" arrives here as "Cookies that have", because
 # `split_clauses` strips 【...】 markers. The property the card filtered on is
@@ -4121,6 +4189,10 @@ def parse_card_filter(phrase: str) -> CardFilter:
     if state:
         raise CompileError(f"card filter describes state, not print: {state.group(0)!r}"
                            f" in {phrase!r}")
+    board = _BOARD_PROPERTY.search(phrase)
+    if board:
+        raise CompileError(f"card filter describes the board, not the print: "
+                           f"{board.group(0)!r} in {phrase!r}")
     if _STRIPPED_PROPERTY.search(phrase.strip()):
         raise CompileError(f"card filter lost its property to marker "
                            f"stripping: {phrase!r}")
@@ -4812,9 +4884,22 @@ def compile_all(db: CardDB, *, register: bool = True,
                 skip: set | None = None) -> dict:
     """Compile the whole pool.
 
-    Hand-written implementations always win: a card already in the effect
-    registry is skipped entirely, so the compiler can never silently override
-    a card someone verified by hand.
+    Hand-written implementations always win, but they win *per trigger*, not
+    per card. A card is a handful of separate abilities that happen to be
+    printed on the same piece of cardboard, and skipping the whole card the
+    moment one of them is in the registry lost the others: Mozzarella Cookie
+    (BS3-028) has a hand-written 【On Play】 and an attack rider that heals it,
+    and for as long as "hand-written" meant the whole card, the heal was
+    compiled, discarded and never run. Eighteen cards were playing part of
+    their text that way, and silently — nothing reports a trigger that was
+    understood and then dropped.
+
+    The all-or-nothing rule is unchanged, only widened to take hand-written
+    work as an answer: a clause the compiler cannot read still refuses the
+    card, *unless* the trigger it belongs to is one somebody already wrote.
+    That is what makes BS3-028 safe — its unreadable sentence is the 【On
+    Play】, and the 【On Play】 is exactly the trigger the registry already
+    holds.
     """
     from .effects import _REGISTRY, STATIC_ABILITY_CARDS, get_effect
 
@@ -4825,16 +4910,23 @@ def compile_all(db: CardDB, *, register: bool = True,
     for card in db.cards.values():
         if card.id in skip or card.base_id in skip:
             continue
-        if any(get_effect(card.id, t) for t in Trigger):
-            continue           # hand-written; leave it alone
+        hand = {t for t in Trigger if get_effect(card.id, t)}
         result = compile_card(card)
         results[card.id] = result
-        if register and result.ok:
-            for trigger, program in result.programs.items():
+        if not register:
+            continue
+        # A trigger written by hand is accounted for however it compiles: the
+        # compiler neither overrides it nor is stopped by its failures.
+        if any(trigger not in hand for trigger, _clause, _why in result.failures):
+            continue
+        fresh = {t: p for t, p in result.programs.items() if t not in hand}
+        if fresh:
+            for trigger, program in fresh.items():
                 _REGISTRY[(card.base_id, trigger)] = program
-            if result.vanilla and not result.programs:
-                # Nothing to register, but the card is understood in full.
-                STATIC_ABILITY_CARDS.add(card.base_id)
+            registered += 1
+        elif not hand and result.vanilla and not result.programs:
+            # Nothing to register, but the card is understood in full.
+            STATIC_ABILITY_CARDS.add(card.base_id)
             registered += 1
 
     results["__registered__"] = registered  # type: ignore[assignment]

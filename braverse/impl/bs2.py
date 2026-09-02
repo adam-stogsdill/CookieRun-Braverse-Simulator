@@ -119,17 +119,14 @@ def aloe_faint(ctx: Ctx) -> None:
                  criterion="{B}", reveal=True, rest="bottom")
 
 
-# --- BS2-047 Diving Goggles -------------------------------------------------
-@effect("BS2-047", Trigger.ATTACK)
-def diving_goggles_attack(ctx: Ctx) -> None:
-    """Select up to 2 of your opponent's Cookies. Deals 1 damage to each of
-    those Cookies.
-
-    The scrape splits this line oddly, so it is written out here rather than
-    fought with in the compiler.
-    """
-    for cookie in list(ctx.enemy_cookies())[:2]:
-        ctx.deal_damage(cookie, 1)
+# BS2-047 Diving Goggles was written here by hand, against a dump that split
+# its line and lost the damage number. The line is whole in the CSV now and
+# the compiler reads the card in full — cost, discard, two targets and 2
+# damage each — so the hand-written version is gone. It was doing nothing
+# regardless: this is an ITEM, an item's body runs on `Trigger.ITEM`, and the
+# effect was registered against `Trigger.ATTACK`, which only a Cookie in the
+# battle area ever fires. The card was inert and `is_implemented` said
+# otherwise, which is how it stayed that way.
 
 
 # --- BS2-060 Beet Cookie ----------------------------------------------------

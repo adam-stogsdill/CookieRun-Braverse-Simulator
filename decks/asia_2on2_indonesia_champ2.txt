@@ -1,0 +1,120 @@
+# source: https://cookierunbraverse.com/asia/decks/7101
+# event: 2-ON-2 Event CHAMPION2 (Indonesia)
+# event_date: 14 June, 2026
+# team: Team BlueYellow
+# player: Hans' Deck Recipe
+
+COOKIE (30)
+  4x BS8-076    Icicle Yeti Cookie               LV1 HP3
+  4x BS9-077    Black Raisin Cookie              LV2 HP3
+  3x BS10-093   Orange Cookie                    LV1 HP2
+  3x BS2-026    Mocha Ray Cookie                 LV1 HP3
+  3x BS3-088    Pure Vanilla Cookie              LV3 HP4
+  3x BS4-077    Sorbet Shark Cookie              LV1 HP1
+  3x BS9-089    Pure Vanilla Cookie              LV2 HP4
+  2x BS9-080    Cinnamon Cookie                  LV1 HP3
+  2x ST9-006    Sea Fairy Cookie                 LV3 HP6
+  1x BS4-075    Black Pearl Cookie               LV3 HP5
+  1x BS6-079    Croissant Cookie                 LV3 HP5
+  1x BS6-080    Adventurer Cookie                LV1 HP3
+FLIP (15)
+  4x BS10-077   Sorbet Shark Cookie              LV2 HP3
+  4x ST4-009    Ice Candy Cookie                 LV2 HP2
+  2x BS3-085    Custard Cookie                   LV2 HP2
+  2x P-092      Pudding à la Mode Cookie         LV2 HP3
+  2x ST9-010    Parfait Cookie                   LV1 HP1
+  1x BS4-068    Aquamarine Cookie                LV2 HP2
+ITEM (5)
+  3x ST4-016    Bear Jelly Ice Cream             
+  2x ST9-016    Bubble Wave Shell                
+TRAP (10)
+  4x BS6-085    Destruction of a Pastless Future 
+  2x BS9-093    Reversed Prophecy                
+  2x ST4-021    Fallen Ice Statue                
+  2x ST9-018    Tower of Frozen Waves            
+
+legal: True  size 60  flips 15
+
+EXTRA deck
+EXTRA (6)
+  3x BS9-088    Pure Vanilla Cookie              LV3 HP0
+  2x BS8-090    Will of Nature                   LV3 HP5
+  1x BS10-098   Jagae Cookie                     LV3 HP6
+
+{
+ "deck": [
+  "BS6-079",
+  "BS3-088",
+  "BS3-088",
+  "BS3-088",
+  "BS4-075",
+  "ST9-006",
+  "ST9-006",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS9-089",
+  "BS9-089",
+  "BS9-089",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS3-085",
+  "BS3-085",
+  "BS4-068",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "P-092",
+  "P-092",
+  "BS10-093",
+  "BS10-093",
+  "BS10-093",
+  "BS9-080",
+  "BS9-080",
+  "BS8-076",
+  "BS8-076",
+  "BS8-076",
+  "BS8-076",
+  "BS6-080",
+  "BS4-077",
+  "BS4-077",
+  "BS4-077",
+  "BS2-026",
+  "BS2-026",
+  "BS2-026",
+  "ST9-010",
+  "ST9-010",
+  "BS9-093",
+  "BS9-093",
+  "BS6-085",
+  "BS6-085",
+  "BS6-085",
+  "BS6-085",
+  "ST4-016",
+  "ST4-016",
+  "ST4-016",
+  "ST9-016",
+  "ST9-016",
+  "ST9-018",
+  "ST9-018",
+  "ST4-021",
+  "ST4-021"
+ ],
+ "extra": [
+  "BS10-098",
+  "BS9-088",
+  "BS9-088",
+  "BS9-088",
+  "BS8-090",
+  "BS8-090"
+ ],
+ "source": "https://cookierunbraverse.com/asia/decks/7101",
+ "event": "2-ON-2 Event CHAMPION2 (Indonesia)",
+ "event_date": "14 June, 2026",
+ "team": "Team BlueYellow",
+ "player": "Hans' Deck Recipe"
+}

@@ -82,6 +82,11 @@ const Sfx = (() => {
       burst({ duration: 0.09, from: 2600, to: 900, q: 0.8, gain: 0.35 });
       burst({ at: 0.05, duration: 0.06, from: 5200, to: 2600, q: 2, gain: 0.18 });
     },
+    // a card dragged out from under a pile: card on card, no corner click,
+    // quiet enough to sit under the flip that follows it rather than answer it
+    slide() {
+      burst({ duration: 0.26, from: 900, to: 260, q: 0.5, gain: 0.13, type: "bandpass" });
+    },
     // the same, but harder, for a FLIP card actually going off
     flipBig() {
       burst({ duration: 0.11, from: 3200, to: 700, q: 0.7, gain: 0.45 });

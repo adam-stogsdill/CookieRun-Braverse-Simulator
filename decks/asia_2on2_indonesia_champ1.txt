@@ -1,0 +1,114 @@
+# source: https://cookierunbraverse.com/asia/decks/7099
+# event: 2-ON-2 Event CHAMPION1 (Indonesia)
+# event_date: 14 June, 2026
+# team: Team BlueYellow
+# player: Albertus Alvianto
+
+COOKIE (28)
+  4x BS1-031    Marshmallow Cookie               LV1 HP3
+  4x BS4-038    Millennial Tree Cookie           LV3 HP5
+  4x BS8-044    Pistachio Cookie                 LV1 HP3
+  4x ST7-008    Elder Faerie Cookie              LV2 HP4
+  4x ST7-012    Churro Cookie                    LV1 HP3
+  3x BS3-028    Mozzarella Cookie                LV3 HP4
+  2x BS6-031    Timekeeper Cookie                LV3 HP5
+  2x BS6-039    Croissant Cookie                 LV3 HP6
+  1x BS4-026    Stormbringer Cookie              LV3 HP5
+FLIP (12)
+  4x BS9-025    Mala Sauce Cookie                LV1 HP1
+  4x BS9-032    Yoga Cookie                      LV1 HP1
+  4x ST7-005    Caramel Choux Cookie             LV1 HP1
+ITEM (6)
+  4x BS4-041    Millennial Twig                  
+  2x BS6-041    Hourglass of Aeternus Tempora    
+TRAP (14)
+  4x ST7-017    Vined Cavern                     
+  3x BS6-042    Clever Advice                    
+  3x BS9-046    Fragmented Soul                  
+  2x BS1-050    Broken Signpost                  
+  2x BS4-043    Heaven-Splitting Lightning       
+
+legal: True  size 60  flips 12
+
+EXTRA deck
+EXTRA (6)
+  3x BS10-048   Warden of the Heart              LV3 HP6
+  3x BS9-030    Shadow Milk Cookie               LV3 HP6
+
+{
+ "deck": [
+  "BS6-031",
+  "BS6-031",
+  "BS6-039",
+  "BS6-039",
+  "BS3-028",
+  "BS3-028",
+  "BS3-028",
+  "BS4-026",
+  "BS4-038",
+  "BS4-038",
+  "BS4-038",
+  "BS4-038",
+  "ST7-008",
+  "ST7-008",
+  "ST7-008",
+  "ST7-008",
+  "BS9-025",
+  "BS9-025",
+  "BS9-025",
+  "BS9-025",
+  "BS9-032",
+  "BS9-032",
+  "BS9-032",
+  "BS9-032",
+  "BS8-044",
+  "BS8-044",
+  "BS8-044",
+  "BS8-044",
+  "BS1-031",
+  "BS1-031",
+  "BS1-031",
+  "BS1-031",
+  "ST7-012",
+  "ST7-012",
+  "ST7-012",
+  "ST7-012",
+  "ST7-005",
+  "ST7-005",
+  "ST7-005",
+  "ST7-005",
+  "BS9-046",
+  "BS9-046",
+  "BS9-046",
+  "BS6-042",
+  "BS6-042",
+  "BS6-042",
+  "BS6-041",
+  "BS6-041",
+  "BS4-043",
+  "BS4-043",
+  "BS4-041",
+  "BS4-041",
+  "BS4-041",
+  "BS4-041",
+  "BS1-050",
+  "BS1-050",
+  "ST7-017",
+  "ST7-017",
+  "ST7-017",
+  "ST7-017"
+ ],
+ "extra": [
+  "BS10-048",
+  "BS10-048",
+  "BS10-048",
+  "BS9-030",
+  "BS9-030",
+  "BS9-030"
+ ],
+ "source": "https://cookierunbraverse.com/asia/decks/7099",
+ "event": "2-ON-2 Event CHAMPION1 (Indonesia)",
+ "event_date": "14 June, 2026",
+ "team": "Team BlueYellow",
+ "player": "Albertus Alvianto"
+}

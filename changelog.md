@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.2.85
+
+- **Eighteen Cookies were only playing half their text, and now play all of
+  it.** A card whose one ability was written out by hand had the rest of its
+  abilities thrown away — so Mozzarella Cookie (BS3-028) never healed on its
+  attack, Bell Pepper, Black Pearl, Moonlight, Avatar of Ruin, Dark Cacao,
+  Captain Caviar and eleven others all swung with a rider missing.
+- **Diving Goggles (BS2-047) and Crimson Dragon Mask (BS5-020) do something
+  when you play them.** Both items were wired to an event that only Cookies
+  ever raise, so neither had ever fired.
+- **"If there are 3 or more Cookies in your break area" now counts to three.**
+  Conditions that name a number were reading it as "1", which is true on
+  almost any board — around a dozen cards were handing out their bonus for
+  free.
+- **Millennial Tree Cookie (BS4-038) no longer charges you {Y} for nothing.**
+  Its 【On Play】 asked for the energy before checking whether there was a
+  Cookie to bring back or room to put one, and kept it either way. Optional
+  costs in general are no longer offered for an effect that cannot happen.
+
+## 0.2.84
+
+- **The board now stands inside an oven.** Behind the table is a wall of
+  sooted firebrick lit by a low ember glow, darkening towards the top and
+  bottom so the middle of the board stays the brightest thing on screen.
+  Nothing about how the game is read has changed — the mats, sleeves and
+  playmats are all still yours to set in Settings → Table.
+- **"Then, ... deals 1 damage." on an attack line now actually deals it.** A
+  rider that names no target means the Cookie the attack was aimed at, and the
+  engine was reading the sentence and hitting nobody with it — 40-odd Cookies
+  across every set, Wildberry Cookie (BS3-009) among them, swung with the
+  second half of their attack missing.
+- **Cards that ask for "a [Soul Jam] card" can now find one.** No card is
+  printed with that bare name — they are Soul Jam: Light of Passion and nine
+  others — so every card asking whether one was in your support area was told
+  no, whatever was sitting there.
+- **A Cookie that pays "place 1 card from the top of this Cookie's HP into the
+  trash" pays it out of its own HP**, not out of the Cookie it just attacked.
+
+## 0.2.82
+
+- **Nero's Brave League S1 Final winning deck is in the deck menu** — the blue
+  Pure Vanilla list that took the 2026 Malaysia final on 25 April, saved as
+  `decks/asia_brave_league_s1_final_champ.txt`. The exact 60 plus its EXTRA
+  deck, straight from the official Deck Recipe page.
+
+## 0.2.81
+
+- **A Cookie's HP is drawn as the pile of cards it actually is** — face down,
+  under the Cookie and splayed sideways in a straight line, sitting a little
+  below it on your side of the table and a little above it on your opponent's.
+  The card nearest the Cookie is the top of the pile, which is the one damage
+  takes next.
+- **The empty spaces in a battle area are now where a Cookie actually goes.**
+  They were drawn a whole HP bar lower than the Cookie beside them, marking a
+  space no card is ever placed in.
+- **Damage now pulls that card out from under the Cookie before turning it
+  over.** It slides out to the right, the way the pile splays, then flips face
+  up the way it always did — so where the card came from is something you can
+  watch rather than work out from the number.
+- The card's name no longer appears until it has actually turned over, and
+  the flip reveal, the break and the skill pop-up now follow the battle-area
+  size slider like the rest of the board — they were fixed at one size.
+
+## 0.2.80
+
+- **Six championship decks from the Asia 2-on-2 events are now in the deck
+  menu** — both winning lists from Thailand (23 May), Indonesia (14 June) and
+  Malaysia (20 June), taken from the official Deck Recipe page and saved as
+  `decks/asia_2on2_<country>_champ<N>.txt`. Each is the exact 60 plus its
+  EXTRA deck, and each passes deck validation as printed.
+
 ## 0.2.79
 
 - **Every card in Festival Arena now plays in full** — 112 of 112, up from 63%

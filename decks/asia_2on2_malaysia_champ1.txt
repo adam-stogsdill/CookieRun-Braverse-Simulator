@@ -1,0 +1,116 @@
+# source: https://cookierunbraverse.com/asia/decks/7104
+# event: 2-ON-2 Event CHAMPION1 (Malaysia)
+# event_date: 20 June, 2026
+# team: Team CoconutLatte
+# player: ZERO
+
+COOKIE (30)
+  4x BS10-093   Orange Cookie                    LV1 HP2
+  4x BS10-096   Grapefruit Cookie                LV1 HP2
+  4x BS3-088    Pure Vanilla Cookie              LV3 HP4
+  4x BS8-081    Strawberry Cream Cookie          LV1 HP3
+  4x BS9-077    Black Raisin Cookie              LV2 HP3
+  4x BS9-089    Pure Vanilla Cookie              LV2 HP4
+  3x BS8-076    Icicle Yeti Cookie               LV1 HP3
+  2x BS2-040    Aloe Cookie                      LV1 HP2
+  1x BS4-075    Black Pearl Cookie               LV3 HP5
+FLIP (14)
+  4x BS10-077   Sorbet Shark Cookie              LV2 HP3
+  4x BS3-085    Custard Cookie                   LV2 HP2
+  4x ST4-009    Ice Candy Cookie                 LV2 HP2
+  1x P-092      Pudding à la Mode Cookie         LV2 HP3
+  1x ST4-006    Peppermint Cookie                LV1 HP1
+ITEM (5)
+  3x ST4-016    Bear Jelly Ice Cream             
+  2x ST9-016    Bubble Wave Shell                
+TRAP (11)
+  4x ST4-021    Fallen Ice Statue                
+  3x ST9-018    Tower of Frozen Waves            
+  2x BS10-086   Sudden Weather Change            
+  2x ST4-020    Octo-Ink Spray                   
+
+legal: True  size 60  flips 14
+
+EXTRA deck
+EXTRA (6)
+  4x BS9-088    Pure Vanilla Cookie              LV3 HP0
+  1x BS10-098   Jagae Cookie                     LV3 HP6
+  1x BS8-090    Will of Nature                   LV3 HP5
+
+{
+ "deck": [
+  "BS3-088",
+  "BS3-088",
+  "BS3-088",
+  "BS3-088",
+  "BS4-075",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS9-089",
+  "BS9-089",
+  "BS9-089",
+  "BS9-089",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS3-085",
+  "BS3-085",
+  "BS3-085",
+  "BS3-085",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "P-092",
+  "BS10-093",
+  "BS10-093",
+  "BS10-093",
+  "BS10-093",
+  "BS10-096",
+  "BS10-096",
+  "BS10-096",
+  "BS10-096",
+  "BS8-081",
+  "BS8-081",
+  "BS8-081",
+  "BS8-081",
+  "BS8-076",
+  "BS8-076",
+  "BS8-076",
+  "BS2-040",
+  "BS2-040",
+  "ST4-006",
+  "BS10-086",
+  "BS10-086",
+  "ST4-016",
+  "ST4-016",
+  "ST4-016",
+  "ST4-020",
+  "ST4-020",
+  "ST9-016",
+  "ST9-016",
+  "ST9-018",
+  "ST9-018",
+  "ST9-018",
+  "ST4-021",
+  "ST4-021",
+  "ST4-021",
+  "ST4-021"
+ ],
+ "extra": [
+  "BS10-098",
+  "BS9-088",
+  "BS9-088",
+  "BS9-088",
+  "BS9-088",
+  "BS8-090"
+ ],
+ "source": "https://cookierunbraverse.com/asia/decks/7104",
+ "event": "2-ON-2 Event CHAMPION1 (Malaysia)",
+ "event_date": "20 June, 2026",
+ "team": "Team CoconutLatte",
+ "player": "ZERO"
+}

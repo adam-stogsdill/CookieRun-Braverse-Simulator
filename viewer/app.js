@@ -253,12 +253,42 @@ function animateTurn(node, card, opts) {
   }, TURN_MS + stagger + 120);
 }
 
+/* How many cards of an HP pile are drawn. Past this the splay is wider than the
+ * room left beside the Cookie, and one more back edge says nothing the HP bar
+ * below it does not. `style.css` reserves the room for exactly this many. */
+const HP_PILE_DEPTH = 6;
+
+/** Resolve a length-valued custom property to pixels.
+ *
+ * `getPropertyValue` on a custom property hands back the token stream, not a
+ * length: `--battle-card-w` comes out as the literal `calc(110px * 1)`, which
+ * `parseFloat` reads as NaN — so a caller that parsed it got its own fallback
+ * every time, and the battle-size slider moved nothing the overlays drew. The
+ * value is measured instead of parsed: a hidden probe is given that width and
+ * the layout engine does the arithmetic. The probe hangs off <body>, where
+ * every :root property is in scope.
+ */
+let lengthProbe = null;
+function cssLength(name, fallback) {
+  if (!lengthProbe) {
+    lengthProbe = document.createElement("div");
+    lengthProbe.style.cssText =
+      "position:absolute;left:-9999px;top:0;height:0;visibility:hidden;pointer-events:none";
+    document.body.appendChild(lengthProbe);
+  }
+  lengthProbe.style.width = `var(${name})`;
+  const px = parseFloat(getComputedStyle(lengthProbe).width);
+  return px > 0 ? px : fallback;
+}
+
+/** How far one HP card pokes out past its Cookie, along and down, in px. */
+function hpPeek() {
+  return cssLength("--hp-peek", 7);
+}
+
 /** The battle-area card box, read from CSS so the two cannot drift apart. */
 function cardBox() {
-  const css = getComputedStyle(document.documentElement);
-  const w = parseFloat(css.getPropertyValue("--battle-card-w")) || 116;
-  const h = parseFloat(css.getPropertyValue("--battle-card-h")) || 162;
-  return { w, h };
+  return { w: cssLength("--battle-card-w", 110), h: cssLength("--battle-card-h", 153) };
 }
 
 function prettyPilot(name) {
@@ -432,14 +462,21 @@ function cookieSlot(cookie) {
   const slot = h("div", "slot");
   const box = h("div", "cookiebox");
 
-  // The HP pile is face down, physically under the Cookie card. Offsetting the
-  // backs up and to the left is what makes the pile readable at a glance.
+  /* The HP pile is face down, physically under the Cookie card and splayed
+   * sideways in a straight line, one step down the table from it so the whole
+   * pile is visible past the Cookie's edge. Only the sideways step is written
+   * here — which way "down the table" is belongs to the seat, and `style.css`
+   * knows that. The top of the pile — the card damage takes next — is the one
+   * drawn closest to the Cookie, so the deepest layer goes in first and the
+   * shallowest paints over it; splayed the other way round the top card would
+   * cover the whole pile. `--hp-peek` is the step, and `flipCard` reads the
+   * same property, so a card pulled off the pile starts exactly where it was
+   * lying. */
   const stack = h("div", "hpstack");
-  const depth = Math.min(cookie.hp, 6);
-  for (let i = depth - 1; i >= 0; i--) {
+  const depth = Math.min(cookie.hp, HP_PILE_DEPTH);
+  for (let i = depth; i >= 1; i--) {
     const back = faceDown();
-    back.style.left = -(i + 1) * 3 + "px";
-    back.style.top = -(i + 1) * 3 + "px";
+    back.style.left = `calc(var(--hp-peek) * ${i})`;
     stack.appendChild(back);
   }
   box.appendChild(stack);
@@ -915,6 +952,7 @@ function renderTurnline(snap) {
  * this plays them as a sequence rather than all at once. */
 const ATTACK_MS = 900;
 const REVEAL_MS = 700;    // between one HP card turning over and the next
+const PULL_MS = 420;      // the card sliding out from under its Cookie first
 const FLIP_MS = 2400;     // how long a revealed card stays on screen
 const FAINT_MS = 300;
 const DRAW_MS = 220;      // between one card leaving the deck and the next
@@ -1002,11 +1040,14 @@ function playEvents(events) {
         if (reveals >= MAX_REVEALS) break;
         if (hitStart === null) hitStart = clock;
         playReveal(event, clock, reveals++);
-        holds(clock, FLIP_MS);
+        // A reveal is the pull *and* the turn, so both are on the clock: a
+        // budget of only the turn would let a faint clear the board while the
+        // card that caused it was still coming off the pile.
+        holds(clock, PULL_MS + FLIP_MS);
         // What the card *did* plays while it is still up, so the clock only
         // moves on by the gap between cards. The board changing underneath it
         // is different — see `faint`.
-        revealsClear = Math.max(revealsClear, clock + FLIP_MS);
+        revealsClear = Math.max(revealsClear, clock + PULL_MS + FLIP_MS);
         clock += REVEAL_MS;
         break;
       }
@@ -1051,8 +1092,11 @@ function playReveal(event, delay = 0, seq = 0) {
   // Several cards can come off the same Cookie in one attack; `seq` fans them
   // out so a three-damage hit reads as three cards rather than one.
   setTimeout(() => {
-    flipCard(event, seq, seq);
-    Sfx.play(event.flip ? "flipBig" : "flip");
+    // The card is drawn off the pile first and only then turns, so the two
+    // sounds are the two beats: a soft slide, then the flick of the corner.
+    const pulled = flipCard(event, seq, seq);
+    if (pulled) Sfx.play("slide");
+    Sfx.play(event.flip ? "flipBig" : "flip", pulled ? PULL_MS : 0);
   }, delay);
 }
 
@@ -1645,6 +1689,12 @@ function renderReveals(events) {
   box.appendChild(row);
 }
 
+/** Turn one HP card over, and return whether it was pulled off a visible pile.
+ *
+ * The caller needs that answer to time its sounds: a card coming off a Cookie
+ * that is still standing slides out from under it first, and a card whose
+ * Cookie has already fainted has no pile left to come from and simply turns.
+ */
 function flipCard(event, rank = 0, seq = 0) {
   // The Cookie is often gone by the time this runs — an emptied HP pile is a
   // faint — so fall back to its owner's battle area, which does not move.
@@ -1658,12 +1708,33 @@ function flipCard(event, rank = 0, seq = 0) {
   const box = cardBox();
   node.style.width = box.w + "px";
   node.style.height = box.h + "px";
-  const left = at ? (host ? at.left : at.left + at.width / 2 - box.w / 2) - bounds.left - 4
+  /* With a host, the card starts where the pile drew it — one peek along, and
+   * one peek down the table, which is *up* for the seat across it. That side is
+   * read off the board rather than off the event, because which seat is drawn
+   * where is the viewer's business and `#side-N` is bolted to the wrong one.
+   * Because that is the card it is. Without one it is
+   * centred in the battle area, and the -4 nudge it used to carry with a host
+   * went with the pile it no longer sits on. */
+  const peek = hpPeek();
+  const away = host && host.closest(".side.opponent") ? -1 : 1;
+  const left = at ? (host ? at.left + peek : at.left + at.width / 2 - box.w / 2) - bounds.left
                   : bounds.width / 2 - box.w / 2;
-  const top = at ? (host ? at.top : at.top + at.height / 2 - box.h / 2) - bounds.top - 4
-                 : bounds.height / 2 - box.h / 2;
+  const top = at ? (host ? at.top + peek * away : at.top + at.height / 2 - box.h / 2) - bounds.top
+                 : bounds.height / 2 - box.h / 2 - 4;
   node.style.left = left + offset * 30 + "px";
   node.style.top = top - offset * 12 + "px";
+  if (host) {
+    /* Pulled clear of the Cookie before it turns. The distance is most of a
+     * card, so what is left covered when the clip lifts is a sliver; the two
+     * clip insets are the visible left edge held at the Cookie's right edge,
+     * before and after the slide, and CSS interpolates the rest. */
+    const pull = Math.round(box.w * 0.85);
+    node.classList.add("frompile");
+    node.style.setProperty("--pull-ms", PULL_MS + "ms");
+    node.style.setProperty("--pull", pull + "px");
+    node.style.setProperty("--clip-a", Math.max(0, box.w - peek) + "px");
+    node.style.setProperty("--clip-b", Math.max(0, box.w - peek - pull) + "px");
+  }
 
   const inner = h("div", "inner");
   inner.appendChild(h("div", "face back card"));
@@ -1682,7 +1753,8 @@ function flipCard(event, rank = 0, seq = 0) {
 
   node.dataset.born = performance.now();
   el("#fx").appendChild(node);
-  setTimeout(() => node.remove(), FLIP_MS + 300);
+  setTimeout(() => node.remove(), (host ? PULL_MS : 0) + FLIP_MS + 300);
+  return !!host;
 }
 
 /* --------------------------------------------------- trash / break browser */

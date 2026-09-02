@@ -33,6 +33,12 @@
      Cookie — the flip reveal, the break, the skill popup — sizes off these. */
   --battle-card-w: calc(110px * var(--battle-scale));
   --battle-card-h: calc(153px * var(--battle-scale));
+  /* How far each face-down HP card pokes out from its Cookie — the same step
+     right and down, so the pile splays on the diagonal. It sizes off the battle
+     scale like everything else the battle area draws, and it is read back by
+     `flipCard` so a card pulled off the pile starts exactly where the pile drew
+     it. */
+  --hp-peek: calc(7px * var(--battle-scale));
   /* The mat, the seat bar and the hand row are one column and share a width. */
   --mat-max: calc(1180px * var(--mat-scale));
   --panel-w: calc(340px * var(--panel-scale));
@@ -177,8 +183,18 @@ button:disabled { opacity: .45; cursor: default; }
   gap: 4px;
   padding: 8px 10px;
   overflow: auto;
+  /* The room the table stands in: the inside of an oven, tiled from
+     `brick.svg` (a seamless two-course firebrick tile, so the seams never
+     line up into a grid). Over it, an ember glow where the board sits and a
+     sooty shade towards the top and bottom edges — the middle stays the
+     brightest thing on screen, because the bricks are meant to be felt at the
+     edges, not read. `--bg` stays the bottom layer for the moment before the
+     tile has loaded. */
   background:
-    radial-gradient(900px 500px at 50% 50%, rgba(80, 130, 170, .10), transparent 70%),
+    radial-gradient(900px 500px at 50% 50%, rgba(255, 150, 60, .10), transparent 70%),
+    linear-gradient(180deg, rgba(10, 6, 4, .80), rgba(10, 6, 4, .46) 45%,
+                    rgba(10, 6, 4, .84)),
+    url("brick.svg") 0 0 / 160px 80px repeat,
     var(--bg);
 }
 
@@ -290,7 +306,12 @@ body.flip-opponent .side.opponent .hand .card:hover { transform: rotate(180deg) 
 }
 .zone.battle {
   grid-area: battle; display: flex; gap: 40px;
-  align-items: flex-end; justify-content: center;
+  /* Aligned at the top, because that is where the *cards* are. A filled slot
+     carries an HP bar and a label under its Cookie and an empty one carries
+     nothing, so aligning the slots at the bottom put the dashed placeholder a
+     bar and a label lower than the Cookie beside it — marking a space no card
+     is ever placed in. */
+  align-items: flex-start; justify-content: center;
   /* inherited by every .card inside, the face-down HP pile included */
   --card-w: var(--battle-card-w);
   --card-h: var(--battle-card-h);
@@ -433,13 +454,46 @@ body.has-cardback .card.back::after { content: none; }
   border: 1px dashed var(--felt-line); border-radius: 8px;
   display: grid; place-items: center; color: rgba(190,225,245,.25); font-size: 10px;
 }
-.cookiebox { position: relative; }
-/* The face-down HP pile sits under the Cookie card. It is decoration — the
-   cards are face down and carry no information beyond their count — so it must
-   never take the pointer: the corner it pokes out of is exactly where you grab
-   a Cookie to drag it into an attack. */
+/* Room beside the card for the HP pile to splay into, and one step of it below
+   for the ledge the pile sits on. The width is constant rather than
+   per-Cookie: the pile shortens every time it is hit, and a row that shuffled
+   itself about on every point of damage is worse than a little empty felt
+   beside a one-HP Cookie. */
+.cookiebox {
+  position: relative;
+  margin-right: calc(var(--hp-peek) * 6);
+  margin-bottom: var(--hp-peek);
+}
+/* Across the table the pile lies the other way up — the cards are under the
+   Cookie from *their* side, so they show above it from ours. The empty slot
+   takes the same margin, or the dashed box and the Cookies stop lining up. */
+.side.opponent .cookiebox { margin-bottom: 0; margin-top: var(--hp-peek); }
+.side.opponent .slot.empty { margin-top: var(--hp-peek); }
+/* ...and the bar and the label carry the same right margin, so they stay
+   centred on the Cookie card rather than on the Cookie card plus its splay. */
+.hpbar, .hplabel { margin-right: calc(var(--hp-peek) * 6); }
+/* The face-down HP pile sits under the Cookie card, offset one step down the
+   table and splayed sideways from there — a straight line of cards, not a
+   diagonal — so it reads as a pile rather than as a shadow, and so the card
+   damage takes is somewhere you can see it come from. Which way is "down the
+   table" is the seat's: below the Cookie on our side, above it on theirs.
+   The layer nearest the Cookie is the *top* of the pile, which is the one
+   damage turns over; the deeper a card is drawn, the further along it sits.
+   That order is forced, not chosen: each card is only seen at all in the strip
+   its neighbour does not cover, so the shallower card has to be the one
+   painted over the deeper one. Splay it the other way and the top card covers
+   the whole pile, leaving one edge showing however many cards are under it. It
+   is decoration — the cards are face down and carry no information beyond
+   their count — so it must never take the pointer: the strip it pokes out of
+   is right where you grab a Cookie to drag it into an attack. */
 .hpstack { position: absolute; left: 0; top: 0; pointer-events: none; }
-.hpstack .card { position: absolute; }
+/* Only the strip beside the card in front of it is ever seen, so each layer
+   carries its own shadow: without one the splay is a single dark block the
+   colour of the felt, which is the thing this is meant to stop being. The
+   sideways step is written on each card by `cookieSlot`; the one step along
+   the table is the same for every card in the pile and belongs here. */
+.hpstack .card { position: absolute; top: var(--hp-peek); box-shadow: 3px 2px 5px rgba(0,0,0,.6); }
+.side.opponent .hpstack .card { top: calc(var(--hp-peek) * -1); }
 .cookie-front { position: relative; }
 .badge {
   position: absolute; top: -6px; left: -6px; z-index: 4;
@@ -608,6 +662,40 @@ body.has-cardback .card.back::after { content: none; }
   100% { transform: rotate(var(--face, 0deg)) scale(.98); opacity: 1; }
 }
 .flipper { position: absolute; perspective: 700px; }
+/* Damage does not make a card appear out of nowhere: it slides the top card
+   out from under the Cookie and turns it over. So a reveal that still has its
+   host on the board is drawn where that card is drawn — on the pile, under the
+   Cookie — and pulled clear before the flip starts. It is drawn to the right,
+   which is the way the pile splays and so the only direction that card could
+   come out. `clip-path` is what sells the "under": the visible left edge is
+   pinned to the Cookie's right edge for the whole pull, so the card is
+   *uncovered* rather than sliding across the host it is supposed to be
+   beneath. It is dropped a beat before the turn, at which point the card is
+   out and the clip has nothing left to hide. */
+.flipper.frompile { animation: hppull var(--pull-ms, 420ms) cubic-bezier(.3,.85,.35,1) forwards; }
+/* `both`, not `forwards`: a delayed animation does not hold its first frame
+   unless it is told to, and the frame that matters here is the one that hides
+   the face. Without it the card is painted front-up for the whole pull and
+   comes out of the pile already revealed, which is the one thing the turn is
+   supposed to be for. */
+.flipper.frompile .inner,
+.flipper.frompile .face.back,
+.flipper.frompile .face.front,
+.flipper.frompile .tagline {
+  animation-delay: var(--pull-ms, 420ms);
+  animation-fill-mode: both;
+}
+/* And the name waits for the turn. `fadeout` opens at full opacity, which the
+   backwards fill then holds through the pull — so the card would be lying face
+   down on the felt with its own name printed under it. This one fades in as it
+   turns instead. */
+.flipper.frompile .tagline { animation-name: flipname; }
+@keyframes flipname { 0% { opacity: 0; } 12%, 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes hppull {
+  0%       { transform: translateX(0); clip-path: inset(0 0 0 var(--clip-a, 0px)); }
+  92%      { transform: translateX(var(--pull, 90px)); clip-path: inset(0 0 0 var(--clip-b, 0px)); }
+  93%, 100% { transform: translateX(var(--pull, 90px)); clip-path: none; }
+}
 /* Deliberately a 2D turn — squash the card to its edge, swap the face at the
  * narrowest point, open it back up. `backface-visibility` on a rotateY is the
  * obvious way to write this and is not honoured everywhere; this is. */

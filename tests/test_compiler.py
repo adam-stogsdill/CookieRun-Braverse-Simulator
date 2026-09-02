@@ -2391,3 +2391,246 @@ def test_adding_up_to_two_viewed_cards_is_one_question(ctx):
     assert seat.singles == []
     assert seat.batches[0]["count"] == 2
     assert "up to 2" in seat.batches[0]["prompt"]
+
+
+def test_an_attack_rider_that_names_no_target_hits_the_attacked_cookie(db):
+    """"Then, if there is a [Soul Jam] card in your support area, deals 1
+    damage." (BS3-009) names no target because the swing already did.
+
+    Compiled, that is a bare `Damage` reading the `it` register, which nothing
+    in an attack program ever binds — so 40-odd riders across every set turned
+    into a sentence the engine read and then did nothing about. The register is
+    *unbound*, which is the distinction being pinned here: a `Select` that ran
+    and found no target writes an empty list, and that empty list still means
+    nobody.
+    """
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=17)
+    game.setup()
+    _plain_hp(game, db)
+    me, them = game.state.players[0], game.state.players[1]
+    victim = them.battle[0]
+    game._attack_target = victim
+
+    fn = get_effect("BS3-009", Trigger.ATTACK)
+
+    def swing():
+        before = victim.remaining_hp
+        fn(Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+               source_cookie=me.battle[0], attack_target=victim,
+               trigger=Trigger.ATTACK.value))
+        return before - victim.remaining_hp
+
+    me.support = []
+    assert swing() == 0, "the rider fired with no Soul Jam in support"
+
+    me.support = [CardInstance.make("BS3-019", 0)]     # Soul Jam: Light of Passion
+    assert swing() == 1, "the rider's damage landed on nobody"
+
+
+def test_an_attack_riders_own_hp_cost_is_not_charged_to_the_victim(db):
+    """"place 1 card from the top of this Cookie's HP into the trash" is about
+    the attacker; "that Cookie" is about whoever was selected or swung at. Read
+    through one alternation the two were the same sentence, so BS3-109 paid its
+    own price out of the Cookie it had just hit.
+    """
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=17)
+    game.setup()
+    _plain_hp(game, db)
+    me, them = game.state.players[0], game.state.players[1]
+    attacker, victim = me.battle[0], them.battle[0]
+
+    before = (attacker.remaining_hp, victim.remaining_hp)
+    get_effect("BS3-109", Trigger.ATTACK)(
+        Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+            source_cookie=attacker, attack_target=victim,
+            trigger=Trigger.ATTACK.value))
+
+    assert attacker.remaining_hp == before[0] - 1
+    assert victim.remaining_hp == before[1], "paid its cost out of the defender"
+
+
+def test_a_bracketed_family_name_matches_its_members(db):
+    """"a [Soul Jam] card" is the family, not a card printed with that name.
+
+    No card is called plain "Soul Jam" — they are "Soul Jam: Light of Passion"
+    and nine others — so exact equality made the condition unsatisfiable and
+    every card asking about one lost a sentence without failing to compile.
+    """
+    from braverse.effect_ir import CardFilter
+
+    jam = CardFilter(name="Soul Jam")
+    assert jam.matches(db["BS3-019"])
+    assert jam.matches(db["BS9-092"])
+    assert not jam.matches(db["ST9-013"])
+    # Still exact for everything that is not a family member.
+    assert not CardFilter(name="Soul").matches(db["BS3-019"])
+
+
+def test_a_hand_written_trigger_does_not_swallow_the_rest_of_the_card(db):
+    """Mozzarella Cookie (BS3-028) has a hand-written 【On Play】 and an attack
+    rider that heals it. `compile_all` skipped the whole card the moment one
+    trigger was in the registry, so the rider was compiled and thrown away —
+    the card swung with the second half of its attack missing, and nothing
+    said so.
+    """
+    assert get_effect("BS3-028", Trigger.ON_PLAY) is not None
+    assert get_effect("BS3-028", Trigger.ATTACK) is not None, \
+        "the compiled attack rider was dropped because the 【On Play】 was written"
+
+
+def test_every_trigger_the_compiler_understands_is_registered(db):
+    """The general form of the same hole.
+
+    A card is several abilities that share a piece of cardboard. Anything the
+    compiler reads in full and nobody wrote by hand has to reach the registry,
+    or the card plays part of its text — the quietest failure this engine has,
+    since a dropped trigger looks exactly like a card with nothing printed on
+    it.
+    """
+    from braverse.compiler import compile_card
+
+    dropped = []
+    for card_id, defn in db.cards.items():
+        if card_id != defn.base_id:
+            continue
+        result = compile_card(defn)
+        # All-or-nothing still holds: a clause nobody can read — neither the
+        # compiler nor a hand-written effect — refuses the whole card, and its
+        # other triggers go down with it deliberately.
+        if any(get_effect(card_id, trigger) is None
+               for trigger, _clause, _why in result.failures):
+            continue
+        for trigger in result.programs:
+            if get_effect(card_id, trigger) is None:
+                dropped.append(f"{card_id} {trigger.name}")
+    assert not dropped, f"understood but never registered: {dropped}"
+
+
+def test_a_card_whose_unreadable_half_is_hand_written_still_registers(db):
+    """All-or-nothing, widened to count hand-written work as an answer.
+
+    BS3-028's 【On Play】 does not compile. That refuses the card only if the
+    【On Play】 is nobody's — and here it is written out in `impl/bs3.py`, so
+    the sentence the compiler cannot read is one it does not have to.
+    """
+    from braverse.compiler import compile_card
+
+    failed = {trigger for trigger, _clause, _why in compile_card(db["BS3-028"]).failures}
+    assert Trigger.ON_PLAY in failed
+    assert get_effect("BS3-028", Trigger.ON_PLAY) is not None
+
+
+def test_a_counted_zone_condition_keeps_its_count():
+    """"if there are 2 Cookies in your battle area" was read as "if there is 1".
+
+    The numeral was matched by the pattern and dropped on the floor, and every
+    card printing one asked for a single card instead — a condition true on
+    nearly any board. The reversed word order is the same sentence and was
+    landing in the same place.
+    """
+    from braverse.compiler import parse_condition
+
+    two = parse_condition("there are 2 Cookies in your battle area")
+    assert (two.kind, two.op, two.value) == ("zone_has", ">=", 2)
+
+    five = parse_condition("there are 5 cards in your support area")
+    assert (five.kind, five.op, five.value) == ("zone_has", ">=", 5)
+
+    # "N or more X" — the bound in front of the filter rather than behind it.
+    three = parse_condition("there are 3 or more Cookies in your break area")
+    assert (three.kind, three.op, three.value) == ("zone_count", ">=", 3)
+
+    # Unnumbered and negated forms are untouched.
+    one = parse_condition("there is another 【Ancient】 Cookie in your battle area")
+    assert (one.op, one.value) == (">=", 1)
+    none = parse_condition("there are no Cookies in your battle area")
+    assert (none.op, none.value) == ("==", 0)
+
+
+def test_a_filter_about_the_board_is_refused_not_dropped():
+    """"2 Cookies whose remaining HP is 1" is not a property of a printed card.
+
+    A `CardFilter` reads `CardDef`s, so the clause was silently counting every
+    Cookie instead — the same failure `_STATE_WORDS` already refuses for
+    "active" and "rested", one relative clause further along.
+    """
+    from braverse.compiler import parse_card_filter
+
+    with pytest.raises(CompileError):
+        parse_card_filter("Cookies whose remaining HP is 1")
+
+
+def test_an_item_body_is_registered_on_the_item_trigger(db):
+    """An ITEM's body runs on `Trigger.ITEM`. Two of them were hand-written
+    against `Trigger.ATTACK`, which only a Cookie in the battle area ever
+    fires, so both cards were inert while `is_implemented` called them done.
+    """
+    from braverse.effects import is_implemented
+
+    for card_id in ("BS2-047", "BS5-020"):
+        assert db[card_id].type.name == "ITEM"
+        assert is_implemented(card_id)
+        assert get_effect(card_id, Trigger.ITEM) is not None
+        assert get_effect(card_id, Trigger.ATTACK) is None
+
+
+def test_crimson_dragon_mask_counts_cookies_at_1_hp(db):
+    """BS5-020 fires only with two Cookies of yours down to their last card."""
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=19)
+    game.setup()
+    _plain_hp(game, db)
+    me, them = game.state.players
+    while len(me.battle) < 2:
+        game._deploy_cookie(me, me.deck.pop())
+    while len(them.battle) < 2:
+        game._deploy_cookie(them, them.deck.pop())
+
+    def fire():
+        before = sorted(c.remaining_hp for c in them.battle)
+        get_effect("BS5-020", Trigger.ITEM)(
+            Ctx(game=game, state=game.state, db=db, me=me, opp=them,
+                source_card=CardInstance.make("BS5-020", 0), trigger=Trigger.ITEM.value))
+        return before != sorted(c.remaining_hp for c in them.battle)
+
+    assert not fire(), "fired with nobody at 1 HP"
+    del me.battle[0].hp_cards[1:]
+    assert not fire(), "one Cookie at 1 HP was enough"
+    del me.battle[1].hp_cards[1:]
+    assert fire()
+
+
+def test_an_optional_cost_is_not_charged_for_an_effect_that_cannot_happen(db):
+    """Millennial Tree Cookie (BS4-038): "<{Y}> Select up to 1 {Y} LV.2 or
+    lower Cookie from your break area and play them."
+
+    The Cookie it plays needs the battle-area slot the Cookie itself just took,
+    so on a full board the clause used to rest the {Y} and then find nowhere to
+    put anything. A cost is a trade; a trade with nothing on the other side is
+    not a decision to put in front of anybody.
+    """
+    game = Game([STARTER_DECKS["st9_sea_fairy"], STARTER_DECKS["st8_wind_archer"]],
+                [SeatedAgent(HeuristicAgent(db=db), 0),
+                 SeatedAgent(HeuristicAgent(db=db), 1)], db=db, seed=3)
+    game.setup()
+    me = game.state.players[0]
+    card = CardInstance.make("BS4-038", 0)
+    me.hand.append(card)
+    me.break_area.append(CardInstance.make("BS1-029", 0))     # {Y} LV.1
+    for _ in range(3):
+        energy = CardInstance.make("BS1-029", 0)
+        energy.rested = False
+        me.support.append(energy)
+
+    play = next(a for a in game.legal_actions()
+                if isinstance(a, A.PlayCookie) and a.card_uid == card.uid)
+    game.step(play)
+
+    assert len(me.battle) == 2, "the board was already full"
+    assert len(me.break_area) == 1, "played a Cookie into a full battle area"
+    assert not any(c.rested for c in me.support), "paid {Y} for nothing"

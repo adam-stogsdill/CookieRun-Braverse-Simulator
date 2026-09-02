@@ -61,7 +61,7 @@ class Filter:
             return False
         if self.keyword is not None and self.keyword not in defn.keywords:
             return False
-        if self.name is not None and defn.name != self.name:
+        if self.name is not None and not _named(defn, self.name):
             return False
         if self.has_flip is not None and defn.is_flip != self.has_flip:
             return False
@@ -103,7 +103,7 @@ class CardFilter:
             return False
         if self.keyword is not None and self.keyword not in defn.keywords:
             return False
-        if self.name is not None and defn.name != self.name:
+        if self.name is not None and not _named(defn, self.name):
             return False
         if self.card_type is not None and defn.type is not self.card_type:
             return False
@@ -116,6 +116,20 @@ class CardFilter:
         if self.marker is not None and not defn.has(self.marker):
             return False
         return True
+
+
+def _named(defn, name: str) -> bool:
+    """Whether a card answers to the name a card's text prints in brackets.
+
+    Exact, except that a *family* is printed as "<family>: <member>" — the ten
+    Soul Jams are "Soul Jam: Light of Passion" and friends, and the nine cards
+    asking about "a [Soul Jam] card in your support area" mean any of them.
+    Matched on exact equality alone the condition is unsatisfiable, which is
+    the silent kind of wrong: the card compiles and plays a game in which its
+    second sentence never happens. `impl/bs3.py` reads the family the same way
+    by hand.
+    """
+    return defn.name == name or defn.name.startswith(name + ": ")
 
 
 # Zones a MoveCards op can read from or write to.
@@ -507,8 +521,35 @@ def _resolve(ref: str, ctx, env) -> list:
         return [ctx.source_cookie] if ctx.source_cookie else []
     if ref == REF_HOST:
         return [ctx.source_cookie] if ctx.source_cookie else []
+    if ref == REF_IT and REF_IT not in env:
+        return _attacked_cookie(ctx)
     targets = env.get(ref) or []
     return [t for t in targets if t is not None]
+
+
+def _attacked_cookie(ctx) -> list:
+    """What "that Cookie" means on an attack rider that selected nothing.
+
+    "Then, if there is a [Soul Jam] card in your support area, deals 1 damage."
+    is a second helping on the Cookie the swing was aimed at — the sentence
+    names no target because the attack already did. Read through `env` alone
+    it lands on nobody, which is a whole class of attack riders silently doing
+    nothing (BS9-102 is the hand-written proof of the reading).
+
+    Only for an unbound register: a `Select` that ran and found nothing writes
+    an empty list, and that emptiness is an answer, not a gap. And only during
+    an attack — `Game._attack_target` is not cleared when the battle ends, so
+    anything else reading it would be reading a stale swing.
+    """
+    if getattr(ctx, "trigger", "") != "attack":
+        return []
+    target = getattr(ctx, "attack_target", None)
+    if target is None:
+        return []
+    # The swing may already have taken it down; there is nothing left to hit.
+    if target not in ctx.state.players[target.owner].battle:
+        return []
+    return [target]
 
 
 @dataclass
@@ -871,7 +912,12 @@ class PayCost(Op):
 # Conditions about something that has not happened yet when a move is being
 # probed: what the sentence before will pick, and whether it will succeed. A
 # probe cannot answer them, so it does not get to veto the move either.
-_NOT_YET_KNOWN = {"did", "selected_hp", "selected_level"}
+# `revealed_is` is the same thing one step further out — "if that card is a
+# LV.2 【Arena】 Cookie" is asked *after* its own `<Reveal ...>` cost precisely
+# because nothing knows the answer before then (`_asks_about_the_reveal`), so
+# a probe reading the empty reveal would answer no to all seven of those
+# cards and veto a move that works.
+_NOT_YET_KNOWN = {"did", "selected_hp", "selected_level", "revealed_is"}
 
 
 @dataclass
@@ -913,6 +959,15 @@ class Clause:
         if self.cost_text:
             # Never offer a cost that cannot be met; the clause fails anyway.
             if not self._affordable(ctx):
+                return False
+            # Nor one that buys nothing. The same rule the engine applies to
+            # whole actions ("a listed move must do something") read one level
+            # down: an optional cost is a trade, and a trade with nothing on
+            # the other side is not a decision to put in front of anybody.
+            # `is_live` is deliberately generous — anything it cannot answer
+            # stays on offer — so this only stops the cases a card can see are
+            # dead.
+            if not self.is_live(ctx, env):
                 return False
             if not ctx.wants_to_pay(self.cost_text):
                 return False

@@ -45,15 +45,24 @@ def tiramisu_activate(ctx: Ctx) -> None:
 
 
 # --- BS5-020 Crimson Dragon Mask --------------------------------------------
-@effect("BS5-020", Trigger.ATTACK)
-def crimson_dragon_mask_attack(ctx: Ctx) -> None:
-    """Deals 1 damage to all of your opponent's Cookies.
+@effect("BS5-020", Trigger.ITEM)
+def crimson_dragon_mask(ctx: Ctx) -> None:
+    """<{R}{R}> If there are 2 Cookies whose remaining HP is 1 in your battle
+    area, deals 2 damage to all of your opponent's Cookies.
 
-    The scrape splits the damage number away from this line, so it is written
-    out rather than fought with in the compiler.
+    Hand-written for the condition: "Cookies whose remaining HP is 1" is a
+    board state, and the compiler's card filters read printed cards, so it
+    refuses the line rather than counting every Cookie you have.
+
+    This was written here before, on `Trigger.ATTACK` and against a dump that
+    had lost the damage number — and an ITEM's body runs on `Trigger.ITEM`, so
+    for as long as it sat on the wrong trigger the card did nothing at all
+    while `is_implemented` said it was finished.
     """
+    if sum(1 for c in ctx.me.battle if c.remaining_hp == 1) < 2:
+        return
     for cookie in list(ctx.enemy_cookies()):
-        ctx.deal_damage(cookie, 1)
+        ctx.deal_damage(cookie, 2)
 
 
 # --- BS5-038 Cherry Cookie --------------------------------------------------

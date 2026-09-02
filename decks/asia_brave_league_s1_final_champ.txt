@@ -1,0 +1,117 @@
+# source: https://cookierunbraverse.com/asia/decks/4730
+# event: 2026 Brave League S1 Final CHAMPION (Malaysia)
+# event_date: 25 April, 2026
+# player: Nero
+
+COOKIE (31)
+  4x BS10-093   Orange Cookie                    LV1 HP2
+  4x BS3-088    Pure Vanilla Cookie              LV3 HP4
+  4x BS9-077    Black Raisin Cookie              LV2 HP3
+  3x BS4-077    Sorbet Shark Cookie              LV1 HP1
+  3x BS9-079    Shadow Milk Cookie               LV3 HP5
+  3x BS9-080    Cinnamon Cookie                  LV1 HP3
+  3x BS9-089    Pure Vanilla Cookie              LV2 HP4
+  3x ST9-005    Mystic Opal Cookie               LV1 HP3
+  2x BS8-081    Strawberry Cream Cookie          LV1 HP3
+  1x BS10-096   Grapefruit Cookie                LV1 HP2
+  1x BS6-079    Croissant Cookie                 LV3 HP5
+FLIP (15)
+  4x BS10-077   Sorbet Shark Cookie              LV2 HP3
+  4x ST4-009    Ice Candy Cookie                 LV2 HP2
+  4x ST9-004    Pond Dino Cookie                 LV2 HP3
+  2x BS3-085    Custard Cookie                   LV2 HP2
+  1x BS1-040    Earl Grey Cookie                 LV3 HP3
+ITEM (4)
+  2x ST4-016    Bear Jelly Ice Cream             
+  2x ST9-016    Bubble Wave Shell                
+TRAP (10)
+  3x BS6-085    Destruction of a Pastless Future 
+  3x ST4-021    Fallen Ice Statue                
+  3x ST9-018    Tower of Frozen Waves            
+  1x ST4-020    Octo-Ink Spray                   
+
+legal: True  size 60  flips 15
+
+EXTRA deck
+EXTRA (6)
+  3x BS9-088    Pure Vanilla Cookie              LV3 HP0
+  1x BS8-090    Will of Nature                   LV3 HP5
+  1x BS9-010    Shadow Milk Cookie               LV2 HP4
+  1x BS9-055    Shadow Milk Cookie               LV3 HP5
+
+{
+ "deck": [
+  "BS9-079",
+  "BS9-079",
+  "BS9-079",
+  "BS6-079",
+  "BS3-088",
+  "BS3-088",
+  "BS3-088",
+  "BS3-088",
+  "BS1-040",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS10-077",
+  "BS9-089",
+  "BS9-089",
+  "BS9-089",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS9-077",
+  "BS3-085",
+  "BS3-085",
+  "ST9-004",
+  "ST9-004",
+  "ST9-004",
+  "ST9-004",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "ST4-009",
+  "BS10-093",
+  "BS10-093",
+  "BS10-093",
+  "BS10-093",
+  "BS10-096",
+  "BS9-080",
+  "BS9-080",
+  "BS9-080",
+  "BS8-081",
+  "BS8-081",
+  "BS4-077",
+  "BS4-077",
+  "BS4-077",
+  "ST9-005",
+  "ST9-005",
+  "ST9-005",
+  "BS6-085",
+  "BS6-085",
+  "BS6-085",
+  "ST4-020",
+  "ST4-016",
+  "ST4-016",
+  "ST9-016",
+  "ST9-016",
+  "ST9-018",
+  "ST9-018",
+  "ST9-018",
+  "ST4-021",
+  "ST4-021",
+  "ST4-021"
+ ],
+ "extra": [
+  "BS9-088",
+  "BS9-088",
+  "BS9-088",
+  "BS9-055",
+  "BS8-090",
+  "BS9-010"
+ ],
+ "source": "https://cookierunbraverse.com/asia/decks/4730",
+ "event": "2026 Brave League S1 Final CHAMPION (Malaysia)",
+ "event_date": "25 April, 2026",
+ "player": "Nero"
+}
